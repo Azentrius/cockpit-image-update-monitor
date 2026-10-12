@@ -511,6 +511,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “Registry error”.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Version jumps** via a different tag and **database majors** are manual (change the compose file).
+- **Floating tags with an unknown version** (`latest` without a version label or variable): the update cannot tell how big the jump is and may bring a new major version.
+- **Dependencies** (`depends_on`) are not considered: an update recreates only the services that use the image. A database or cache restarts under the running app, which has to reconnect by itself.
 - After updates of images whose version can only be determined by label/digest, `?` shows for a few minutes until the radar run started by the update is done.
 
 ---
@@ -523,6 +525,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
+| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, dependencies in the plan | planned |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |

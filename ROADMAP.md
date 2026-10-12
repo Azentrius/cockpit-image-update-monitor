@@ -47,6 +47,67 @@ Decided on the way:
 
 ---
 
+## Stage 1.2 – Know before switching, fail clearly
+
+**Goal:** an update never surprises. The dialog says how big the jump is, or that nobody knows. If the
+containers do not come up, the reason is visible at once. A failed build is not offered the same way
+again.
+
+**Seen on the reference host:** `latest` of an app moved to a new major version that needs an extra
+service; the app did not start. Dump, rollback copy and rollback worked, and the data stayed untouched.
+But the add-on could not warn beforehand: the image has no version label and no version variable, so the
+installed version was unknown and the jump invisible.
+
+**Before switching**
+- **Unknown jump size:** if the installed version is unknown and the tag fixes no version number
+  (`latest`, `stable`; reach 0 in the README's terms), the plan says “the size of the jump is unknown; a
+  new major version is possible” and asks for an extra confirmation.
+- **Resolve floating tags:** the radar finds the version tag with the same digest as the configured tag
+  in the registry (e.g. `latest` = `6.0.2`), without a pull. For the installed image it searches further
+  back than the 20 newest tags, once, and keeps the result. A jump such as 5.x → 6.0.2 then shows as a
+  major chip with the warning that exists already.
+- **Update in two steps** (a choice in the dialog): fetch first (pull only; nothing that runs changes,
+  the row shows “Roll-out pending” with the version that came), roll out second.
+
+**While switching**
+- **Reason first:** when containers do not come up, the result names the first meaningful error line
+  (e.g. “Invalid environment variables: …”) above the log lines, next to the rollback button.
+- **Keep the output:** the live output of every update and rollback is stored with the history
+  (`/var/backups/image-updates/logs/<op-id>.log`, root only) and can be opened from the history. Today it
+  exists only in the browser while the dialog is open.
+- **Restart loops:** `wait_healthy` already counts a restarting container as failed. An end-to-end case
+  with an image that exits at once proves that the update fails within seconds, not after
+  `HEALTH_TIMEOUT`.
+
+**After a failure**
+- **Remember failed builds:** the digest that failed is stored with the operation. As long as the
+  registry offers that same digest, the row says “Update to this build failed on <date>, rolled back”
+  and *Update* asks for a confirmation.
+- Pinning the tag to the running version comes with stage 2 (change the tag in the compose file).
+
+**Dependencies** (from `docker compose config`, which the plan reads already)
+- **Show them:** the plan lists what the services depend on (`depends_on`) and what depends on them.
+  Today the update recreates only the services of the image (`up --no-deps`): a database or cache
+  restarts under the running app, which has to reconnect by itself, and nothing says so.
+- **Watch them:** after such an update the add-on also watches the dependent services for the waiting
+  time (still running, no new restarts, healthy if they have a health check) without restarting them. A
+  failure there makes the update fail and offers the rollback.
+- **Migration jobs:** a one-off job (e.g. `migrate`) with the same image as long-running services that
+  do not wait for it (`depends_on: … condition: service_completed_successfully`): the plan warns that the
+  services can start before the migration is done. Seen with an app whose worker briefly hit a table the
+  migration had not created yet.
+- **Other projects** on the same user-defined network (e.g. one mail relay for several projects) are
+  shown as a hint. Being on a network does not prove use, so this never blocks anything.
+
+**Done when …**
+- Offline tests cover the plan hint, the error line, the stored output, the remembered digest and the
+  dependency lists; fixtures for floating tags with and without a known version.
+- End to end: an image that exits at once fails within seconds and rolls back with one click; the output
+  of the run is stored; a dependent service is watched after a database update.
+- On the reference host `latest` is resolved for every image whose registry the radar can read.
+
+---
+
 ## Stage 2 – Version jumps (change the tag in the compose file)
 
 **Goal:** a click on an *outlined* chip (e.g. “Patch v2.1.5” with `v2.1.4` configured) switches to
@@ -174,5 +235,8 @@ and tested.
 
 1. Rename the package (`diun` → `image-updates`)? If yes, early, while there are few installations.
 2. Should automatic updates (stage 4) come at all, or does every update stay a deliberate click?
+3. Roll back automatically when the containers do not come up after an update started by hand? Only
+   as an option: if the new version has migrated its database already, the old program no longer fits
+   the data.
 
 Decided: the license is Apache-2.0 (see [LICENSE](LICENSE)).
