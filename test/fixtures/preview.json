@@ -1,0 +1,145 @@
+{
+ "plans": {
+  "ollama": {
+   "container": "ollama",
+   "image": "ollama/ollama:latest",
+   "updatable": true,
+   "reason": null,
+   "project": "actual",
+   "workdir": "/opt/actual",
+   "services": [
+    "ollama"
+   ],
+   "containers": [
+    "ollama"
+   ],
+   "pulled": false,
+   "config_changed": true,
+   "old_image": "sha256:ollama",
+   "dbs": [
+    {
+     "name": "actual-db",
+     "kind": "postgres",
+     "running": true,
+     "size": 52428800
+    }
+   ],
+   "free_bytes": 42949672960
+  },
+  "*": {
+   "container": "glitchtip-postgres",
+   "image": "postgres:16-alpine",
+   "updatable": true,
+   "reason": null,
+   "project": "glitchtip",
+   "workdir": "/opt/glitchtip",
+   "services": [
+    "postgres"
+   ],
+   "containers": [
+    "glitchtip-postgres"
+   ],
+   "pulled": true,
+   "config_changed": false,
+   "old_image": "sha256:old",
+   "dbs": [
+    {
+     "name": "glitchtip-postgres",
+     "kind": "postgres",
+     "running": true,
+     "size": 120000000
+    },
+    {
+     "name": "glitchtip-redis",
+     "kind": "unsupported",
+     "running": true,
+     "size": null
+    }
+   ],
+   "free_bytes": 42949672960
+  }
+ },
+ "backups": {
+  "dir": "/var/backups/image-updates",
+  "free_bytes": 42949672960,
+  "dump_bytes": 3145728,
+  "dumps": [
+   {
+    "path": "glitchtip/20261012-031500_glitchtip-postgres.sql.gz",
+    "project": "glitchtip",
+    "container": "glitchtip-postgres",
+    "size": 3145728,
+    "mtime": 1791768900
+   }
+  ],
+  "images": [
+   {
+    "ref": "postgres:rollback-20261012-031500",
+    "id": "sha256:old",
+    "size": "275MB",
+    "created": "2026-10-12 03:15:00 +0200 CEST",
+    "in_use": false
+   },
+   {
+    "ref": "ollama/ollama:rollback-20261011-120000",
+    "id": "sha256:x",
+    "size": "3.4GB",
+    "created": "2026-10-11 12:00:00 +0200 CEST",
+    "in_use": true
+   }
+  ],
+  "ops": [
+   {
+    "id": "20261012-031500-glitchtip-postgres",
+    "ts": "2026-10-12T01:15:00Z",
+    "kind": "update",
+    "container": "glitchtip-postgres",
+    "project": "glitchtip",
+    "image": "postgres:16-alpine",
+    "services": [
+     "postgres"
+    ],
+    "containers": [
+     "glitchtip-postgres"
+    ],
+    "rollback": "postgres:rollback-20261012-031500",
+    "dumps": [
+     "glitchtip/20261012-031500_glitchtip-postgres.sql.gz"
+    ],
+    "status": "ok",
+    "can_rollback": true
+   },
+   {
+    "id": "20261011-120000-ollama",
+    "ts": "2026-10-11T10:00:00Z",
+    "kind": "update",
+    "container": "ollama",
+    "project": "actual",
+    "image": "ollama/ollama:latest",
+    "services": [
+     "ollama"
+    ],
+    "containers": [
+     "ollama"
+    ],
+    "rollback": null,
+    "dumps": [],
+    "status": "nochange",
+    "can_rollback": false
+   }
+  ]
+ },
+ "log": [
+  "Update postgres:16-alpine in Projekt glitchtip: Services postgres\n",
+  "Datenbank-Dump von glitchtip-postgres (postgres) …\n",
+  "  -> /var/backups/image-updates/dumps/glitchtip/20261012-033000_glitchtip-postgres.sql.gz (3.1 MB, 2 s)\n",
+  "Rollback-Sicherung: postgres:rollback-20261012-033000\n",
+  "+ docker compose -p glitchtip --project-directory /opt/glitchtip -f /opt/glitchtip/docker-compose.yml pull --ignore-pull-failures postgres\n",
+  "+ docker compose -p glitchtip --project-directory /opt/glitchtip -f /opt/glitchtip/docker-compose.yml up -d --no-deps --pull never postgres\n",
+  " Container glitchtip-postgres  Recreated\n",
+  "Warte auf glitchtip-postgres (max. 180 s) …\n",
+  "Alle Container laufen: glitchtip-postgres=running/healthy\n",
+  "Update erfolgreich.\n",
+  "@@RESULT {\"op\": \"20261012-033000-glitchtip-postgres\", \"status\": \"ok\", \"rollback\": \"postgres:rollback-20261012-033000\", \"dumps\": [\"glitchtip/20261012-033000_glitchtip-postgres.sql.gz\"]}\n"
+ ]
+}

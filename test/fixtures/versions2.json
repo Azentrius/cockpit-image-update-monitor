@@ -1,0 +1,793 @@
+{
+ "generated": "2026-10-12T02:17:34Z",
+ "images": [
+  {
+   "image": "crazymax/diun",
+   "tag": "4.33.0",
+   "containers": [
+    "diun"
+   ],
+   "db": false,
+   "reach": [],
+   "installed": {
+    "sha256:diun": {
+     "version": "4.33.0",
+     "src": "tag"
+    }
+   },
+   "versions": {
+    "4.33.0": {
+     "patch": null,
+     "minor": null,
+     "major": null,
+     "status": "current",
+     "as_tag": "4.33.0"
+    }
+   },
+   "newest": "4.33.0",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": null,
+    "minor": null,
+    "major": null,
+    "status": "current"
+   },
+   "status": "current"
+  },
+  {
+   "image": "ghcr.io/tecnativa/docker-socket-proxy",
+   "tag": "v0.4.1",
+   "containers": [
+    "diun-socket-proxy"
+   ],
+   "db": false,
+   "reach": [],
+   "installed": {
+    "sha256:diun-socket-proxy": {
+     "version": "0.4.1",
+     "src": "tag"
+    }
+   },
+   "versions": {
+    "0.4.1": {
+     "patch": "v0.4.2",
+     "minor": "v0.5.0",
+     "major": null,
+     "status": "minor",
+     "as_tag": "v0.4.1"
+    }
+   },
+   "newest": "v0.5.0",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": "v0.4.2",
+    "minor": "v0.5.0",
+    "major": null,
+    "status": "minor"
+   },
+   "status": "minor",
+   "stale": true,
+   "error": "registry timeout"
+  },
+  {
+   "image": "onlyoffice/documentserver",
+   "tag": "9.4.0.1",
+   "containers": [
+    "onlyoffice-ds"
+   ],
+   "db": false,
+   "reach": [],
+   "installed": {
+    "sha256:onlyoffice-ds": {
+     "version": "9.4.0.1",
+     "src": "tag"
+    }
+   },
+   "versions": {
+    "9.4.0.1": {
+     "patch": null,
+     "minor": null,
+     "major": null,
+     "status": "current",
+     "as_tag": "9.4.0.1"
+    }
+   },
+   "newest": "9.4.0.1",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": null,
+    "minor": null,
+    "major": null,
+    "status": "current"
+   },
+   "status": "current"
+  },
+  {
+   "image": "nextcloud",
+   "tag": "apache",
+   "containers": [
+    "nextcloud-family-app-1",
+    "nextcloud-family-cron-1"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:nextcloud-family-app-1": {
+     "version": "34.0.3",
+     "src": "env:NEXTCLOUD_VERSION"
+    },
+    "sha256:nextcloud-family-cron-1": {
+     "version": "34.0.3",
+     "src": "env:NEXTCLOUD_VERSION"
+    }
+   },
+   "versions": {
+    "34.0.3": {
+     "patch": "34.0.4-apache",
+     "minor": null,
+     "major": "35.0.1-apache",
+     "status": "major",
+     "as_tag": "34.0.3-apache"
+    }
+   },
+   "newest": "35.0.1",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "major"
+  },
+  {
+   "image": "postgres",
+   "tag": "16-alpine",
+   "containers": [
+    "nextcloud-family-db-1",
+    "docuseal-db",
+    "plausible_db",
+    "glitchtip-postgres"
+   ],
+   "db": true,
+   "reach": [
+    "patch",
+    "minor"
+   ],
+   "installed": {
+    "sha256:nextcloud-family-db-1": {
+     "version": "16.15",
+     "src": "env:PG_VERSION"
+    },
+    "sha256:old": {
+     "version": "16.14",
+     "src": "env:PG_VERSION"
+    },
+    "sha256:new": {
+     "version": "16.15",
+     "src": "env:PG_VERSION"
+    }
+   },
+   "versions": {
+    "16.14": {
+     "patch": null,
+     "minor": "16.15-alpine",
+     "major": "18.6-alpine",
+     "status": "major",
+     "as_tag": "16.14-alpine"
+    },
+    "16.15": {
+     "patch": null,
+     "minor": null,
+     "major": "18.6-alpine",
+     "status": "major",
+     "as_tag": "16.15-alpine"
+    }
+   },
+   "newest": "18.6",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": null,
+    "minor": null,
+    "major": "18-alpine",
+    "status": "major"
+   },
+   "status": "major"
+  },
+  {
+   "image": "redis",
+   "tag": "7-alpine",
+   "containers": [
+    "nextcloud-family-redis-1"
+   ],
+   "db": true,
+   "reach": [
+    "patch",
+    "minor"
+   ],
+   "installed": {
+    "sha256:nextcloud-family-redis-1": {
+     "version": "7.4.11",
+     "src": "env:REDIS_VERSION"
+    }
+   },
+   "versions": {
+    "7.4.11": {
+     "patch": null,
+     "minor": null,
+     "major": "8.10.2-alpine",
+     "status": "major",
+     "as_tag": "7.4.11-alpine"
+    }
+   },
+   "newest": "8.10.2",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": null,
+    "minor": null,
+    "major": "8-alpine",
+    "status": "major"
+   },
+   "status": "major"
+  },
+  {
+   "image": "docuseal/docuseal",
+   "tag": "latest",
+   "containers": [
+    "docuseal"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:docuseal": {
+     "version": "3.1.6",
+     "src": "digest",
+     "tag": "3.1.6",
+     "ts": "2026-10-12T02:17:34Z"
+    }
+   },
+   "versions": {
+    "3.1.6": {
+     "patch": "3.1.7",
+     "minor": "3.3.1",
+     "major": null,
+     "status": "minor",
+     "as_tag": "3.1.6"
+    }
+   },
+   "newest": "3.3.1",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "minor"
+  },
+  {
+   "image": "docker.io/sakowicz/actual-ai",
+   "tag": "latest",
+   "containers": [
+    "actual-ai"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:actual-ai": {
+     "version": "2.4.1",
+     "src": "digest",
+     "tag": "2.4.1",
+     "ts": "2026-10-12T02:17:34Z"
+    }
+   },
+   "versions": {
+    "2.4.1": {
+     "patch": "2.4.4",
+     "minor": null,
+     "major": "3.0.2",
+     "status": "major",
+     "as_tag": "2.4.1"
+    }
+   },
+   "newest": "3.0.2",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "major"
+  },
+  {
+   "image": "ollama/ollama",
+   "tag": "latest",
+   "containers": [
+    "ollama"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:ollama": {
+     "version": "0.30.11",
+     "src": "digest",
+     "tag": "0.30.11",
+     "ts": "2026-10-12T02:17:34Z"
+    }
+   },
+   "versions": {
+    "0.30.11": {
+     "patch": null,
+     "minor": "0.40.3",
+     "major": null,
+     "status": "minor",
+     "as_tag": "0.30.11"
+    }
+   },
+   "newest": "0.40.3",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "minor"
+  },
+  {
+   "image": "actualbudget/actual-server",
+   "tag": "26.6.0",
+   "containers": [
+    "actual_server"
+   ],
+   "db": false,
+   "reach": [],
+   "installed": {
+    "sha256:actual_server": {
+     "version": "26.6.0",
+     "src": "tag"
+    }
+   },
+   "versions": {
+    "26.6.0": {
+     "patch": null,
+     "minor": "26.10.0",
+     "major": null,
+     "status": "minor",
+     "as_tag": "26.6.0"
+    }
+   },
+   "newest": "26.10.0",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": null,
+    "minor": "26.10.0",
+    "major": null,
+    "status": "minor"
+   },
+   "status": "minor"
+  },
+  {
+   "image": "ghcr.io/plausible/community-edition",
+   "tag": "v2.1.4",
+   "containers": [
+    "plausible"
+   ],
+   "db": false,
+   "reach": [],
+   "installed": {
+    "sha256:plausible": {
+     "version": "2.1.4",
+     "src": "tag"
+    }
+   },
+   "versions": {
+    "2.1.4": {
+     "patch": "v2.1.5",
+     "minor": null,
+     "major": "v3.2.1",
+     "status": "major",
+     "as_tag": "v2.1.4"
+    }
+   },
+   "newest": "v3.2.1",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": "v2.1.5",
+    "minor": null,
+    "major": "v3.2.1",
+    "status": "major"
+   },
+   "status": "major"
+  },
+  {
+   "image": "clickhouse/clickhouse-server",
+   "tag": "24.3.3.102-alpine",
+   "containers": [
+    "plausible_events_db"
+   ],
+   "db": true,
+   "reach": [],
+   "installed": {
+    "sha256:plausible_events_db": {
+     "version": "24.3.3.102",
+     "src": "tag"
+    }
+   },
+   "versions": {
+    "24.3.3.102": {
+     "patch": "24.3.18.7-alpine",
+     "minor": "24.12.6.70-alpine",
+     "major": "26.9.16.11-alpine",
+     "status": "major",
+     "as_tag": "24.3.3.102-alpine"
+    }
+   },
+   "newest": "26.9.16.11",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": "24.3.18.7-alpine",
+    "minor": "24.12.6.70-alpine",
+    "major": "26.9.16.11-alpine",
+    "status": "major"
+   },
+   "status": "major"
+  },
+  {
+   "image": "rustdesk/rustdesk-server",
+   "tag": "latest",
+   "containers": [
+    "hbbs",
+    "hbbr"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:hbbs": {
+     "version": "1.1.15",
+     "src": "label"
+    },
+    "sha256:hbbr": {
+     "version": "1.1.15",
+     "src": "label"
+    }
+   },
+   "versions": {
+    "1.1.15": {
+     "patch": "1.1.16",
+     "minor": null,
+     "major": null,
+     "status": "patch",
+     "as_tag": "1.1.15"
+    }
+   },
+   "newest": "1.1.16",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "patch"
+  },
+  {
+   "image": "calcom/cal.com",
+   "tag": "latest",
+   "containers": [
+    "calcom"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:calcom": {
+     "version": "6.2.0",
+     "src": "label"
+    }
+   },
+   "versions": {
+    "6.2.0": {
+     "patch": null,
+     "minor": null,
+     "major": null,
+     "status": "current",
+     "as_tag": "v6.2.0"
+    }
+   },
+   "newest": "v6.2.0",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "current"
+  },
+  {
+   "image": "postgres",
+   "tag": "15-alpine",
+   "containers": [
+    "calcom-db"
+   ],
+   "db": true,
+   "reach": [
+    "patch",
+    "minor"
+   ],
+   "installed": {
+    "sha256:calcom-db": {
+     "version": "15.18",
+     "src": "env:PG_VERSION"
+    }
+   },
+   "versions": {
+    "15.18": {
+     "patch": null,
+     "minor": "15.19-alpine",
+     "major": "18.6-alpine",
+     "status": "major",
+     "as_tag": "15.18-alpine"
+    }
+   },
+   "newest": "18.6",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": null,
+    "minor": null,
+    "major": "18-alpine",
+    "status": "major"
+   },
+   "status": "major"
+  },
+  {
+   "image": "cubejs/cube",
+   "tag": "v1.6.6",
+   "containers": [
+    "formbricks-cube"
+   ],
+   "db": false,
+   "reach": [],
+   "installed": {
+    "sha256:formbricks-cube": {
+     "version": "1.6.6",
+     "src": "tag"
+    }
+   },
+   "versions": {
+    "1.6.6": {
+     "patch": "v1.6.74",
+     "minor": "v1.8.3",
+     "major": null,
+     "status": "minor",
+     "as_tag": "v1.6.6"
+    }
+   },
+   "newest": "v1.8.3",
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": "v1.6.74",
+    "minor": "v1.8.3",
+    "major": null,
+    "status": "minor"
+   },
+   "status": "minor"
+  },
+  {
+   "image": "pgvector/pgvector",
+   "tag": "pg17",
+   "containers": [
+    "formbricks-db"
+   ],
+   "db": true,
+   "reach": [
+    "patch",
+    "minor"
+   ],
+   "installed": {
+    "sha256:formbricks-db": {
+     "version": "17.10",
+     "src": "env:PG_VERSION"
+    }
+   },
+   "versions": {
+    "17.10": {
+     "status": "unknown"
+    }
+   },
+   "newest": null,
+   "checked": "2026-10-12T02:17:34Z",
+   "by_tag": {
+    "patch": null,
+    "minor": null,
+    "major": "pg18",
+    "status": "major"
+   },
+   "status": "unknown"
+  },
+  {
+   "image": "valkey/valkey",
+   "tag": "latest",
+   "containers": [
+    "formbricks-redis",
+    "glitchtip-redis"
+   ],
+   "db": true,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:formbricks-redis": {
+     "version": "9.1.0",
+     "src": "env:VALKEY_VERSION"
+    },
+    "sha256:glitchtip-redis": {
+     "version": "9.1.0",
+     "src": "env:VALKEY_VERSION"
+    }
+   },
+   "versions": {
+    "9.1.0": {
+     "patch": "9.1.2",
+     "minor": null,
+     "major": null,
+     "status": "patch",
+     "as_tag": "9.1.0"
+    }
+   },
+   "newest": "9.2",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "patch"
+  },
+  {
+   "image": "ghcr.io/cbcoutinho/nextcloud-mcp-server",
+   "tag": "latest",
+   "containers": [
+    "prod-mcp-1"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:prod-mcp-1": {
+     "version": null,
+     "src": "digest",
+     "tag": null,
+     "ts": "2026-10-12T02:17:34Z"
+    }
+   },
+   "versions": {},
+   "newest": "0.199.3",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "unknown"
+  },
+  {
+   "image": "ghcr.io/formbricks/formbricks",
+   "tag": "latest",
+   "containers": [
+    "formbricks-app"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:formbricks-app": {
+     "version": null,
+     "src": "digest",
+     "tag": null,
+     "ts": "2026-10-12T02:17:34Z"
+    }
+   },
+   "versions": {},
+   "newest": "6.0.2",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "unknown"
+  },
+  {
+   "image": "boky/postfix",
+   "tag": "latest",
+   "containers": [
+    "smtp-relay-2",
+    "smtp-relay"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:smtp-relay-2": {
+     "version": "5.1.0",
+     "src": "digest",
+     "tag": "5.1.0",
+     "ts": "2026-10-12T02:17:34Z"
+    },
+    "sha256:smtp-relay": {
+     "version": "5.1.0",
+     "src": "digest",
+     "tag": "5.1.0",
+     "ts": "2026-10-12T02:17:34Z"
+    }
+   },
+   "versions": {
+    "5.1.0": {
+     "patch": null,
+     "minor": null,
+     "major": null,
+     "status": "current",
+     "as_tag": "5.1.0"
+    }
+   },
+   "newest": "5.1.0",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "current"
+  },
+  {
+   "image": "glitchtip/glitchtip",
+   "tag": "latest",
+   "containers": [
+    "glitchtip-web",
+    "glitchtip-worker"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:glitchtip-web": {
+     "version": "6.1.8",
+     "src": "env:GLITCHTIP_VERSION"
+    },
+    "sha256:glitchtip-worker": {
+     "version": "6.1.8",
+     "src": "env:GLITCHTIP_VERSION"
+    }
+   },
+   "versions": {
+    "6.1.8": {
+     "patch": null,
+     "minor": "6.2.6",
+     "major": null,
+     "status": "minor",
+     "as_tag": "6.1.8"
+    }
+   },
+   "newest": "6.2.6",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "minor"
+  },
+  {
+   "image": "ghcr.io/formbricks/hub",
+   "tag": "latest",
+   "containers": [
+    "formbricks-hub"
+   ],
+   "db": false,
+   "reach": [
+    "patch",
+    "minor",
+    "major"
+   ],
+   "installed": {
+    "sha256:formbricks-hub": {
+     "version": "0.4.0",
+     "src": "digest",
+     "tag": "0.4.0",
+     "ts": "2026-10-12T02:17:34Z"
+    }
+   },
+   "versions": {
+    "0.4.0": {
+     "patch": null,
+     "minor": "0.8.7",
+     "major": null,
+     "status": "minor",
+     "as_tag": "0.4.0"
+    }
+   },
+   "newest": "0.8.7",
+   "checked": "2026-10-12T02:17:34Z",
+   "status": "minor"
+  }
+ ]
+}

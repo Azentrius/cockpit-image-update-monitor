@@ -1,0 +1,17 @@
+{
+    "version": 0,
+    "require": {
+        "cockpit": "266"
+    },
+    "menu": {
+        "index": {
+            "label": "Image updates",
+            "order": 35,
+            "keywords": [
+                {
+                    "matches": ["docker", "image", "update", "diun", "container", "version", "skopeo"]
+                }
+            ]
+        }
+    }
+}

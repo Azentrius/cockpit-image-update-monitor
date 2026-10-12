@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title data-i18n="app.title">Image updates</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <!-- Cockpit base API + Cockpit's own translation file for the session
+         language (sets cockpit.language, e.g. "de"; absent for English).
+         No external resources are loaded, so the default (strict) Cockpit
+         CSP applies unchanged. -->
+    <script src="../base1/cockpit.js"></script>
+    <script src="../base1/po.js"></script>
+    <link rel="stylesheet" href="diun.css?v=6">
+</head>
+<body>
+    <!-- Static texts are English (the fallback) and get translated by
+         diun.js before anything is interactive; see data-i18n. -->
+    <main class="dm-wrap">
+        <header class="dm-head">
+            <h1><span data-i18n="app.title">Image updates</span> <span class="dm-accent">monitor</span></h1>
+            <div class="dm-actions">
+                <span id="dm-meta" class="dm-meta"></span>
+                <!-- Starts busy: the first load begins as soon as diun.js runs. -->
+                <button id="dm-refresh" class="dm-btn is-busy" disabled>
+                    <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label" data-i18n="btn.loading">Loading …</span>
+                </button>
+            </div>
+        </header>
+
+        <nav class="dm-tabs" role="tablist">
+            <button id="dm-tab-btn-updates" class="dm-tab is-active" role="tab" aria-selected="true"
+                    aria-controls="dm-tab-updates" data-tab="updates" data-i18n="tab.updates">Updates</button>
+            <button id="dm-tab-btn-backups" class="dm-tab" role="tab" aria-selected="false"
+                    aria-controls="dm-tab-backups" data-tab="backups" data-i18n="tab.backups">Backups &amp; dumps</button>
+        </nav>
+
+        <div id="dm-status" class="dm-status" hidden></div>
+
+        <!-- ===================== Tab: Updates ===================== -->
+        <section id="dm-tab-updates" role="tabpanel" aria-labelledby="dm-tab-btn-updates">
+            <!-- Requirements panel: only shown when something is missing. -->
+            <section id="dm-deps" class="dm-deps" hidden aria-labelledby="dm-deps-title">
+                <h2 id="dm-deps-title" class="dm-deps-title" data-i18n="deps.title">Missing requirements</h2>
+                <p id="dm-deps-intro" class="dm-deps-intro"></p>
+                <ul id="dm-deps-list" class="dm-deps-list"></ul>
+            </section>
+
+            <!-- Visible from the very first paint until the first load finishes
+                 (inventory script + Diun log + radar file). -->
+            <div id="dm-loading" class="dm-loading" role="status" aria-live="polite">
+                <span class="dm-spinner" aria-hidden="true"></span>
+                <span>
+                    <span class="dm-loading-title" data-i18n="loading.title">Loading overview …</span>
+                    <span class="dm-loading-sub" data-i18n="loading.sub">Inventorying containers and matching them against Diun and the version radar.</span>
+                </span>
+            </div>
+
+            <div id="dm-table-wrap" class="dm-table-wrap" aria-busy="true">
+                <table class="dm-table" id="dm-table" hidden>
+                    <thead>
+                        <tr>
+                            <th data-i18n="col.container">Container</th>
+                            <th data-i18n="col.image">Image</th>
+                            <th data-i18n="col.configured">Configured</th>
+                            <th data-i18n="col.installed">Installed</th>
+                            <th data-i18n="col.new">Newest version</th>
+                            <th data-i18n="col.status">Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="dm-rows"></tbody>
+                </table>
+            </div>
+
+            <!-- What the chip styles in "Newest version" mean. -->
+            <p id="dm-legend" class="dm-legend" hidden>
+                <span class="dm-legend-item"><span class="dm-chip dm-chip-minor">Minor</span>
+                    <span data-i18n="legend.filled">reachable with the Update button</span></span>
+                <span class="dm-legend-item"><span class="dm-chip dm-chip-minor dm-chip-manual">Minor</span>
+                    <span data-i18n="legend.outlined">needs a different tag in the compose file</span></span>
+                <span class="dm-legend-item"><span class="dm-chip dm-chip-info">Major</span>
+                    <span data-i18n="legend.dashed">database major – needs a migration</span></span>
+            </p>
+
+            <div id="dm-empty" class="dm-empty" hidden data-i18n="empty">
+                No running containers found.
+            </div>
+        </section>
+
+        <!-- ===================== Tab: Backups ===================== -->
+        <section id="dm-tab-backups" role="tabpanel" aria-labelledby="dm-tab-btn-backups" hidden>
+            <p id="dm-bk-summary" class="dm-bk-summary"></p>
+            <p class="dm-bk-note" data-i18n="bk.note">Restoring a dump is deliberately a manual step. Dump files are readable by root only.</p>
+
+            <h2 class="dm-h2" data-i18n="bk.ops">Update history</h2>
+            <div class="dm-table-wrap"><table class="dm-table" id="dm-ops-table">
+                <thead><tr>
+                    <th data-i18n="col.when">When</th>
+                    <th data-i18n="col.container">Container</th>
+                    <th data-i18n="col.image">Image</th>
+                    <th data-i18n="col.result">Result</th>
+                    <th data-i18n="col.dumps">Dumps</th>
+                    <th></th>
+                </tr></thead>
+                <tbody id="dm-ops"></tbody>
+            </table></div>
+            <p id="dm-ops-empty" class="dm-empty-small" hidden data-i18n="bk.noOps">No updates yet.</p>
+
+            <h2 class="dm-h2" data-i18n="bk.dumps">Database dumps</h2>
+            <div class="dm-table-wrap"><table class="dm-table" id="dm-dumps-table">
+                <thead><tr>
+                    <th data-i18n="col.created">Created</th>
+                    <th data-i18n="col.project">Project</th>
+                    <th data-i18n="col.container">Container</th>
+                    <th data-i18n="col.file">File</th>
+                    <th data-i18n="col.size">Size</th>
+                    <th></th>
+                </tr></thead>
+                <tbody id="dm-dumps"></tbody>
+            </table></div>
+            <p id="dm-dumps-empty" class="dm-empty-small" hidden data-i18n="bk.noDumps">No dumps.</p>
+
+            <h2 class="dm-h2" data-i18n="bk.images">Rollback images</h2>
+            <div class="dm-table-wrap"><table class="dm-table" id="dm-images-table">
+                <thead><tr>
+                    <th data-i18n="col.image">Image</th>
+                    <th data-i18n="col.created">Created</th>
+                    <th data-i18n="col.size">Size</th>
+                    <th data-i18n="col.status">Status</th>
+                    <th></th>
+                </tr></thead>
+                <tbody id="dm-images"></tbody>
+            </table></div>
+            <p id="dm-images-empty" class="dm-empty-small" hidden data-i18n="bk.noImages">No rollback images.</p>
+        </section>
+    </main>
+
+    <!-- One dialog for every action: install requirement, update, rollback,
+         delete. Shows a confirmation first, then the live output. -->
+    <dialog id="dm-dialog" class="dm-dialog" aria-labelledby="dm-dialog-title">
+        <h2 id="dm-dialog-title" class="dm-dialog-title"></h2>
+        <p id="dm-dialog-desc" class="dm-dialog-desc"></p>
+        <div id="dm-dialog-body" class="dm-dialog-body"></div>
+        <p id="dm-dialog-note" class="dm-dialog-note" data-i18n="dialog.note">Runs with administrator privileges via Cockpit. Output appears here live.</p>
+        <pre id="dm-dialog-log" class="dm-dialog-log" hidden></pre>
+        <div class="dm-dialog-foot">
+            <span id="dm-dialog-result" class="dm-dialog-result" role="status" aria-live="polite"></span>
+            <span class="dm-dialog-buttons">
+                <button id="dm-dialog-cancel" class="dm-btn dm-btn-ghost" data-i18n="dialog.cancel">Cancel</button>
+                <button id="dm-dialog-extra" class="dm-btn dm-btn-danger" hidden>
+                    <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label"></span>
+                </button>
+                <button id="dm-dialog-confirm" class="dm-btn">
+                    <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label"></span>
+                </button>
+            </span>
+        </div>
+    </dialog>
+
+    <script src="diun.js?v=6"></script>
+</body>
+</html>
