@@ -27,3 +27,8 @@ jobs:
           bash run-all.sh
       - name: Installer into a staging directory
         run: DESTDIR="$RUNNER_TEMP/stage" bash install.sh
+      - name: Lint (shellcheck, pyflakes, systemd units)
+        run: |
+          python -m pip install --quiet pyflakes
+          shellcheck --version | head -n 2
+          sh tools/lint.sh
