@@ -108,5 +108,5 @@ const cells = (tr) => [...tr.querySelectorAll("td")];
     assert.strictEqual(cells(row(n, "glitchtip-web"))[3].textContent.trim(), "6.1.8");
     assert.strictEqual(cells(row(n, "ollama"))[3].textContent.trim(), "?");
 
-    console.log("\nALLE CHECKS OK");
+    console.log("\nALL CHECKS PASSED");
 })().catch((e) => { console.error(e); process.exit(1); });

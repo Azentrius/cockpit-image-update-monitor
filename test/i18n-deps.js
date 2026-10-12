@@ -160,5 +160,5 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
                 "| items:", e.d.querySelectorAll(".dm-dep").length);
     assert(!e.d.getElementById("dm-deps").hidden && e.d.querySelectorAll(".dm-dep").length === 0);
 
-    console.log("\nALLE CHECKS OK");
+    console.log("\nALL CHECKS PASSED");
 })().catch((e) => { console.error("FEHLGESCHLAGEN:", e.stack || e.message); process.exit(1); });

@@ -65,5 +65,5 @@ check("postgres managed by compose", (pg["managed"], pg["project"], pg["service"
 check("postgres digest", pg["digest"], "sha256:16bc")
 check("ollama: inherited label ignored", (ol["version"], ol["version_src"]), (None, None))
 check("ollama not pulled, not managed", (ol["pulled"], ol["managed"]), (False, False))
-print("\nALLE CHECKS OK" if not fails else f"\n{fails} FEHLER")
+print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

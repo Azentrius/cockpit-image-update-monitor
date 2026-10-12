@@ -1,60 +1,93 @@
 # Changelog
 
-Ab v5 entspricht die Versionsnummer dem `?v=` in `plugin/index.html`.
+## 0.6.1 – 2026-10-12
 
-## v6 – 2026-10-12 · Konfiguriert / Installiert / Neueste Version
+Semantic Versioning, English repository, CI and releases.
 
-- **Neue Spalten.** Die Tabelle zeigt jetzt *Konfiguriert* (Tag aus Compose), *Installiert* (echte Version) und *Neueste Version*. Die Digest-Spalte entfällt; der Digest steht im Tooltip.
-- **Echte installierte Version**, in dieser Reihenfolge:
-  1. Tag
-  2. Versions-Variable der App (`PG_VERSION`, `GLITCHTIP_VERSION` …)
-  3. Image-Label, nur wenn es den Tag in der Registry gibt
-  4. Digest-Abgleich über die Docker-Hub-API bzw. Registry-Manifeste, mit Cache
-- **`16.14 → 16.15`** für schon gezogene, noch nicht ausgerollte Images.
-- **Vergleich mit der installierten Version** im passenden Schema: `16-alpine` + 16.14 → `16.15-alpine`; Nextcloud `apache` → `N.N.N-apache`.
-- **Chip-Form und Legende:**
-  - gefüllt = per Update-Knopf erreichbar
-  - umrandet = Tag-Änderung nötig
-  - gestrichelt = Datenbank-Major
-- **Status:** „unbekannt“ statt „aktuell“, wenn die installierte Version nicht ermittelbar ist.
-- **Neu:** `lib/diunlib.py` mit der gemeinsamen Logik für Inventar und Radar.
+- **Versions** follow Semantic Versioning. The earlier versions v1–v6 are listed below as 0.1.0–0.6.0.
+  The version lives in `const VERSION` in `plugin/diun.js`; `plugin/index.html` loads `diun.js` and
+  `diun.css` with `?v=<version>`.
+- **Messages** of `install.sh`, the radar's log line, the tests and the preview tools are English. The
+  end-to-end test runs the helpers with `DIUN_LANG=en`.
+- **Docs** (README, ROADMAP, CLAUDE.md, docs/INTERNALS.md) are English.
+- **CI:** the `test` workflow runs the offline tests and the installer into a staging directory on
+  every push and pull request; the `release` workflow makes a release on request (tarball,
+  `SHA256SUMS`, notes from this file).
+- `tools/check-version.sh` (part of `run-all.sh`) checks that `diun.js`, `index.html` and this file
+  agree on the version.
 
-## v5 – 2026-10-12 · Stufe 1: Update, Rollback, Backups
+## 0.6.0 – 2026-10-12
 
-- **Knöpfe:** „Update“ (Diun meldet neuen Build) und „Ausrollen“ (neueres Image schon lokal).
-- **Plan-Dialog:**
-  - betroffene Services/Container (alle mit demselben Image im Projekt)
-  - Datenbanken mit Größe
-  - freier Platz
-  - Warnung bei geänderter Compose-Datei
-- **Ablauf:**
-  1. `pg_dumpall` bzw. `mariadb-dump`
-  2. Rollback-Tag
+Columns Configured / Installed / Newest version.
+
+- **New columns.** The table shows *Configured* (tag from compose), *Installed* (real version) and
+  *Newest version*. The digest column is gone; the digest is in the tooltip.
+- **Real installed version**, in this order:
+  1. tag
+  2. the app's version variable (`PG_VERSION`, `GLITCHTIP_VERSION` …)
+  3. image label, only if that tag exists in the registry
+  4. digest match via the Docker Hub API or registry manifests, with a cache
+- **`16.14 → 16.15`** for images that are pulled but not rolled out yet.
+- **Comparison with the installed version** in the matching scheme: `16-alpine` + 16.14 →
+  `16.15-alpine`; Nextcloud `apache` → `N.N.N-apache`.
+- **Chip style and legend:**
+  - filled = reachable with the Update button
+  - outlined = needs a tag change
+  - dashed = database major
+- **Status:** “unknown” instead of “up to date” when the installed version cannot be determined.
+- **New:** `lib/diunlib.py` with the logic shared by inventory and radar.
+
+## 0.5.0 – 2026-10-12
+
+Stage 1: update, rollback, backups.
+
+- **Buttons:** “Update” (Diun reports a new build) and “Roll out” (newer image already local).
+- **Plan dialog:**
+  - affected services/containers (all with the same image in the project)
+  - databases with size
+  - free space
+  - warning when the compose file changed
+- **Flow:**
+  1. `pg_dumpall` or `mariadb-dump`
+  2. rollback tag
   3. `compose pull`
   4. `up -d --no-deps`
-  5. Warten auf healthy
-  6. Ergebnis; bei Fehler Rollback-Angebot
-- **Tab „Backups & Dumps“:** Verlauf mit Rollback, Dumps und Rollback-Images löschen.
-- **Inventar** in Python neu: Compose-Zuordnung, „gezogen, nicht ausgerollt“, deutlich weniger Docker-Aufrufe.
-- **E2E-Test** im Wegwerf-Projekt.
-- **Behoben:** Hilfscontainer mit Postgres-Image (`sh -c …`) wurden als Datenbank erkannt. Jetzt zählt nur ein Container, der den Server startet.
-- **Behoben:** Ein spät eintreffender Plan öffnete einen geschlossenen Dialog wieder.
+  5. wait for healthy
+  6. result; on failure, offer a rollback
+- **Tab “Backups & dumps”:** history with rollback; delete dumps and rollback images.
+- **Inventory** rewritten in Python: compose mapping, “pulled, not rolled out”, far fewer Docker calls.
+- **E2E test** in a throw-away project.
+- **Fixed:** helper containers using the Postgres image (`sh -c …`) were taken for databases. Now only a
+  container that starts the server counts.
+- **Fixed:** a plan arriving late reopened a closed dialog.
 
-## v4 – 2026-10-12 · Zweisprachig, Voraussetzungen
+## 0.4.0 – 2026-10-12
 
-- Deutsch/Englisch nach Cockpit-Sprache (Rückfall Englisch), auch der Menüeintrag.
-- **Panel „Voraussetzungen“** prüft Docker, Diun, skopeo und den Radar und bietet die Installation an (`diun-deps.sh`, überschreibt nie).
+Two languages, requirements.
 
-## v3 – 2026-10-12 · Ladeanzeige
+- German/English following Cockpit's language (fallback English), the menu entry too.
+- **Panel “Missing requirements”** checks Docker, Diun, skopeo and the radar and offers to install them
+  (`diun-deps.sh`, never overwrites).
 
-- Ladeblock beim ersten Laden, Spinner im Aktualisieren-Knopf, gedimmte Tabelle.
-- **Behoben:** Watch-/Read-Schleife, die Hunderte Inventar-Prozesse gestartet hat. Jetzt wird nie parallel geladen, und neu geladen wird nur bei geändertem Datei-Tag.
+## 0.3.0 – 2026-10-12
 
-## v2 – 2026-10-12 · Versions-Radar
+Loading indicator.
 
-- `diun-versions.py` + systemd-Timer (alle 6 h): neuere Versions-Tags (Patch/Minor/Major) per `skopeo list-tags`; Datenbank-Majors als graue Info.
-- **Sicherheit:** Alles, was als root läuft, liegt nach `/usr/local/lib/diun-radar` umgezogen, weg aus dem vom Diun-Container beschreibbaren `/var/lib/diun`.
+- Loading block on the first load, spinner in the Refresh button, dimmed table.
+- **Fixed:** a watch/read loop that started hundreds of inventory processes. Loads never run in
+  parallel now, and a reload happens only when the file tag changed.
 
-## v1 · Grundversion
+## 0.2.0 – 2026-10-12
 
-- Tabelle der laufenden Container mit Diun-Meldungen (neuer Digest für denselben Tag), „Erledigt“-Markierung.
+Version radar.
+
+- `diun-versions.py` + systemd timer (every 6 h): newer version tags (patch/minor/major) via
+  `skopeo list-tags`; database majors as grey info.
+- **Security:** everything that runs as root moved to `/usr/local/lib/diun-radar`, away from
+  `/var/lib/diun`, which the Diun container can write to.
+
+## 0.1.0
+
+First version.
+
+- Table of running containers with Diun reports (new digest for the same tag), “Dismiss” button.

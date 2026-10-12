@@ -1,149 +1,173 @@
-# Ausbaustufen
+# Roadmap
 
-Stand: 12.10.2026. Jede Stufe ist so geschnitten, dass sie für sich nutzbar ist und eigene Tests mitbringt. Reihenfolge = Empfehlung.
+As of 2026-10-12. Each stage is cut so that it is useful on its own and brings its own tests. The order
+is the recommendation.
 
-**Leitplanken für jede Stufe** (gelten unverändert weiter):
+**Guardrails for every stage** (they keep applying unchanged):
 
-- **Ort:** Root-Code nur in `/usr/local/lib/diun-radar`, nur feste Verben, Argumente per Regex prüfen.
-- **Vorher zeigen:** Jede verändernde Aktion zeigt erst einen Plan, dann die Live-Ausgabe, dann das Ergebnis.
-- **Abbrechen vor der Änderung:** Was schiefgehen kann, bricht ab, bevor sich etwas ändert (Dump, Platz, Validierung).
-- **Sprache:** DE und EN für jeden Text, Mobilansicht, keine externen Ressourcen im Browser.
-- **Tests:** offline in `test/`, End-to-End nur in Wegwerf-Projekten, nie an Produktivcontainern.
-
----
-
-## Stufe 1 – Update mit gleichem Tag ✅
-
-Erledigt (siehe [CHANGELOG](CHANGELOG.md)):
-- Update/Ausrollen mit Plan, DB-Dump (Postgres, MariaDB/MySQL), Rollback-Tag, Health-Wartezeit, Rollback
-- Backups-&-Dumps-Tab mit Löschen
-- Spalten Konfiguriert / Installiert / Neueste Version
+- **Place:** root code only in `/usr/local/lib/diun-radar`, fixed verbs only, arguments checked by regex.
+- **Show first:** every changing action shows a plan first, then the live output, then the result.
+- **Stop before the change:** anything that can go wrong stops before something changes (dump, space,
+  validation).
+- **Language:** English and German for every text, phone layout, no external resources in the browser.
+- **Tests:** offline in `test/`, end-to-end only in throw-away projects, never on production containers.
 
 ---
 
-## Stufe 1.1 – Feinschliff (klein, als Nächstes)
+## Stage 1 – Update with the same tag ✅
 
-| # | Thema | Umfang | Fertig, wenn … |
+Done (see [CHANGELOG](CHANGELOG.md)):
+- Update/roll-out with plan, database dump (Postgres, MariaDB/MySQL), rollback tag, waiting for health,
+  rollback
+- Backups & dumps tab with delete
+- Columns Configured / Installed / Newest version
+
+---
+
+## Stage 1.1 – Polish (small, next)
+
+| # | Topic | Scope | Done when … |
 |---|---|---|---|
-| 1 | **Radar nach Update anstoßen** | `diun-update.py` startet nach erfolgreichem Update/Rollback `systemctl start --no-block diun-radar.service` (nur wenn die Unit existiert). Das Plugin lädt neu, sobald sich `versions.json` ändert; der Watch ist schon da. | nach dem Update von z. B. ollama (`latest`) die Spalte *Installiert* innerhalb ~1 min die neue Version zeigt statt `?` |
-| 2 | **„Radar jetzt prüfen“** | Knopf neben *Aktualisieren*; neues festes Verb (z. B. `diun-update.py radar`), das den Service startet. Anzeige „läuft …“ bis `versions.json` neu ist. | Knopf startet genau einen Lauf; Doppelklick startet keinen zweiten (systemd-Oneshot) |
-| 3 | **Aufräumregeln** | Standard: je Container die letzten **3** Dumps behalten, ungenutzte Rollback-Images nach **14 Tagen** löschen. Konfigurierbar in `/etc/image-updates.conf`, root-owned, einfache `KEY=VALUE`-Datei. Läuft nach jedem erfolgreichen Update und täglich per Timer. Im Backups-Tab: „würde gelöscht“-Vorschau und Knopf „Jetzt aufräumen“. | Tests mit Fake-Dateisystem; nie wird ein Dump des **letzten** Updates oder ein Image in Benutzung gelöscht |
-| 4 | **Versionen im Verlauf** | `operations.jsonl` bekommt `from_version` / `to_version` (über `diunlib.local_version` bzw. den Radar-Cache). Der Verlauf zeigt „16.14 → 16.15“. | Alte Einträge ohne Felder werden weiter angezeigt |
-| 5 | **MariaDB/MySQL Ende-zu-Ende** | `test/e2e-server.sh` um ein Wegwerf-Projekt mit `mariadb:11` (und `mysql:8`) erweitern: Dump enthält Testdaten, Abbruch bei falschem Passwort. | E2E grün für Postgres, MariaDB, MySQL |
-| 6 | **Offline-Tests für `diun-update.py`** | Fake-`docker`/`compose` analog `test/inv_test.py`: Plan-Gründe, DB-Erkennung (`kind_of`), Exit-Codes, Pfadprüfung. | `run-all.sh` deckt `diun-update.py` ohne Docker ab |
-| 7 | **CI** | GitHub Actions: `test/run-all.sh`, `shellcheck lib/*.sh install.sh test/*.sh`, `python -m pyflakes lib`. | grüner Haken auf jedem Push/PR |
-| 8 | **systemd-Units als Dateien** | `diun-radar.service/.timer` liegen heute als Heredoc in `diun-deps.sh`. Nach `systemd/` verschieben; `install.sh` und `diun-deps.sh` nutzen dieselbe Quelle. | eine Quelle der Wahrheit; `diun-deps.sh install radar` funktioniert unverändert |
+| 1 | **Start the radar after an update** | After a successful update/rollback `diun-update.py` runs `systemctl start --no-block diun-radar.service` (only if the unit exists). The plugin reloads as soon as `versions.json` changes; the watch is already there. | after updating e.g. ollama (`latest`) the *Installed* column shows the new version within ~1 min instead of `?` |
+| 2 | **“Check radar now”** | Button next to *Refresh*; a new fixed verb (e.g. `diun-update.py radar`) that starts the service. Shows “running …” until `versions.json` is new. | the button starts exactly one run; a double click does not start a second one (systemd oneshot) |
+| 3 | **Cleanup rules** | Default: keep the last **3** dumps per container, delete unused rollback images after **14 days**. Configurable in `/etc/image-updates.conf`, root-owned, a plain `KEY=VALUE` file. Runs after every successful update and daily by timer. In the backups tab: a “would be deleted” preview and a “Clean up now” button. | tests with a fake file system; a dump of the **last** update or an image in use is never deleted |
+| 4 | **Versions in the history** | `operations.jsonl` gets `from_version` / `to_version` (via `diunlib.local_version` or the radar cache). The history shows “16.14 → 16.15”. | old entries without the fields are still shown |
+| 5 | **MariaDB/MySQL end-to-end** | Extend `test/e2e-server.sh` with a throw-away project using `mariadb:11` (and `mysql:8`): the dump contains test data, abort on a wrong password. | E2E green for Postgres, MariaDB, MySQL |
+| 6 | **Offline tests for `diun-update.py`** | Fake `docker`/`compose` like `test/inv_test.py`: plan reasons, database detection (`kind_of`), exit codes, path checks. | `run-all.sh` covers `diun-update.py` without Docker |
+| 7 | **CI** | The `test` workflow runs `test/run-all.sh` and the installer on every push and PR (done). Still missing: `shellcheck lib/*.sh install.sh test/*.sh tools/*.sh`, `python -m pyflakes lib`. | green check on every push/PR, including lint |
+| 8 | **systemd units as files** | `diun-radar.service/.timer` live as a heredoc in `diun-deps.sh` today. Move them to `systemd/`; `install.sh` and `diun-deps.sh` use the same source. | one source of truth; `diun-deps.sh install radar` works unchanged |
 
 ---
 
-## Stufe 2 – Versionssprünge (Tag in der Compose-Datei ändern)
+## Stage 2 – Version jumps (change the tag in the compose file)
 
-**Ziel:** Ein Klick auf einen *umrandeten* Chip (z. B. „Patch v2.1.5“ bei konfiguriertem `v2.1.4`) wechselt sicher auf diesen Tag.
+**Goal:** a click on an *outlined* chip (e.g. “Patch v2.1.5” with `v2.1.4` configured) switches to
+that tag safely.
 
-**Ablauf**
+**Flow**
 
-1. Dialog „Auf `v2.1.5` wechseln?“ mit **Diff-Vorschau** der Compose-Änderung, Plan wie bei Stufe 1 und Hinweis auf Release Notes (ab Stufe 3 mit Inhalt).
-2. Neues Verb `diun-update.py retag <container> <ziel-tag>`. Das Ziel wird gegen die Tag-Liste der Registry und das Schema der installierten Version geprüft.
-3. **Wo der Tag steht** (Compose-Label `config_files`, ggf. mehrere Dateien/Overrides):
-   - `image: repo:v2.1.4` direkt → genau diese Zeile ändern (Text-Ersetzung, **kein** YAML-Roundtrip; Kommentare und Formatierung bleiben).
-   - `image: repo:${PLAUSIBLE_VERSION}` → den Wert in der `.env` (Label `environment_file`) ändern, aber nur wenn die Variable ausschließlich für dieses Image genutzt wird; sonst Abbruch mit Erklärung.
-   - `extends`, YAML-Anker, mehrere Treffer → Abbruch mit Erklärung (manuell).
-4. **Sicherung:** Compose-Datei bzw. `.env` byte-genau nach `/var/backups/image-updates/compose/<projekt>/<stamp>/`; danach `docker compose config` als Validierung.
-5. Danach derselbe Ablauf wie Stufe 1 (Dump → Rollback-Tag → `pull` → `up -d --no-deps`).
-6. **Rollback** stellt die Compose-Datei byte-genau wieder her und setzt das alte Image zurück.
-7. Ist das Projektverzeichnis ein **Git-Repository**: Status anzeigen und optional mit vorgeschlagener Commit-Nachricht committen (nie pushen).
+1. Dialog “Switch to `v2.1.5`?” with a **diff preview** of the compose change, a plan as in stage 1 and
+   a pointer to the release notes (with content from stage 3 on).
+2. New verb `diun-update.py retag <container> <target-tag>`. The target is checked against the
+   registry's tag list and the scheme of the installed version.
+3. **Where the tag is** (compose label `config_files`, possibly several files/overrides):
+   - `image: repo:v2.1.4` directly → change exactly this line (text replacement, **no** YAML round
+     trip; comments and formatting stay).
+   - `image: repo:${PLAUSIBLE_VERSION}` → change the value in the `.env` (label `environment_file`),
+     but only if the variable is used for this image alone; otherwise stop with an explanation.
+   - `extends`, YAML anchors, several matches → stop with an explanation (manual).
+4. **Backup:** compose file or `.env` byte-exact to
+   `/var/backups/image-updates/compose/<project>/<stamp>/`; then `docker compose config` as validation.
+5. Then the same flow as stage 1 (dump → rollback tag → `pull` → `up -d --no-deps`).
+6. **Rollback** restores the compose file byte-exact and points back to the old image.
+7. If the project directory is a **git repository**: show its status and optionally commit with a
+   suggested message (never push).
 
-**Sperren**
-- Datenbank-Majors: nur Info, siehe Stufe 5.
-- Majors allgemein: zusätzliche Bestätigung und Release-Notes-Hinweis.
-- Nextcloud: nur ein Major pro Schritt.
+**Blocks**
+- Database majors: info only, see stage 5.
+- Majors in general: an extra confirmation and a pointer to the release notes.
+- Nextcloud: one major per step only.
 
-**Fertig, wenn …**
-- E2E im Wegwerf-Projekt grün ist, für: direkter Tag, `.env`-Variable, Override-Datei, Rollback (Datei byte-identisch), abgelehnte Fälle (Anker, mehrfach genutzte Variable).
-- Die Diff-Vorschau genau der späteren Änderung entspricht.
-
----
-
-## Stufe 3 – Release Notes im Dialog
-
-**Ziel:** Vor dem Klick sehen, was sich ändert.
-
-- **Quelle zum Image finden:** Label `org.opencontainers.image.source`, Hub-Link aus Diun, bekannte Zuordnungen.
-- **GitHub-Releases holen** zwischen installierter und Ziel-Version. Das macht der Radar auf dem Server, nicht der Browser. Ergebnis zwischenspeichern und das Rate-Limit beachten: ohne Token 60 Anfragen pro Stunde, optional ein Token in `/etc/image-updates.conf`.
-- **Anzeige:** Im Update-Dialog als einklappbare Liste, nur Text, keine externen Bilder. Stichwörter wie „breaking“, „migration“, „deprecated“ werden hervorgehoben.
-- **Fertig, wenn** für die Images auf dem Referenz-Host die Notes zwischen zwei Versionen erscheinen. Fehlen sie, steht ein klarer Hinweis statt eines Fehlers.
+**Done when …**
+- E2E in a throw-away project is green for: direct tag, `.env` variable, override file, rollback (file
+  byte-identical), refused cases (anchor, variable used more than once).
+- The diff preview matches the later change exactly.
 
 ---
 
-## Stufe 4 – Automatische Updates nach Regeln
+## Stage 3 – Release notes in the dialog
 
-**Ziel:** Patch-Updates nachts ohne Klick, mit Sicherheitsnetz.
+**Goal:** see what changes before the click.
 
-**Regeln je Container**
-- Als Compose-Label (`image-updates.policy=patch|minor|off`) oder im Addon gespeichert in `/etc/image-updates.d/`.
-- Standard `off`; Datenbank-Container immer `off`.
-
-**Wartungsfenster:** systemd-Timer, z. B. 03:30. Pro Lauf höchstens N Projekte, nacheinander.
-
-**Sicherheitsnetz**
-- Dump und Rollback-Tag wie in Stufe 1.
-- Health-Check, danach automatischer Rollback bei `failed`.
-- Neue Verben nur für den Timer, nicht aus dem Browser.
-
-**Benachrichtigungen:** Zusammenfassung per E-Mail (lokaler MTA), ntfy oder Matrix-Webhook. Inhalt: was aktualisiert wurde, was fehlschlug, was zurückgerollt wurde.
-
-**Fertig, wenn …**
-- Ein Trockenlauf-Modus den Plan zeigt.
-- Ein E2E einen absichtlich kaputten Patch automatisch zurückrollt und meldet.
+- **Find the source of an image:** label `org.opencontainers.image.source`, hub link from Diun, known
+  mappings.
+- **Fetch GitHub releases** between the installed and the target version. The radar does this on the
+  server, not the browser. Cache the result and respect the rate limit: 60 requests per hour without a
+  token, optionally a token in `/etc/image-updates.conf`.
+- **Display:** in the update dialog as a collapsible list, text only, no external images. Words like
+  “breaking”, “migration”, “deprecated” are highlighted.
+- **Done when** the notes between two versions appear for the images on the reference host. If they are
+  missing, a clear note appears instead of an error.
 
 ---
 
-## Stufe 5 – Datenbank-Majors begleitet
+## Stage 4 – Automatic updates by rules
 
-**Ziel:** Postgres 16 → 18 (und MariaDB-Majors) geführt statt von Hand.
+**Goal:** patch updates at night without a click, with a safety net.
 
-**Weg A, Dump/Restore:**
-1. `pg_dumpall` mit der alten Version
-2. neuer Container mit neuer Version auf **neuem** Volume
-3. Restore
-4. Prüfung (Tabellen- und Zeilenzahlen)
-5. Umschalten (Compose-Änderung wie Stufe 2)
-6. altes Volume bleibt bis zur Freigabe
+**Rules per container**
+- As a compose label (`image-updates.policy=patch|minor|off`) or stored by the add-on in
+  `/etc/image-updates.d/`.
+- Default `off`; database containers always `off`.
 
-**Weg B, `pg_upgrade`:** über ein Upgrade-Image (z. B. `tianon/postgres-upgrade`), schneller, aber komplexer.
+**Maintenance window:** systemd timer, e.g. 03:30. At most N projects per run, one after another.
 
-**Bedienung:** Hohe Hürde – eigener Assistent, Ausfallzeit wird angekündigt, Häkchen „Backup außerhalb geprüft“.
+**Safety net**
+- Dump and rollback tag as in stage 1.
+- Health check, then automatic rollback on `failed`.
+- New verbs only for the timer, not from the browser.
 
-**Fertig, wenn** ein E2E mit Testdaten 16 → 17 per Weg A durchläuft und der Rückweg (altes Volume) dokumentiert und getestet ist.
+**Notifications:** a summary by email (local MTA), ntfy or Matrix webhook. Content: what was updated,
+what failed, what was rolled back.
 
----
-
-## Stufe 6 – Verteilung und Reichweite
-
-- **Debian-Paket** (`.deb`) mit Plugin, Helfern und Units; GitHub-Releases. Danach ersetzt das Paket `install.sh` für Endnutzer.
-- **Private Registries:** Zugangsdaten über eine eigene, root-only Datei, die der Radar trotz Härtung lesen darf (`LoadCredential=` oder `ReadOnlyPaths=`); `skopeo --authfile`.
-- **Podman** (`podman compose`, Quadlets) als zweite Laufzeit.
-- **Mehrere Hosts:** Cockpit kann zwischen Hosts wechseln, das Plugin läuft je Host. Optional eine Sammelansicht.
-- **Lizenz** festlegen (Vorschlag: LGPL-2.1-or-later wie Cockpit, oder MIT).
+**Done when …**
+- A dry-run mode shows the plan.
+- An E2E rolls back a deliberately broken patch automatically and reports it.
 
 ---
 
-## Technische Schulden / Aufräumen
+## Stage 5 – Guided database majors
 
-| Thema | Vorschlag |
+**Goal:** Postgres 16 → 18 (and MariaDB majors) guided instead of by hand.
+
+**Path A, dump/restore:**
+1. `pg_dumpall` with the old version
+2. new container with the new version on a **new** volume
+3. restore
+4. check (table and row counts)
+5. switch over (compose change as in stage 2)
+6. the old volume stays until released
+
+**Path B, `pg_upgrade`:** through an upgrade image (e.g. `tianon/postgres-upgrade`), faster but more
+complex.
+
+**Use:** a high bar – its own assistant, downtime is announced, a “backup checked elsewhere” tick box.
+
+**Done when** an E2E with test data runs 16 → 17 via path A and the way back (old volume) is documented
+and tested.
+
+---
+
+## Stage 6 – Distribution and reach
+
+- **Debian package** (`.deb`) with plugin, helpers and units, attached to the GitHub releases (which
+  the release workflow makes today as source tarballs). The package then replaces `install.sh` for end
+  users.
+- **Private registries:** credentials in a separate root-only file that the radar may read despite its
+  hardening (`LoadCredential=` or `ReadOnlyPaths=`); `skopeo --authfile`.
+- **Podman** (`podman compose`, Quadlets) as a second runtime.
+- **Several hosts:** Cockpit can switch between hosts, the plugin runs per host. Optionally a combined
+  view.
+
+---
+
+## Technical debt / cleanup
+
+| Topic | Proposal |
 |---|---|
-| `plugin/diun.js` hat ~1 300 Zeilen in einer Datei | in ES-Module aufteilen (`<script type="module">` funktioniert unter Cockpits CSP ohne Build-Schritt): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
-| Paketname `diun` (URL `/cockpit/@host/diun`) passt nicht mehr zum Umfang | umbenennen in `image-updates`, `install.sh` entfernt das alte Verzeichnis; Lesezeichen ändern sich |
-| Units als Heredoc in `diun-deps.sh` | siehe 1.1 #8 |
-| Kein Typ-/Lint-Check | `pyflakes`/`ruff`, `shellcheck` in CI (1.1 #7) |
-| `diun-update.py` nur per E2E getestet | Offline-Tests (1.1 #6) |
-| Radar-Lauf fest um `:17` alle 6 h | `RandomizedDelaySec=` gegen Registry-Spitzen |
-| Dokumentation der JSON-Formate | bei jeder Formatänderung `docs/INTERNALS.md` und die Fixtures in `test/fixtures/` mitziehen |
+| `plugin/diun.js` has ~1,300 lines in one file | split into ES modules (`<script type="module">` works under Cockpit's CSP without a build step): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
+| Package name `diun` (URL `/cockpit/@host/diun`) no longer fits the scope | rename to `image-updates`, `install.sh` removes the old directory; bookmarks change |
+| Units as a heredoc in `diun-deps.sh` | see 1.1 #8 |
+| No type/lint check | `pyflakes`/`ruff`, `shellcheck` in CI (1.1 #7) |
+| `diun-update.py` only tested by E2E | offline tests (1.1 #6) |
+| Radar run fixed at `:17` every 6 h | `RandomizedDelaySec=` against registry peaks |
+| Documentation of the JSON formats | update `docs/INTERNALS.md` and the fixtures in `test/fixtures/` with every format change |
 
 ---
 
-## Offene Entscheidungen
+## Open decisions
 
-1. Lizenz (siehe Stufe 6).
-2. Paket umbenennen (`diun` → `image-updates`)? Wenn ja, früh, solange es wenige Installationen gibt.
-3. Sollen automatische Updates (Stufe 4) überhaupt kommen, oder bleibt jedes Update ein bewusster Klick?
+1. Rename the package (`diun` → `image-updates`)? If yes, early, while there are few installations.
+2. Should automatic updates (stage 4) come at all, or does every update stay a deliberate click?
+
+Decided: the license is Apache-2.0 (see [LICENSE](LICENSE)).

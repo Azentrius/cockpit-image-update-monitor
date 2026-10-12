@@ -6,7 +6,7 @@ set -u
 cd "$(dirname "$0")"
 
 if [ ! -d node_modules/jsdom ]; then
-    echo "jsdom fehlt – bitte zuerst: (cd test && npm ci)" >&2
+    echo "jsdom missing – run first: (cd test && npm ci)" >&2
     exit 2
 fi
 
@@ -25,16 +25,17 @@ run() {
     rm -f "$log"
 }
 
-run "python: diunlib + Versions-Radar" python3 radar_test.py
-run "python: Inventar"                 python3 inv_test.py
-run "python: Syntax lib/*.py"          python3 -c 'import ast, glob, sys; [ast.parse(open(f).read(), f) for f in glob.glob("../lib/*.py")]'
-run "shell:  Syntax lib/*.sh + e2e"    bash -c 'for f in ../lib/*.sh e2e-server.sh run-all.sh ../install.sh; do bash -n "$f" || exit 1; done'
-run "plugin: Ladeanzeige"              node loading.js
-run "plugin: Sprache + Voraussetzungen" node i18n-deps.js
-run "plugin: Update, Rollback, Backups" node update-backups.js
-run "plugin: Versions-Spalten"         node version-cols.js
-run "plugin: Gesamtdarstellung (Smoke)" node harness.js
+run "python: diunlib + version radar"   python3 radar_test.py
+run "python: inventory"                 python3 inv_test.py
+run "python: syntax lib/*.py"           python3 -c 'import ast, glob, sys; [ast.parse(open(f).read(), f) for f in glob.glob("../lib/*.py")]'
+run "shell:  syntax lib/*.sh + e2e"     bash -c 'for f in ../lib/*.sh e2e-server.sh run-all.sh ../install.sh ../tools/*.sh; do bash -n "$f" || exit 1; done'
+run "plugin: loading indicator"         node loading.js
+run "plugin: language + requirements"   node i18n-deps.js
+run "plugin: update, rollback, backups" node update-backups.js
+run "plugin: version columns"           node version-cols.js
+run "plugin: whole table (smoke)"       node harness.js
+run "repo:   version + changelog"       sh ../tools/check-version.sh
 
 echo
-if [ $fail = 0 ]; then echo "ALLE TESTS GRÜN"; else echo "ES GIBT FEHLER"; fi
+if [ $fail = 0 ]; then echo "ALL TESTS PASSED"; else echo "THERE ARE FAILURES"; fi
 exit $fail

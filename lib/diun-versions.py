@@ -398,7 +398,7 @@ def table(recs):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Versions-Radar for running containers")
+    ap = argparse.ArgumentParser(description="Version radar for running containers")
     ap.add_argument("--table", action="store_true", help="human-readable table")
     ap.add_argument("--output", metavar="FILE", help="write JSON document atomically")
     args = ap.parse_args()
@@ -407,7 +407,7 @@ def main():
         groups = collect()
     except Exception as e:
         # Never overwrite good data with an empty list because Docker hiccuped.
-        print(f"docker nicht erreichbar: {e}", file=sys.stderr)
+        print(f"docker not reachable: {e}", file=sys.stderr)
         return 1
 
     prev = load_previous(args.output) if args.output else []
@@ -425,8 +425,8 @@ def main():
         write_atomic(args.output, {"generated": iso(now), "images": recs})
         errors = sum(1 for r in recs if r["status"] == "error" or r.get("stale"))
         unknown = sum(1 for r in recs for x in (r.get("installed") or {}).values() if not x.get("version"))
-        print(f"{len(recs)} Images geprüft, {errors} mit Registry-Fehler, "
-              f"{unknown} ohne ermittelbare Version -> {args.output}")
+        print(f"{len(recs)} images checked, {errors} with registry errors, "
+              f"{unknown} without a known version -> {args.output}")
     elif args.table:
         table(recs)
     else:
