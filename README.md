@@ -4,7 +4,9 @@ A [Cockpit](https://cockpit-project.org/) add-on that shows three things for eve
 Updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button.
 Everything that runs as root for this is a small, fixed set of helper scripts. The browser makes no external requests, and Diun sees Docker only through a read-only socket proxy.
 
-![Overview: Configured, Installed, Newest version](docs/img/updates.png)
+| Light | Dark |
+|---|---|
+| ![Overview: Configured, Installed, Newest version](docs/img/updates.png) | ![The same overview in the dark theme](docs/img/updates-dark.png) |
 
 **Contents**
 
@@ -32,17 +34,19 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | Area | Function |
 |---|---|
 | **Overview** | All running containers with *Configured* (tag from compose), *Installed* (real version), *Newest version* (patch / minor / major) and status. Sorted by urgency. |
-| **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**”. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
+| **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**” in the card. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
 | **Update / roll out** | One click first shows a plan (affected containers, compose project, databases, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If that fails, there is a rollback button. |
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
-| **Use** | English and German following Cockpit's language (fallback English), loading indicator, cards on phones, no external resources (strict Cockpit CSP). |
+| **Use** | The shared Azentrius page frame (header, tabs, signature), light or dark following Cockpit's style, English and German following Cockpit's language (fallback English), loading indicator, rows as blocks on phones, no external resources (strict Cockpit CSP). |
 
 | Update dialog | Result with live output |
 |---|---|
 | ![Plan before the update](docs/img/update-dialog.png) | ![Live output and result](docs/img/update-done.png) |
 
-![Tab Backups & dumps](docs/img/backups.png)
+| Backups & dumps | On a phone |
+|---|---|
+| ![Tab Backups & dumps](docs/img/backups.png) | ![The overview on a phone, dark](docs/img/mobile-dark.png) |
 
 ---
 
@@ -59,13 +63,16 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 
 **Status**
 
-| Badge | Meaning | Button |
+| Label | Meaning | Button |
 |---|---|---|
-| Update available | Diun reported a new build of **the same tag**. | Update, Dismiss |
-| Roll-out pending | The newer image is already local, the container still runs the old one. | Roll out |
-| New version | The radar knows a newer version. The chip style shows whether the Update button delivers it. | – |
-| up to date | Nothing newer known. | – |
-| unknown | Installed version cannot be determined (e.g. `latest` from a development build). | – |
+| ⓘ Update available | Diun reported a new build of **the same tag**. | Update, Dismiss (✓) |
+| ⓘ Roll-out pending | The newer image is already local, the container still runs the old one. | Roll out |
+| ⓘ New version | The radar knows a newer version. The chip style shows whether the Update button delivers it. | – |
+| ✓ Up to date | Nothing newer known. | – |
+| ⊘ Unknown | Installed version cannot be determined (e.g. `latest` from a development build). | – |
+
+The labels use the shared status language: a hint in violet with `info-circle`, good in green with
+`check-circle`, unknown without judgement with `ban`. Gold is never a status.
 
 Update buttons exist only for containers started with **docker compose** (“manual only” otherwise).
 
@@ -76,7 +83,7 @@ Update buttons exist only for containers started with **docker compose** (“man
 | filled | The configured tag delivers this version **with the Update button** (e.g. `latest` → everything, `16-alpine` → 16.x). |
 | outlined | Reachable only by **changing the tag in the compose file** (e.g. `v2.1.4` → `v2.1.5`). That is [stage 2](ROADMAP.md#stage-2--version-jumps-change-the-tag-in-the-compose-file). |
 | dashed, grey | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. |
-| colour | green = patch, gold = minor, red = major |
+| colour | patch green, minor neutral with bronze (light) or gold (dark) text, major red |
 
 > **Careful with `latest` and similar tags:** they deliver major versions on update too. If Nextcloud `apache` shows a filled red “Major 35.0.1”, a click on *Update* jumps from 34 to 35. Read the release notes before such jumps (Nextcloud allows only one major step at a time).
 
@@ -447,6 +454,9 @@ Covered by the tests, among other things:
 - cache and registry outage
 - inventory
 - `diun-update.py` with fake Docker: database detection, plan reasons, exit codes, update, rollback, cleanup rules, radar
+- the page frame: header, tabs (mouse and keyboard), status labels with icons, buttons, signature
+- contrast of every colour pair in the light and the dark theme
+- the shared design files are identical to the pinned versions (SHA-256)
 - loading indicator and repeated loads
 - language EN/DE
 - requirements panel
@@ -458,7 +468,7 @@ Covered by the tests, among other things:
 
 ```bash
 python3 tools/preview/build.py      # -> tools/preview/out/diun/index.html?lang=en
-python3 tools/preview/shoot.py      # screenshots to docs/img (needs playwright + chromium)
+python3 tools/preview/shoot.py      # screenshots light, dark and phone to docs/img (needs playwright + chromium)
 ```
 
 **End-to-end on a real host** (creates the throw-away compose projects `imgupd-test` and `imgupd-test-my`, touches nothing else, cleans up afterwards):

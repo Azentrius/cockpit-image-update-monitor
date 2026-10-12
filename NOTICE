@@ -1,0 +1,26 @@
+Image updates monitor for Cockpit
+Copyright 2026 Azentrius
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+The shared Azentrius design files plugin/azentrius.css and
+plugin/azentrius-theme.js (identical in every Azentrius add-on, see
+tools/design-files.sha256) are part of this project under the same license.
+
+This project includes third-party material under its own license:
+
+DM Sans (plugin/DMSans.woff2, a Latin subset)
+  Copyright 2014 The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts)
+  SIL Open Font License 1.1, see plugin/OFL.txt
+
+DM Serif Display (plugin/DMSerifDisplay-Regular.woff2, subset to the word mark;
+plugin/DMSerifDisplay-Italic.woff2, subset to the name suffix "monitor")
+  Copyright 2014 - 2017 Adobe Systems Incorporated (http://www.adobe.com/), with
+  Reserved Font Name 'Source'. Copyright 2019 Google LLC.
+  SIL Open Font License 1.1, see plugin/OFL.txt
+
+Icons (plugin/icons.js, and the "ban" icon in plugin/diun.js): Font Awesome
+  Free 5 (Solid) by Fonticons, Inc., as shipped by PatternFly. Creative Commons
+  Attribution 4.0 International, https://fontawesome.com/license/free
+
+The page uses Red Hat Mono from Cockpit's own static files; it is not part of
+this project.

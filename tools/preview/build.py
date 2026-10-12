@@ -32,6 +32,7 @@ def main():
             "/var/lib/diun/events.jsonl": open(os.path.join(FIX, "events.jsonl")).read(),
             "/var/lib/diun-radar/versions.json": json.load(open(os.path.join(FIX, "versions2.json"))),
             "/var/lib/diun/dismissed.json": None,
+            "/etc/hostname": "docker-host",
         },
         "inventory": open(os.path.join(FIX, "inventory3.jsonl")).read(),
         "deps": {"root": True, "docker": {"state": "ok", "compose": True},

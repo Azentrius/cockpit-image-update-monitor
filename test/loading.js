@@ -18,6 +18,8 @@ const files = {
     "/var/lib/diun/dismissed.json": null,
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Every load also lists the backups (both tabs load together).
+const BACKUPS_EMPTY = JSON.stringify({ dumps: [], images: [], ops: [], dump_bytes: 0, free_bytes: 0, dir: "/var/backups/image-updates" });
 
 function boot(spawnImpl) {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
@@ -34,6 +36,7 @@ function boot(spawnImpl) {
             };
         },
         spawn(cmd) {
+            if (cmd[0].endsWith("diun-update.py")) return Promise.resolve(BACKUPS_EMPTY);
             if (cmd[0].endsWith("diun-deps.sh")) return Promise.resolve('{"root":true,"docker":{"state":"ok","version":"29.5.2","compose":true},"diun":{"state":"running","managed":true,"events":true,"can_install":false,"can_start":false},"skopeo":{"state":"ok","version":"1.13.3","can_install":true},"radar":{"state":"active","can_install":true}}');
             spawns++; return spawnImpl();
         },

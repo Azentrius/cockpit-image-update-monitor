@@ -164,6 +164,7 @@ and tested.
 |---|---|
 | `plugin/diun.js` has ~1,300 lines in one file | split into ES modules (`<script type="module">` works under Cockpit's CSP without a build step): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
 | Package name `diun` (URL `/cockpit/@host/diun`) no longer fits the scope | rename to `image-updates`, `install.sh` removes the old directory; bookmarks change; the units (`diun-radar`, `diun-cleanup`) and `/usr/local/lib/diun-radar` would follow |
+| The shared `icons.js` has no `ban` yet | add it there (Cron Jobs), then drop the copy in `diun.js` |
 | Changed unit templates do not reach existing installations | `install.sh` only reports the difference; an opt-in `diun-deps.sh update units` with a backup |
 | Radar run fixed at `:17` every 6 h | `RandomizedDelaySec=` against registry peaks |
 | Documentation of the JSON formats | update `docs/INTERNALS.md` and the fixtures in `test/fixtures/` with every format change |

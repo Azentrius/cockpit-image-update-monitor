@@ -48,6 +48,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
             calls.push({ cmd, opts });
             if (cmd[0].endsWith("diun-inventory.py")) return Promise.resolve(inventory);
             if (cmd[1] === "check") return Promise.resolve(JSON.stringify(typeof deps === "function" ? deps() : deps));
+            if (cmd[1] === "backups") return Promise.resolve(JSON.stringify({ dumps: [], images: [], ops: [] }));
             // install/start: scripted stream + result
             let streamCb = null;
             const p = new Promise((resolve, reject) => {
