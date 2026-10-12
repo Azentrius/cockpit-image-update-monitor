@@ -30,7 +30,9 @@ PLUGIN_DIR=$DEST/usr/share/cockpit/diun
 LIB_DIR=$DEST/usr/local/lib/diun-radar
 UNIT_SRC_DIR=$LIB_DIR/systemd
 UNIT_DIR=/etc/systemd/system
-PLUGIN_FILES=(manifest.json po.manifest.de.js index.html diun.js diun.css)
+PLUGIN_FILES=(manifest.json po.manifest.de.js index.html diun.js diun.css
+              azentrius.css azentrius-theme.js icons.js
+              DMSans.woff2 DMSerifDisplay-Regular.woff2 DMSerifDisplay-Italic.woff2 OFL.txt)
 LIB_SCRIPTS=(diun-inventory.py diun-versions.py diun-update.py diun-deps.sh)
 LIB_MODULES=(diunlib.py)
 UNITS=(diun-radar.service diun-radar.timer diun-cleanup.service diun-cleanup.timer)

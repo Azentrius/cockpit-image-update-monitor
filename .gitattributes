@@ -3,6 +3,7 @@
 * text=auto eol=lf
 
 *.png binary
+*.woff2 binary
 
 # Not part of the release tarball (git archive): repository tooling only.
 /.claude/       export-ignore
