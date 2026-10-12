@@ -33,8 +33,8 @@ Done in 0.7.0 (see [CHANGELOG](CHANGELOG.md)):
   update for that project, daily via `diun-cleanup.timer` (set up on request), preview and “Clean up
   now” in the backups tab.
 - `from_version` / `to_version` in the history.
-- End-to-end test for MariaDB and MySQL; offline tests for `diun-update.py`; shellcheck, pyflakes and
-  `systemd-analyze verify` in CI; systemd units as files in `systemd/`.
+- End-to-end test for MariaDB and MySQL; offline tests for `diun-update.py`; lint (shellcheck, ruff), the browser
+  preview and `systemd-analyze verify` in CI; systemd units as files in `systemd/`.
 
 Decided on the way:
 - The cleanup after an update stays inside that project and image; only the timer and “Clean up now”

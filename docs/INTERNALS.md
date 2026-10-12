@@ -287,7 +287,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend |
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
-| `tools/lint.sh` | shellcheck, pyflakes, `systemd-analyze verify` (CI) |
+| `tools/check-units.sh` | `systemd-analyze verify` for the unit templates (CI lint step, next to shellcheck and ruff) |
 | `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL) |
 
 The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds

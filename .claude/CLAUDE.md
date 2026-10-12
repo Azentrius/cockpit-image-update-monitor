@@ -38,6 +38,30 @@ The same in every Azentrius repository.
 Here the German translation is `I18N.de` in `plugin/diun.js`, `plugin/po.manifest.de.js` and the
 German half of the helpers' `say(de, en)` / `msg de en` messages.
 
+## Repository baseline
+
+The same in every Azentrius repository; keep it when changing the repository or its settings.
+
+- **Security.** `SECURITY.md` with private vulnerability reporting; secret scanning with push
+  protection; Dependabot alerts and security updates; Dependabot version updates for every
+  ecosystem in use and for GitHub Actions; CodeQL default setup.
+- **Branches and tags.** Ruleset `main`: pull request, squash only, linear history, no deletion or
+  force push, required check `test`. Ruleset `release tags`: `v*` cannot be deleted or moved.
+- **CI.** The job `test` runs every test and every lint on each push and pull request. Actions are
+  pinned by commit SHA with the version as a comment; checkouts use `persist-credentials: false`;
+  the token is read-only unless a job needs more. Check tools are pinned as well, so Dependabot keeps
+  them current.
+- **Releases.** Only the `release` workflow makes releases, on request, from `main`: it checks the
+  version against the code and the existing tags, runs all tests, builds the artifact with
+  `SHA256SUMS`, signs a build provenance (`gh attestation verify`) and takes the notes from
+  `CHANGELOG.md`. Releases are immutable. Files that are not for users stay out of the artifact.
+- **Licensing.** `LICENSE` in the root; `NOTICE` for third-party material.
+
+Here: check tools in `test/requirements.txt` (pip) and `test/package.json` (npm); lint is
+`shellcheck --severity=warning`, `ruff check` (Python 3.8 syntax, `ruff.toml`) and
+`tools/check-units.sh` (`systemd-analyze verify`); the artifact is
+`git archive` of the repository minus `export-ignore` (`.gitattributes`).
+
 ## Layout
 
 ```
@@ -55,7 +79,7 @@ test/                         offline tests + e2e-server.sh
 tools/preview/                the plugin in a browser with test data, screenshots
 tools/check-version.sh        version in diun.js = ?v= in index.html = section in CHANGELOG.md
 tools/release-notes.sh        notes for a release from CHANGELOG.md
-tools/lint.sh                 shellcheck (warnings), pyflakes, systemd-analyze verify
+tools/check-units.sh          systemd-analyze verify for systemd/ (part of the CI lint step)
 .github/workflows/            test (every push and PR, incl. lint), release (on request)
 ```
 
@@ -63,9 +87,11 @@ tools/lint.sh                 shellcheck (warnings), pyflakes, systemd-analyze v
 
 ```bash
 cd test && npm ci && ./run-all.sh              # all offline tests (Python + jsdom), must be green
-sh tools/lint.sh                               # lint, must be green (needs shellcheck, pyflakes, systemd)
+pip install -r test/requirements.txt           # pinned check tools: shellcheck, ruff, playwright
+shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh && ruff check .   # lint, as in CI
+sh tools/check-units.sh                        # systemd-analyze verify for systemd/, as in CI
 python3 tools/preview/build.py                 # preview: tools/preview/out/diun/index.html?lang=de
-python3 tools/preview/shoot.py /tmp/shots      # screenshots (playwright + chromium), checks JS errors + phone width
+python3 tools/preview/shoot.py /tmp/shots      # screenshots (English UI; default output docs/img), checks JS errors + phone width
 DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging directory
 ```
 
@@ -143,8 +169,6 @@ DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging 
   that project and image, so the end-to-end test never deletes other data; the global run is only
   tested with `--dry-run` there. Unknown keys stop it – a new key (e.g. a token for stage 3) has to be
   added to `RULES` or the parser.
-- **pyflakes ignores `# noqa`**: an unused local (e.g. a lock handle) fails the lint; the update lock
-  therefore lives in a module global.
 - **Cockpit:**
   - `superuser: "try"` without admin rights gives errors with `problem: "access-denied"`, or exit 77
     from our helpers.

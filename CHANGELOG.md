@@ -29,7 +29,9 @@ Stage 1.1: cleanup rules, radar runs on demand, versions in the history.
 - **Tests:** offline tests for `diun-update.py` (fake Docker, compose and systemctl), the new plugin
   parts, and `diun-deps.sh check`. The end-to-end test covers MariaDB and MySQL dumps, a wrong
   password and the new flows.
-- **CI** also runs `tools/lint.sh`: shellcheck, pyflakes and `systemd-analyze verify`.
+- **CI:** lint (shellcheck, ruff), the preview in a browser with screenshots, and
+  `systemd-analyze verify` for the unit templates (`tools/check-units.sh`) run on every push and pull
+  request.
 ## 0.6.2 – 2026-10-12
 
 Maintenance release: the add-on is unchanged, the release is verifiable.

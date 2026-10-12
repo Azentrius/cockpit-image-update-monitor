@@ -159,16 +159,16 @@
   }
  },
  "log": [
-  "Update postgres:16-alpine in Projekt glitchtip: Services postgres\n",
-  "Datenbank-Dump von glitchtip-postgres (postgres) …\n",
+  "Updating postgres:16-alpine in project glitchtip: services postgres\n",
+  "Dumping database glitchtip-postgres (postgres) …\n",
   "  -> /var/backups/image-updates/dumps/glitchtip/20261012-033000_glitchtip-postgres.sql.gz (3.1 MB, 2 s)\n",
-  "Rollback-Sicherung: postgres:rollback-20261012-033000\n",
+  "Rollback image: postgres:rollback-20261012-033000\n",
   "+ docker compose -p glitchtip --project-directory /opt/glitchtip -f /opt/glitchtip/docker-compose.yml pull --ignore-pull-failures postgres\n",
   "+ docker compose -p glitchtip --project-directory /opt/glitchtip -f /opt/glitchtip/docker-compose.yml up -d --no-deps --pull never postgres\n",
   " Container glitchtip-postgres  Recreated\n",
-  "Warte auf glitchtip-postgres (max. 180 s) …\n",
-  "Alle Container laufen: glitchtip-postgres=running/healthy\n",
-  "Update erfolgreich.\n",
+  "Waiting for glitchtip-postgres (max 180 s) …\n",
+  "All containers running: glitchtip-postgres=running/healthy\n",
+  "Update successful.\n",
   "@@RESULT {\"op\": \"20261012-033000-glitchtip-postgres\", \"status\": \"ok\", \"rollback\": \"postgres:rollback-20261012-033000\", \"dumps\": [\"glitchtip/20261012-033000_glitchtip-postgres.sql.gz\"]}\n"
  ]
 }

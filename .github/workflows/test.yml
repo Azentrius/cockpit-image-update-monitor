@@ -20,6 +20,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Check tools (pinned in test/requirements.txt)
+        run: pip install -r test/requirements.txt
+      - name: Lint (shellcheck, ruff, systemd units)
+        run: |
+          shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh
+          ruff check .
+          sh tools/check-units.sh
       - name: Offline tests (Python helpers, plugin under jsdom, version and changelog)
         run: |
           cd test
@@ -27,8 +34,15 @@ jobs:
           bash run-all.sh
       - name: Installer into a staging directory
         run: DESTDIR="$RUNNER_TEMP/stage" bash install.sh
-      - name: Lint (shellcheck, pyflakes, systemd units)
+      - name: Browser for the preview
+        run: python -m playwright install --with-deps chromium
+      - name: Preview in a browser (no JavaScript errors, no sideways scrolling on a phone) and screenshots
         run: |
-          python -m pip install --quiet pyflakes==3.2.0
-          shellcheck --version | head -n 2
-          sh tools/lint.sh
+          python tools/preview/build.py
+          python tools/preview/shoot.py test/shots
+      - name: Keep screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots
+          path: test/shots/

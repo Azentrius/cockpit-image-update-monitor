@@ -4,7 +4,7 @@ A [Cockpit](https://cockpit-project.org/) add-on that shows three things for eve
 Updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button.
 Everything that runs as root for this is a small, fixed set of helper scripts. The browser makes no external requests, and Diun sees Docker only through a read-only socket proxy.
 
-![Overview: Configured, Installed, Newest version](docs/img/updates-en.png)
+![Overview: Configured, Installed, Newest version](docs/img/updates.png)
 
 **Contents**
 
@@ -422,18 +422,26 @@ tools/preview/     the plugin in a normal browser with test data + screenshots (
 tools/probe-versions.py   diagnosis: which version sources a host offers (read-only)
 tools/check-version.sh    version in diun.js, index.html and CHANGELOG.md agree
 tools/release-notes.sh    release notes from CHANGELOG.md
-tools/lint.sh      shellcheck, pyflakes, systemd-analyze verify
+tools/check-units.sh      systemd-analyze verify for the unit templates
 docs/              INTERNALS.md (interfaces, formats), images
 ```
 
-**Tests** (no Docker, no root, no network; the `test` workflow runs them and `tools/lint.sh` on every push and pull request):
+**Tests** (no Docker, no root, no network; the `test` workflow runs them on every push and pull request):
 
 ```bash
 cd test && npm ci && ./run-all.sh
-sh tools/lint.sh      # needs shellcheck, pyflakes and systemd
 ```
 
-Covered, among other things:
+**Lint** (the `test` workflow runs it too; the tools are pinned in `test/requirements.txt`):
+
+```bash
+pip install -r test/requirements.txt
+shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh
+ruff check .
+sh tools/check-units.sh      # unit templates (needs systemd)
+```
+
+Covered by the tests, among other things:
 - version sources and tag schemes
 - Docker Hub and registry matching (with fakes)
 - cache and registry outage
