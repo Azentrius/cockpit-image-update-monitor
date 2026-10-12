@@ -3,7 +3,7 @@
 # files, systemd-analyze for the unit files. The test workflow runs this on
 # every push and pull request.
 #   sh tools/lint.sh
-# Needs shellcheck, pyflakes (python3 -m pip install pyflakes) and systemd.
+# Needs shellcheck, pyflakes (python3 -m pip install pyflakes==3.2.0) and systemd.
 # SPDX-License-Identifier: Apache-2.0
 set -u
 cd "$(dirname "$0")/.." || exit 1
