@@ -882,7 +882,8 @@
         radarRunning = true;
         renderRadarButton();
         let failed = null;
-        spawnHelper([UPDATE_CMD, "radar"], "require")
+        // Native promise around Cockpit's: catch/finally everywhere, also for a throwing spawn.
+        Promise.resolve().then(() => spawnHelper([UPDATE_CMD, "radar"], "require"))
             .catch((ex) => {
                 ex = ex || {};
                 failed = isNoAdmin(ex) ? t("dialog.noAdmin")
