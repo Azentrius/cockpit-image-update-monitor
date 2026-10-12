@@ -1,68 +1,70 @@
-# Interna: Schnittstellen, Formate, Abläufe
+# Internals: interfaces, formats, flows
 
-Referenz für alle, die am Code weiterarbeiten. Die Helfer sind die **einzige** Brücke zwischen Browser und root. Wer ein Format ändert, ändert Helfer, Plugin, Fixtures (`test/fixtures/`) und dieses Dokument zusammen.
+Reference for everyone working on the code. The helpers are the **only** bridge between the browser and
+root. Whoever changes a format changes helper, plugin, fixtures (`test/fixtures/`) and this document
+together.
 
-## Pfade
+## Paths
 
-| Pfad | Inhalt | Besitzer / Rechte |
+| Path | Content | Owner / mode |
 |---|---|---|
-| `/usr/share/cockpit/diun/` | Plugin | root, 644 |
-| `/usr/local/lib/diun-radar/` | Helfer (`*.py`, `*.sh` 755, `diunlib.py` 644), Sicherungen von `install.sh` (`backup-*`, 700) | root |
-| `/var/lib/diun-radar/versions.json` | Ergebnis des Versions-Radars | root, 644 (StateDirectory) |
-| `/var/lib/diun/events.jsonl` | Diun-Ereignisse (vom Notifier **im Container** geschrieben) | im Diun-Container beschreibbar → nur Daten, nie Code |
-| `/var/lib/diun/dismissed.json` | vom Plugin „Erledigt“ markierte Diun-Ereignisse | Daten |
-| `/var/backups/image-updates/` | `dumps/<projekt>/*.sql.gz`, `operations.jsonl` | root, 700 / 600 |
-| `/opt/diun/` | Diun-Stack (`docker-compose.yml`, `diun.yml`), von `diun-deps.sh install diun` | root |
-| `/etc/systemd/system/diun-radar.{service,timer}` | Radar alle 6 h (`*-*-* 00/6:17:00`) | root |
-| `/run/lock/diun-{inventory,update,deps}.lock` | `flock`-Sperren | root |
+| `/usr/share/cockpit/diun/` | plugin | root, 644 |
+| `/usr/local/lib/diun-radar/` | helpers (`*.py`, `*.sh` 755, `diunlib.py` 644), backups made by `install.sh` (`backup-*`, 700) | root |
+| `/var/lib/diun-radar/versions.json` | result of the version radar | root, 644 (StateDirectory) |
+| `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
+| `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
+| `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl` | root, 700 / 600 |
+| `/opt/diun/` | Diun stack (`docker-compose.yml`, `diun.yml`), from `diun-deps.sh install diun` | root |
+| `/etc/systemd/system/diun-radar.{service,timer}` | radar every 6 h (`*-*-* 00/6:17:00`) | root |
+| `/run/lock/diun-{inventory,update,deps}.lock` | `flock` locks | root |
 
-## Aufrufe aus dem Plugin
+## Calls from the plugin
 
-Alle über `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] })`:
-- Lesen (Inventar, Check, Plan, Backups): `superuser: "try"`, `err: "message"`.
-- Aktionen: `superuser: "require"`, `err: "out"`, Ausgabe wird live gestreamt.
+All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] })`:
+- Reading (inventory, check, plan, backups): `superuser: "try"`, `err: "message"`.
+- Actions: `superuser: "require"`, `err: "out"`, the output is streamed live.
 
-| Helfer | Aufruf | Art | Ausgabe |
+| Helper | Call | Kind | Output |
 |---|---|---|---|
-| `diun-inventory.py` | (keine Argumente) | lesen | JSON-Zeilen, siehe unten |
-| `diun-deps.sh` | `check` | lesen | ein JSON-Objekt |
-| | `install skopeo` / `install diun` / `install radar` / `start diun` | Aktion | Text, zweisprachig |
-| `diun-update.py` | `plan <container>` | lesen | ein JSON-Objekt |
-| | `update <container> [--no-dump]` | Aktion | Text + letzte Zeile `@@RESULT {…}` |
-| | `rollback <op-id>` | Aktion | Text + `@@RESULT {…}` |
-| | `backups` | lesen | ein JSON-Objekt |
-| | `delete-dump <projekt>/<datei>.sql.gz` | Aktion | Text |
-| | `delete-image <repo>:rollback-JJJJMMTT-HHMMSS` | Aktion | Text (`docker rmi`, ohne `-f`) |
-| `diun-versions.py` | `--output FILE` (systemd), `--table`, ohne Argument JSON-Zeilen | Timer / Diagnose | – |
+| `diun-inventory.py` | (no arguments) | read | JSON lines, see below |
+| `diun-deps.sh` | `check` | read | one JSON object |
+| | `install skopeo` / `install diun` / `install radar` / `start diun` | action | text, two languages |
+| `diun-update.py` | `plan <container>` | read | one JSON object |
+| | `update <container> [--no-dump]` | action | text + last line `@@RESULT {…}` |
+| | `rollback <op-id>` | action | text + `@@RESULT {…}` |
+| | `backups` | read | one JSON object |
+| | `delete-dump <project>/<file>.sql.gz` | action | text |
+| | `delete-image <repo>:rollback-YYYYMMDD-HHMMSS` | action | text (`docker rmi`, without `-f`) |
+| `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – |
 
-Eingaben werden per Regex geprüft:
+Inputs are checked by regex:
 
-| Eingabe | Regex |
+| Input | Regex |
 |---|---|
-| Container-Name | `^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$` |
-| Vorgangs-ID | `^\d{8}-\d{6}-<name>$` |
-| Dump-Pfad | `^<name>/\d{8}-\d{6}_<name>\.sql\.gz$` + `realpath`-Prüfung |
-| Rollback-Tag | `^rollback-\d{8}-\d{6}$` |
+| container name | `^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$` |
+| operation ID | `^\d{8}-\d{6}-<name>$` |
+| dump path | `^<name>/\d{8}-\d{6}_<name>\.sql\.gz$` + `realpath` check |
+| rollback tag | `^rollback-\d{8}-\d{6}$` |
 
-`DIUN_LANG` wählt nur die Sprache der Textausgabe.
+`DIUN_LANG` only selects the language of the text output.
 
-### Exit-Codes (alle Helfer)
+### Exit codes (all helpers)
 
-| Code | Bedeutung |
+| Code | Meaning |
 |---|---|
-| 0 | ok (auch `nochange`) |
-| 1 | unerwarteter Fehler eines Unterbefehls (stderr in der Ausgabe) |
-| 2 | nicht gefunden / nicht möglich (Container, Vorgang, Rollback-Image weg, nicht aktualisierbar) |
-| 3 | abgelehnt (schon zurückgerollt; Datei/Container existiert bei `install`) |
-| 4 | nach Update/Rollback laufen die Container nicht stabil |
-| 5 | vor jeder Änderung abgebrochen (Dump fehlgeschlagen, zu wenig Platz, DB läuft nicht) |
-| 64 | falscher Aufruf |
-| 75 | Sperre belegt (läuft schon) |
-| 77 | keine root-Rechte |
+| 0 | ok (also `nochange`) |
+| 1 | unexpected error of a subcommand (stderr in the output) |
+| 2 | not found / not possible (container, operation, rollback image gone, not updatable) |
+| 3 | refused (already rolled back; file/container exists on `install`) |
+| 4 | after update/rollback the containers do not run stably |
+| 5 | stopped before any change (dump failed, too little space, database not running) |
+| 64 | wrong call |
+| 75 | lock taken (already running) |
+| 77 | no root rights |
 
-## Formate
+## Formats
 
-### Inventar – eine Zeile je laufendem Container
+### Inventory – one line per running container
 
 ```json
 {"name": "glitchtip-postgres", "image": "postgres", "tag": "16-alpine",
@@ -72,13 +74,13 @@ Eingaben werden per Regex geprüft:
  "project": "glitchtip", "service": "glitchtip-postgres", "managed": true}
 ```
 
-- `image` ist das Repo ohne Tag, so wie es in der Compose-Datei steht.
-- `version_src` ist `tag`, `env:<NAME>` oder `null`. Label- und Digest-Quellen kennt nur der Radar.
-- `pulled` bedeutet: Der lokale Tag zeigt auf ein anderes Image als das laufende.
-- `managed` bedeutet: Die Compose-Labels für Projekt, Service, Arbeitsverzeichnis und Dateien sind vorhanden.
-- Bei Dockers containerd-Image-Store ist `imgid` gleich dem Index-Digest. Das ist normal.
+- `image` is the repo without the tag, as written in the compose file.
+- `version_src` is `tag`, `env:<NAME>` or `null`. Only the radar knows the label and digest sources.
+- `pulled` means: the local tag points to a different image than the running one.
+- `managed` means: the compose labels for project, service, working directory and files are present.
+- With Docker's containerd image store `imgid` equals the index digest. That is normal.
 
-### `versions.json` (Radar)
+### `versions.json` (radar)
 
 ```json
 {"generated": "2026-10-12T02:17:34Z",
@@ -103,22 +105,22 @@ Eingaben werden per Regex geprüft:
  }]}
 ```
 
-| Feld | Bedeutung |
+| Field | Meaning |
 |---|---|
-| `installed` | je **Image-ID**, auch für das neuere, schon gezogene Image. `src` ist `tag`, `env:<NAME>`, `label` oder `digest`. Digest-Treffer sind der Cache für den nächsten Lauf: Treffer dauerhaft, `version: null` wird nach 7 Tagen neu versucht. |
-| `versions[<installierte Version>]` | neuere Tags im Schema der installierten Version. `status: "unknown"`, wenn es kein passendes Schema gibt (z. B. pgvector `pg17` mit `PG_VERSION` 17.10). |
-| `by_tag` | Vergleich mit dem konfigurierten Tag selbst. Nur wenn der Tag Zahlen enthält; das Plugin nutzt ihn als Rückfall. |
-| `reach` | Stufen, die der konfigurierte Tag per Update-Knopf liefert. |
-| `newest` | höchster schlichter Versions-Tag. Wird angezeigt, wenn die installierte Version unbekannt ist. |
-| `status` | `major`, `minor`, `patch`, `current`, `unknown` oder `error`, zum Sortieren und für die Tabelle. |
-| `stale` / `error` | Registry-Fehler in diesem Lauf. Der Rest des Eintrags stammt aus dem letzten guten Lauf. |
+| `installed` | per **image ID**, also for the newer image that is already pulled. `src` is `tag`, `env:<NAME>`, `label` or `digest`. Digest matches are the cache for the next run: hits are kept for good, `version: null` is retried after 7 days. |
+| `versions[<installed version>]` | newer tags in the scheme of the installed version. `status: "unknown"` when there is no matching scheme (e.g. pgvector `pg17` with `PG_VERSION` 17.10). |
+| `by_tag` | comparison with the configured tag itself. Only when the tag contains numbers; the plugin uses it as a fallback. |
+| `reach` | levels the configured tag delivers with the Update button. |
+| `newest` | highest plain version tag. Shown when the installed version is unknown. |
+| `status` | `major`, `minor`, `patch`, `current`, `unknown` or `error`, for sorting and for the table. |
+| `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. |
 
-So rechnet das Plugin:
+How the plugin computes:
 
 ```
-installiert = inventar.version  ||  versions.installed[imgid].version
-vergleich   = versions.versions[installiert]  (falls fehlt oder "unknown": by_tag)
-neuere      = Chips patch/minor/major; gefüllt wenn in reach, sonst umrandet; db+major = grau
+installed = inventory.version  ||  versions.installed[imgid].version
+compare   = versions.versions[installed]  (if missing or "unknown": by_tag)
+newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+major = grey
 ```
 
 ### `plan` (diun-update.py)
@@ -134,25 +136,30 @@ neuere      = Chips patch/minor/major; gefüllt wenn in reach, sonst umrandet; d
  "free_bytes": 84654432256, "config_changed": false, "pulled": false, "old_image": "sha256:…"}
 ```
 
-- `reason`, wenn nicht aktualisierbar: `not-compose`, `compose-file-missing` (+`missing`), `digest-pinned`, `built-locally` oder `compose-config-error` (+`detail`).
-- `services`: alle Services des Projekts mit **demselben** Image-Verweis.
-- `dbs`: alle Datenbank-Container des Projekts.
-  - `kind`: `postgres` oder `mysql`, wenn der Befehl den Server startet; `unsupported` für redis/valkey/mongo/clickhouse … (kein Dump).
-  - `size`: nur Postgres, Summe von `pg_database_size`.
-- `config_changed`: `docker compose config --hash` weicht vom Label `com.docker.compose.config-hash` ab. Die Änderung wird mit ausgerollt.
+- `reason` when not updatable: `not-compose`, `compose-file-missing` (+`missing`), `digest-pinned`,
+  `built-locally` or `compose-config-error` (+`detail`).
+- `services`: all services of the project with the **same** image reference.
+- `dbs`: all database containers of the project.
+  - `kind`: `postgres` or `mysql` when the command starts the server; `unsupported` for
+    redis/valkey/mongo/clickhouse … (no dump).
+  - `size`: Postgres only, sum of `pg_database_size`.
+- `config_changed`: `docker compose config --hash` differs from the label
+  `com.docker.compose.config-hash`. The change is rolled out as well.
 
-### `@@RESULT` (letzte Zeile von `update` / `rollback`)
+### `@@RESULT` (last line of `update` / `rollback`)
 
 ```
 @@RESULT {"op": "20261012-015025-imgupd-test-db", "status": "ok|nochange|failed",
-          "rollback": "repo:rollback-20261012-015025", "dumps": ["projekt/…sql.gz"]}
+          "rollback": "repo:rollback-20261012-015025", "dumps": ["project/…sql.gz"]}
 ```
 
-Das Plugin blendet diese Zeile im Log aus und wertet sie aus. Bei `failed` (Exit 4) bietet es den Rollback mit `op` an.
+The plugin hides this line in the log and evaluates it. On `failed` (exit 4) it offers the rollback
+with `op`.
 
 ### `operations.jsonl`
 
-Eine JSON-Zeile je Vorgang. Spätere Zeilen mit derselben `id` ergänzen frühere; so markiert ein Rollback den Vorgang mit `rolled_back`, `rollback_ts` und `rollback_status`.
+One JSON line per operation. Later lines with the same `id` complete earlier ones; this is how a
+rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_status`.
 
 ```json
 {"id": "20261012-015025-imgupd-test-db", "ts": "…", "kind": "update", "container": "imgupd-test-db",
@@ -162,7 +169,9 @@ Eine JSON-Zeile je Vorgang. Spätere Zeilen mit derselben `id` ergänzen früher
  "rollback": "imgupd-test/pg:rollback-20261012-015025", "dumps": ["imgupd-test/…sql.gz"], "status": "failed"}
 ```
 
-`backups` liefert die letzten 30 Vorgänge mit zusätzlich `can_rollback`, ohne Pfade und Image-IDs. Dazu kommen `dumps[]` (`path`, `project`, `container`, `size`, `mtime`), `images[]` (`ref`, `id`, `size`, `created`, `in_use`), `dump_bytes`, `free_bytes` und `dir`.
+`backups` returns the last 30 operations, with `can_rollback` added and without paths and image IDs.
+On top come `dumps[]` (`path`, `project`, `container`, `size`, `mtime`), `images[]` (`ref`, `id`,
+`size`, `created`, `in_use`), `dump_bytes`, `free_bytes` and `dir`.
 
 ### `diun-deps.sh check`
 
@@ -174,11 +183,11 @@ Eine JSON-Zeile je Vorgang. Spätere Zeilen mit derselben `id` ergänzen früher
  "radar":  {"state": "active|inactive|missing", "can_install": true}}
 ```
 
-- `diun.managed`: `/opt/diun/docker-compose.yml` existiert.
-- `diun.events`: `events.jsonl` ist nicht leer.
-- `install diun` ist nur auf frischen Systemen möglich: Abbruch, wenn `/opt/diun` oder ein Diun-Container existiert.
+- `diun.managed`: `/opt/diun/docker-compose.yml` exists.
+- `diun.events`: `events.jsonl` is not empty.
+- `install diun` is only possible on fresh systems: it stops if `/opt/diun` or a Diun container exists.
 
-### Diun-Ereignis (`events.jsonl`)
+### Diun event (`events.jsonl`)
 
 ```json
 {"ts": "2026-10-11T10:00:16Z", "status": "update", "hostname": "docker-host", "provider": "docker",
@@ -186,33 +195,39 @@ Eine JSON-Zeile je Vorgang. Spätere Zeilen mit derselben `id` ergänzen früher
  "platform": "linux/amd64", "hub_link": "https://hub.docker.com/r/ollama/ollama"}
 ```
 
-- Geschrieben vom Script-Notifier `diun-notify.sh` im Diun-Container: eine Zeile mit einem einzigen `printf`, damit parallele Notifier sich nicht vermischen.
-- Diun prüft alle 6 h (`0 */6 * * *`) mit `firstCheckNotif: true`.
+- Written by the script notifier `diun-notify.sh` inside the Diun container: one line with a single
+  `printf`, so that parallel notifiers do not mix.
+- Diun checks every 6 h (`0 */6 * * *`) with `firstCheckNotif: true`.
 
-## Plugin-Interna
+## Plugin internals
 
-- **Kein Build-Schritt**, kein Framework, nur `cockpit.js` aus `../base1/`.
-- **Sprache:** `../base1/po.js` setzt `cockpit.language`. `de*` → Deutsch, sonst Englisch.
-  - Texte stehen in `I18N.en` / `I18N.de` in `diun.js`. Statische Texte im HTML tragen `data-i18n`.
-  - Der Menüeintrag wird über `po.manifest.de.js` übersetzt.
-- **Laden:** `safeLoad()` lädt nie doppelt; eine Anfrage während des Ladens wird einmal nachgeholt.
-  - `cockpit.file().watch()` löst nur bei **geändertem** Tag neu aus.
-  - Hintergrund: Am 12.10.2026 hat ein Watch-Read-Kreislauf Hunderte Inventar-Prozesse gestartet.
-- **Dialog:** ein `<dialog>` für alles (Installieren, Update, Rollback, Löschen). Ablauf: `dlg.open` → `confirmAndRun` → `dlg.run` → `onDone`.
-  - Ein Plan, der eintrifft, nachdem der Dialog geschlossen wurde, wird verworfen (`planSeq`).
-- **Sortierung:** Update verfügbar → Ausrollen ausstehend → Neue Version → unbekannt → aktuell.
+- **No build step**, no framework, only `cockpit.js` from `../base1/`.
+- **Version:** `const VERSION` in `diun.js`; `index.html` loads `diun.js` and `diun.css` with
+  `?v=<version>`. `tools/check-version.sh` keeps them and `CHANGELOG.md` in step.
+- **Language:** `../base1/po.js` sets `cockpit.language`. `de*` → German, otherwise English.
+  - Texts live in `I18N.en` / `I18N.de` in `diun.js`. Static texts in the HTML carry `data-i18n`.
+  - The menu entry is translated through `po.manifest.de.js`.
+- **Loading:** `safeLoad()` never loads twice; a request during a load is repeated once afterwards.
+  - `cockpit.file().watch()` triggers a reload only on a **changed** tag.
+  - Background: on 2026-10-12 a watch/read loop started hundreds of inventory processes.
+- **Dialog:** one `<dialog>` for everything (install, update, rollback, delete). Flow: `dlg.open` →
+  `confirmAndRun` → `dlg.run` → `onDone`.
+  - A plan that arrives after the dialog was closed is dropped (`planSeq`).
+- **Sorting:** update available → roll-out pending → new version → unknown → up to date.
 
 ## Tests
 
-| Datei | Prüft |
+| File | Checks |
 |---|---|
-| `test/radar_test.py` | `diunlib` (Versionsquellen, Erreichbarkeit), Radar (Schema, Vergleich, Hub-/Registry-Abgleich mit Fakes, Cache, Ausfall) |
-| `test/inv_test.py` | Inventar mit Fake-Docker |
-| `test/loading.js` | Ladeanzeige, Doppelladen, Fehlerfälle |
-| `test/i18n-deps.js` | DE/EN, Voraussetzungs-Panel, Installieren-Dialog |
-| `test/update-backups.js` | Update-Knöpfe, Plan-Dialog, Dump-Häkchen, Rollback-Angebot, Backups-Tab, Löschen |
-| `test/version-cols.js` | Spalten Konfiguriert / Installiert / Neueste, Chips, Legende |
-| `test/harness.js` | druckt die ganze Tabelle (Smoke-Test, auch zum Ansehen) |
-| `test/e2e-server.sh` | echter Docker-Host, Wegwerf-Projekt `imgupd-test` |
+| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, hub/registry match with fakes, cache, outage) |
+| `test/inv_test.py` | inventory with fake Docker |
+| `test/loading.js` | loading indicator, double loads, error cases |
+| `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
+| `test/update-backups.js` | update buttons, plan dialog, dump tick box, rollback offer, backups tab, delete |
+| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend |
+| `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
+| `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
+| `test/e2e-server.sh` | real Docker host, throw-away project `imgupd-test` |
 
-Die Fixtures in `test/fixtures/` stammen von einem echten Host. Hostnamen sind entfernt; `make_v2.py` erzeugt `inventory3.jsonl` und `versions2.json` aus `inventory2.jsonl`.
+The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds
+`inventory3.jsonl` and `versions2.json` from `inventory2.jsonl`.

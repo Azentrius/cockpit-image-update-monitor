@@ -172,5 +172,5 @@ check("error record keeps local version", (err["status"], err["installed"]["idg"
 merged = R.keep_last_good([err], [gl])[0]
 check("stale merge", (merged.get("stale"), merged["versions"]["6.1.8"]["minor"]), (True, "6.2.0"))
 
-print("\nALLE CHECKS OK" if not fails else f"\n{fails} FEHLER")
+print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)
