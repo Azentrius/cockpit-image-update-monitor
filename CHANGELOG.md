@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.2 – 2026-10-12
+
+Maintenance release: the add-on is unchanged, the release is verifiable.
+
+- **Build provenance:** the release tarball comes with a signed build provenance;
+  `gh attestation verify cockpit-image-update-monitor-0.6.2.tar.gz --repo Azentrius/cockpit-image-update-monitor`
+  checks that it was built by the release workflow from this repository.
+- **CI:** workflow actions pinned by commit SHA and kept current by Dependabot; checkouts keep no
+  token.
+
 ## 0.6.1 – 2026-10-12
 
 Semantic Versioning, English repository, CI and releases.
