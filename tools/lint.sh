@@ -19,11 +19,11 @@ python3 -m pyflakes lib test tools || fail=1
 # a finding. The copies get mode 644: a checkout may carry other modes, which
 # systemd-analyze would report as well.
 echo "== systemd-analyze verify"
-tmp=$(mktemp -d)
-cp systemd/*.service systemd/*.timer "$tmp/"
-chmod 644 "$tmp"/*
-out=$(systemd-analyze verify "$tmp"/* 2>&1)
-rm -rf "$tmp"
+tmp=$(mktemp -d) || exit 1
+cp systemd/*.service systemd/*.timer "${tmp:?}/"
+chmod 644 "${tmp:?}"/*
+out=$(systemd-analyze verify "${tmp:?}"/* 2>&1)
+rm -rf "${tmp:?}"
 if [ -n "$out" ]; then
     printf '%s\n' "$out"
     fail=1

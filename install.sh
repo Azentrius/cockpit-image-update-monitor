@@ -32,7 +32,7 @@ UNIT_DIR=/etc/systemd/system
 PLUGIN_FILES=(manifest.json po.manifest.de.js index.html diun.js diun.css)
 LIB_SCRIPTS=(diun-inventory.py diun-versions.py diun-update.py diun-deps.sh)
 LIB_MODULES=(diunlib.py)
-UNITS=(diun-radar.service diun-radar.timer)
+UNITS=(diun-radar.service diun-radar.timer diun-cleanup.service diun-cleanup.timer)
 
 DRY=0
 case "${1:-}" in

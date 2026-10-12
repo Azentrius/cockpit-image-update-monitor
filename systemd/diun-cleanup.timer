@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily cleanup of old dumps and unused rollback images
+
+[Timer]
+OnCalendar=*-*-* 04:40:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -7,6 +7,7 @@
 #   diun-deps.sh install diun     deploy Diun + read-only socket proxy to /opt/diun
 #   diun-deps.sh start diun       start the existing /opt/diun stack
 #   diun-deps.sh install radar    install and enable diun-radar.service/.timer
+#   diun-deps.sh install cleanup  install and enable diun-cleanup.service/.timer
 # Everything else is rejected. Existing files are never overwritten.
 #
 # Lives in /usr/local/lib/diun-radar (root-owned, never mounted into a
@@ -105,7 +106,7 @@ do_check() {
         sk_install=1
     fi
 
-    ra_state=missing; ra_install=0
+    ra_state=missing; ra_running=0; ra_install=0
     if [ -f "$UNIT_DIR/diun-radar.timer" ]; then
         if [ "$(systemctl is-active diun-radar.timer 2>/dev/null || true)" = active ]; then
             ra_state=active
@@ -113,9 +114,26 @@ do_check() {
             ra_state=inactive
         fi
     fi
+    # A oneshot run in progress is "activating".
+    if [ "$(systemctl is-active diun-radar.service 2>/dev/null || true)" = activating ]; then
+        ra_running=1
+    fi
     if [ -f "$LIB/diun-versions.py" ] && [ -f "$UNIT_SRC/diun-radar.service" ] \
        && command -v python3 >/dev/null 2>&1; then
         ra_install=1
+    fi
+
+    cl_state=missing; cl_install=0
+    if [ -f "$UNIT_DIR/diun-cleanup.timer" ]; then
+        if [ "$(systemctl is-active diun-cleanup.timer 2>/dev/null || true)" = active ]; then
+            cl_state=active
+        else
+            cl_state=inactive
+        fi
+    fi
+    if [ -f "$LIB/diun-update.py" ] && [ -f "$UNIT_SRC/diun-cleanup.service" ] \
+       && command -v python3 >/dev/null 2>&1; then
+        cl_install=1
     fi
 
     printf '{"root":%s,' "$(json_bool $is_root)"
@@ -126,8 +144,10 @@ do_check() {
         "$(json_bool $di_install)" "$(json_bool $di_start)"
     printf '"skopeo":{"state":%s,"version":%s,"can_install":%s},' \
         "$(json_str $sk_state)" "$(json_str "$sk_ver")" "$(json_bool $sk_install)"
-    printf '"radar":{"state":%s,"can_install":%s}}\n' \
-        "$(json_str $ra_state)" "$(json_bool $ra_install)"
+    printf '"radar":{"state":%s,"running":%s,"can_install":%s},' \
+        "$(json_str $ra_state)" "$(json_bool $ra_running)" "$(json_bool $ra_install)"
+    printf '"cleanup":{"state":%s,"can_install":%s}}\n' \
+        "$(json_str $cl_state)" "$(json_bool $cl_install)"
 }
 
 # ----------------------------------------------------------- installers ----
@@ -330,6 +350,18 @@ install_radar() {
     msg "Versions-Radar eingerichtet." "Version radar set up."
 }
 
+install_cleanup() {
+    [ -f "$LIB/diun-update.py" ] || die 2 \
+        "$LIB/diun-update.py fehlt." "$LIB/diun-update.py is missing."
+    command -v python3 >/dev/null 2>&1 || die 2 "python3 fehlt." "python3 is missing."
+    install_unit diun-cleanup.service
+    install_unit diun-cleanup.timer
+    run systemctl daemon-reload
+    run systemctl enable --now diun-cleanup.timer
+    msg "Tägliches Aufräumen eingerichtet. Regeln: /etc/image-updates.conf (ohne Datei die Standardwerte)." \
+        "Daily cleanup set up. Rules: /etc/image-updates.conf (defaults without the file)."
+}
+
 # ----------------------------------------------------------------- main ----
 cmd="${1:-}"; arg="${2:-}"
 
@@ -358,5 +390,6 @@ case "$cmd:$arg" in
     install:diun)   install_diun ;;
     start:diun)     start_diun ;;
     install:radar)  install_radar ;;
+    install:cleanup) install_cleanup ;;
     *) die 64 "Unbekannter Befehl: $cmd $arg" "Unknown command: $cmd $arg" ;;
 esac
