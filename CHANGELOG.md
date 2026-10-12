@@ -2,7 +2,8 @@
 
 ## 0.7.0 – 2026-10-12
 
-Stage 1.1: cleanup rules, radar runs on demand, versions in the history.
+Stage 1.1: cleanup rules, radar runs on demand, versions in the history; the shared Azentrius page
+frame.
 
 - **Cleanup rules.** Old dumps and unused rollback images are deleted by rules: keep the newest 3 dumps
   per database container, remove unused rollback images after 14 days. `/etc/image-updates.conf`
@@ -23,12 +24,34 @@ Stage 1.1: cleanup rules, radar runs on demand, versions in the history.
   shows “16.14 → 16.15”, the update result names both. Older entries show “—”.
 - **Fixed:** an update that stopped at a failing dump kept the dumps of the other databases of the
   project. It now removes them, so nothing is left behind.
+- **Azentrius page frame.** The page follows Cockpit's light/dark setting and uses the shared design
+  files. Nothing it does changed; helpers, formats, flows and texts stay.
+  - Header in one line: “Image updates *monitor*” (the suffix in DM Serif Display italic), the state
+    of the data and “Refresh” as the only filled button on the page, with its icon; while loading it
+    says “Loading …”.
+  - Tabs “Updates” and “Backups & dumps” with the keyboard as well (arrow keys, Home, End). Switching
+    loads nothing; both tabs load together and “Refresh” keeps the tab shown. Messages and “Missing
+    requirements” stand right under the tabs, in both tabs.
+  - Tables in cards; on phones every row becomes a block. Status in the shared status language with
+    its icon (hint, good, unknown); gold is no longer a status. The version chips keep their meaning.
+  - “Update”, “Roll out” and “Roll back” are outlined buttons with an icon, “Dismiss” and “Delete” icon
+    buttons. In dialogs the main action is filled and “Cancel” a link; red only confirms deleting.
+    “Run radar now” moved from the header into the card it belongs to.
+  - New signature in the foot: the word mark, “Image updates monitor 0.7.0” and the server's host
+    name.
+  - `azentrius.css`, `azentrius-theme.js`, `icons.js`, `DMSans.woff2`, `DMSerifDisplay-Regular.woff2`
+    and `OFL.txt` are byte-identical to the Cron Jobs add-on (pinned in `tools/design-files.sha256`);
+    `DMSerifDisplay-Italic.woff2` holds only the letters of “monitor”. Third-party material is listed
+    in `NOTICE`.
 - **systemd units** are plain files in `systemd/`. `install.sh` installs them as templates to
   `/usr/local/lib/diun-radar/systemd/`, `diun-deps.sh` copies them from there and never replaces
   units already set up; `install.sh` reports when they differ.
 - **Tests:** offline tests for `diun-update.py` (fake Docker, compose and systemctl), the new plugin
   parts, and `diun-deps.sh check`. The end-to-end test covers MariaDB and MySQL dumps, a wrong
   password and the new flows.
+- **Tests** for the page frame (header, tabs with mouse and keyboard, labels, buttons, signature), the
+  contrast of every colour pair in both themes and the shared design files. Screenshots light, dark
+  and on a phone.
 - **CI:** lint (shellcheck, ruff), the preview in a browser with screenshots, and
   `systemd-analyze verify` for the unit templates (`tools/check-units.sh`) run on every push and pull
   request.

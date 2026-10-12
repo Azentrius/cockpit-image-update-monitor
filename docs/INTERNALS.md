@@ -253,6 +253,18 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 ## Plugin internals
 
 - **No build step**, no framework, only `cockpit.js` from `../base1/`.
+- **Shared design files:** `azentrius.css` (tokens for light and dark, page frame, buttons, cards,
+  tables, labels, dialogs), `azentrius-theme.js` (sets `pf-v6-theme-dark` on `<html>` from Cockpit's
+  style, `shell:style`), `icons.js` (`window.AzIcons`), the fonts and `OFL.txt`. They are copies of
+  `src/` in Azentrius/cockpit-cronjobs, pinned in `tools/design-files.sha256` and never edited here;
+  `diun.css` holds only what this page needs on top. Icons are inline SVG from `icon(name)` in
+  `diun.js` (`ban` lives there too until the shared set has it).
+- **Frame:** header (`az-page-header`, the only `az-btn--primary` is Refresh), tabs (`az-tabs`,
+  WAI-ARIA keyboard), `#dm-status` and `#dm-deps` under the tabs, the panels, the signature (version,
+  host from `/etc/hostname`). Both tabs are loaded together with every load; switching loads nothing.
+- **Status labels:** update / roll-out pending / new version `az-label--info` + `info-circle`, up to
+  date `az-label--success` + `check-circle`, unknown `az-label` + `ban`. History results: successful
+  success, failed danger, aborted warning, no change and rolled back neutral.
 - **Version:** `const VERSION` in `diun.js`; `index.html` loads `diun.js` and `diun.css` with
   `?v=<version>`. `tools/check-version.sh` keeps them and `CHANGELOG.md` in step.
 - **Language:** `../base1/po.js` sets `cockpit.language`. `de*` → German, otherwise English.
@@ -285,6 +297,9 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/update-backups.js` | update buttons, plan dialog, dump tick box, rollback offer, backups tab, delete |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend |
+| `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
+| `test/contrast_test.py` | WCAG contrast of every colour pair the page uses, light and dark (text 4.5:1, borders and icons 3:1) |
+| `tools/check-design-files.sh` | the shared design files match `tools/design-files.sha256` |
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
 | `tools/check-units.sh` | `systemd-analyze verify` for the unit templates (CI lint step, next to shellcheck and ruff) |

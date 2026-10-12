@@ -67,6 +67,10 @@ Here: check tools in `test/requirements.txt` (pip) and `test/package.json` (npm)
 
 ```
 plugin/   the Cockpit package, installed to /usr/share/cockpit/diun/   (vanilla JS, NO build step)
+          azentrius.*, icons.js, DMSans/DMSerifDisplay-Regular.woff2, OFL.txt: shared design files,
+          byte-identical copies of src/ in Azentrius/cockpit-cronjobs (tools/design-files.sha256);
+          never edit them here – copy the new versions and update the list
+          DMSerifDisplay-Italic.woff2: only the letters of "monitor" (see "Useful knowledge")
 lib/      root helpers, installed to /usr/local/lib/diun-radar/
           diunlib.py          shared logic (tag scheme, version variables, reach)
           diun-inventory.py   inventory (on every load of the plugin)
@@ -81,6 +85,7 @@ tools/preview/                the plugin in a browser with test data, screenshot
 tools/check-version.sh        version in diun.js = ?v= in index.html = section in CHANGELOG.md
 tools/release-notes.sh        notes for a release from CHANGELOG.md
 tools/check-units.sh          systemd-analyze verify for systemd/ (part of the CI lint step)
+tools/check-design-files.sh   shared design files = tools/design-files.sha256 (part of run-all.sh)
 .github/workflows/            test (every push and PR, incl. lint), release (on request)
 ```
 
@@ -92,7 +97,7 @@ pip install -r test/requirements.txt           # pinned check tools: shellcheck,
 shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh && ruff check .   # lint, as in CI
 sh tools/check-units.sh                        # systemd-analyze verify for systemd/, as in CI
 python3 tools/preview/build.py                 # preview: tools/preview/out/diun/index.html?lang=de
-python3 tools/preview/shoot.py /tmp/shots      # screenshots (English UI; default output docs/img), checks JS errors + phone width
+python3 tools/preview/shoot.py /tmp/shots      # screenshots light, dark, phone (English UI; default docs/img), checks JS errors + phone width
 DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging directory
 ```
 
@@ -170,6 +175,13 @@ DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging 
   that project and image, so the end-to-end test never deletes other data; the global run is only
   tested with `--dry-run` there. Unknown keys stop it – a new key (e.g. a token for stage 3) has to be
   added to `RULES` or the parser.
+- **Design system:** `Azentrius/design-system` (private), `cockpit.md` and `components/`. Only
+  “Refresh” is `az-btn--primary` on the page; text buttons carry an icon; tools in rows are icon
+  buttons; `az-btn--danger` only confirms deleting. `[hidden]` needs `!important` in `diun.css`,
+  because the az classes set `display`. README screenshots come from the CI artifact `screenshots`.
+- **Italic subset** (fonttools with brotli or brotlicffi):
+  `pyftsubset DMSerifDisplay-Italic.ttf --text="monitor" --flavor=woff2 --output-file=DMSerifDisplay-Italic.woff2`,
+  the TTF from google/fonts `ofl/dmserifdisplay/`.
 - **Cockpit:**
   - `superuser: "try"` without admin rights gives errors with `problem: "access-denied"`, or exit 77
     from our helpers.
