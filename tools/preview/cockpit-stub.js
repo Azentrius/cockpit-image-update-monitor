@@ -50,7 +50,7 @@
                 return fakeProcess(JSON.stringify(FX.plans[argv[2]] || FX.plans["*"]), []);
             }
             if (tool === "diun-update.py" && verb === "backups") return fakeProcess(JSON.stringify(FX.backups), []);
-            if (tool === "diun-update.py" && verb.indexOf("delete-") === 0) return fakeProcess("", ["Gelöscht.\n"]);
+            if (tool === "diun-update.py" && verb.indexOf("delete-") === 0) return fakeProcess("", ["Deleted.\n"]);
             return fakeProcess("", FX.log);    // update / rollback / install: live log
         },
         transport: { wait() {} },

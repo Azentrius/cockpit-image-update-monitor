@@ -198,5 +198,5 @@ const BASE_SCRIPT = {
     console.log("\nEN German leftovers:", found.length ? found : "none");
     assert.deepStrictEqual(found, []);
 
-    console.log("\nALLE CHECKS OK");
+    console.log("\nALL CHECKS PASSED");
 })().catch((e) => { console.error("FEHLGESCHLAGEN:", e.stack || e.message); process.exit(1); });

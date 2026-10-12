@@ -1,235 +1,236 @@
-# Image-Updates monitor für Cockpit
+# Image updates monitor for Cockpit
 
-Ein [Cockpit](https://cockpit-project.org/)-Addon, das für jeden laufenden Docker-Container drei Dinge zeigt: was in der Compose-Datei steht, welche Version tatsächlich läuft und welche Version die neueste ist.
-Updates mit gleichem Tag (z. B. `latest`, `16-alpine`) lassen sich direkt aus Cockpit einspielen, mit Datenbank-Dump vorher, einer Rollback-Kopie des alten Images und einem Rollback auf Knopfdruck.
-Alles, was dabei als root läuft, ist ein kleines, festes Set von Hilfsskripten. Der Browser stellt keine externen Anfragen, und Diun sieht Docker nur über einen schreibgeschützten Socket-Proxy.
+A [Cockpit](https://cockpit-project.org/) add-on that shows three things for every running Docker container: what the compose file says, which version actually runs and which version is the newest.
+Updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button.
+Everything that runs as root for this is a small, fixed set of helper scripts. The browser makes no external requests, and Diun sees Docker only through a read-only socket proxy.
 
-![Übersicht: Konfiguriert, Installiert, Neueste Version](docs/img/updates.png)
+![Overview: Configured, Installed, Newest version](docs/img/updates-en.png)
 
-**Inhalt**
+**Contents**
 
-- [Was das Addon kann](#was-das-addon-kann)
-- [Die Übersicht lesen](#die-übersicht-lesen)
-- [Wie die installierte Version ermittelt wird](#wie-die-installierte-version-ermittelt-wird)
-- [Wie neuere Versionen gefunden werden](#wie-neuere-versionen-gefunden-werden)
-- [Update und Rollback (Stufe 1)](#update-und-rollback-stufe-1)
-- [Backups & Dumps](#backups--dumps)
-- [Architektur](#architektur)
-- [Sicherheitsmodell](#sicherheitsmodell)
-- [Voraussetzungen](#voraussetzungen)
-- [Installation, Aktualisierung, Deinstallation](#installation-aktualisierung-deinstallation)
-- [Betrieb und Fehlersuche](#betrieb-und-fehlersuche)
-- [Entwicklung](#entwicklung)
-- [Bekannte Grenzen](#bekannte-grenzen)
-- [Ausbaustufen](#ausbaustufen)
-- [Lizenz](#lizenz)
-
----
-
-## Was das Addon kann
-
-| Bereich | Funktion |
-|---|---|
-| **Übersicht** | Alle laufenden Container mit *Konfiguriert* (Tag aus Compose), *Installiert* (echte Version), *Neueste Version* (Patch / Minor / Major) und Status. Sortiert nach Dringlichkeit. |
-| **Erkennung** | [Diun](https://crazymax.dev/diun/) meldet, wenn derselbe Tag neu gebaut wurde (neuer Digest). Der **Versions-Radar** sucht alle 6 Stunden neuere Versions-Tags in den Registries. „**Ausrollen ausstehend**“ erkennt Images, die schon gezogen, aber noch nicht ausgerollt sind. |
-| **Update / Ausrollen** | Ein Klick zeigt erst einen Plan (betroffene Container, Compose-Projekt, Datenbanken, freier Platz). Danach: DB-Dump → Rollback-Kopie → Pull → Neustart der betroffenen Services → Warten auf „healthy“ → Ergebnis. Schlägt das fehl, gibt es einen Rollback-Knopf. |
-| **Backups & Dumps** | Eigener Tab mit Update-Verlauf, Datenbank-Dumps und Rollback-Images, jeweils mit Löschen (in Benutzung befindliche Images sind gesperrt) und Rollback aus dem Verlauf. |
-| **Voraussetzungen** | Prüft Docker, Diun, skopeo und den Radar-Timer und bietet fehlende Teile zur Installation an. Vorhandene Dateien werden nie überschrieben. |
-| **Bedienung** | Deutsch und Englisch nach Cockpit-Sprache (Rückfall Englisch), Ladeanzeige, Mobilansicht als Karten, keine externen Ressourcen (strikte Cockpit-CSP). |
-
-| Update-Dialog | Ergebnis mit Live-Ausgabe |
-|---|---|
-| ![Plan vor dem Update](docs/img/update-dialog.png) | ![Live-Ausgabe und Ergebnis](docs/img/update-done.png) |
-
-![Tab Backups & Dumps](docs/img/backups.png)
+- [What the add-on does](#what-the-add-on-does)
+- [Reading the overview](#reading-the-overview)
+- [How the installed version is determined](#how-the-installed-version-is-determined)
+- [How newer versions are found](#how-newer-versions-are-found)
+- [Update and rollback (stage 1)](#update-and-rollback-stage-1)
+- [Backups & dumps](#backups--dumps)
+- [Architecture](#architecture)
+- [Security model](#security-model)
+- [Requirements](#requirements)
+- [Install, update, uninstall](#install-update-uninstall)
+- [Operation and troubleshooting](#operation-and-troubleshooting)
+- [Development](#development)
+- [Releasing](#releasing)
+- [Known limits](#known-limits)
+- [Stages](#stages)
+- [License](#license)
 
 ---
 
-## Die Übersicht lesen
+## What the add-on does
 
-**Spalten**
-
-| Spalte | Bedeutung |
+| Area | Function |
 |---|---|
-| Konfiguriert | Der Tag, wie er in der Compose-Datei bzw. bei `docker run` steht, z. B. `latest`, `16-alpine`, `v2.1.4`. |
-| Installiert | Die Version, die wirklich läuft, z. B. `0.30.11`. Der Tooltip nennt die Quelle (siehe unten) und den Digest. `16.14 → 16.15` heißt: 16.15 liegt schon auf dem Server, läuft aber noch nicht. `?` heißt: nicht ermittelbar oder vom Radar noch nicht erfasst. |
-| Neueste Version | Neuere Versionen relativ zur **installierten** Version, als Chips Patch / Minor / Major. `✓ 6.2.0` = installiert ist die neueste. `neueste: 6.0.2` erscheint, wenn die installierte Version unbekannt ist. |
-| Status | siehe nächste Tabelle |
+| **Overview** | All running containers with *Configured* (tag from compose), *Installed* (real version), *Newest version* (patch / minor / major) and status. Sorted by urgency. |
+| **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
+| **Update / roll out** | One click first shows a plan (affected containers, compose project, databases, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result. If that fails, there is a rollback button. |
+| **Backups & dumps** | A tab of its own with the update history, database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. |
+| **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
+| **Use** | English and German following Cockpit's language (fallback English), loading indicator, cards on phones, no external resources (strict Cockpit CSP). |
+
+| Update dialog | Result with live output |
+|---|---|
+| ![Plan before the update](docs/img/update-dialog.png) | ![Live output and result](docs/img/update-done.png) |
+
+![Tab Backups & dumps](docs/img/backups.png)
+
+---
+
+## Reading the overview
+
+**Columns**
+
+| Column | Meaning |
+|---|---|
+| Configured | The tag as written in the compose file or with `docker run`, e.g. `latest`, `16-alpine`, `v2.1.4`. |
+| Installed | The version that really runs, e.g. `0.30.11`. The tooltip names the source (see below) and the digest. `16.14 → 16.15` means: 16.15 is already on the server but does not run yet. `?` means: cannot be determined, or not covered by the radar yet. |
+| Newest version | Newer versions relative to the **installed** version, as patch / minor / major chips. `✓ 6.2.0` = the installed version is the newest. `newest: 6.0.2` appears when the installed version is unknown. |
+| Status | see the next table |
 
 **Status**
 
-| Badge | Bedeutung | Knopf |
+| Badge | Meaning | Button |
 |---|---|---|
-| Update verfügbar | Diun hat einen neuen Build **desselben Tags** gemeldet. | Update, Erledigt |
-| Ausrollen ausstehend | Das neuere Image ist schon lokal vorhanden, der Container läuft noch auf dem alten. | Ausrollen |
-| Neue Version | Der Radar kennt eine neuere Version. Ob der Update-Knopf sie liefert, zeigt die Chip-Form. | – |
-| aktuell | Nichts Neueres bekannt. | – |
-| unbekannt | Installierte Version nicht ermittelbar (z. B. `latest` aus einem Entwicklungs-Build). | – |
+| Update available | Diun reported a new build of **the same tag**. | Update, Dismiss |
+| Roll-out pending | The newer image is already local, the container still runs the old one. | Roll out |
+| New version | The radar knows a newer version. The chip style shows whether the Update button delivers it. | – |
+| up to date | Nothing newer known. | – |
+| unknown | Installed version cannot be determined (e.g. `latest` from a development build). | – |
 
-Update-Knöpfe gibt es nur für Container, die mit **docker compose** gestartet wurden („nur manuell“ sonst).
+Update buttons exist only for containers started with **docker compose** (“manual only” otherwise).
 
-**Chips in „Neueste Version“**
+**Chips in “Newest version”**
 
-| Form | Bedeutung |
+| Style | Meaning |
 |---|---|
-| gefüllt | Der konfigurierte Tag liefert diese Version **per Update-Knopf** (z. B. `latest` → alles, `16-alpine` → 16.x). |
-| umrandet | Nur erreichbar, wenn der **Tag in der Compose-Datei geändert** wird (z. B. `v2.1.4` → `v2.1.5`). Das ist [Stufe 2](ROADMAP.md#stufe-2--versionssprünge-tag-in-der-compose-datei-ändern). |
-| gestrichelt, grau | **Datenbank-Major** (z. B. Postgres 16 → 18): braucht eine Migration (Dump/Restore oder `pg_upgrade`), kein reiner Image-Tausch. Zählt nicht als „Neue Version“. |
-| Farbe | grün = Patch, gold = Minor, rot = Major |
+| filled | The configured tag delivers this version **with the Update button** (e.g. `latest` → everything, `16-alpine` → 16.x). |
+| outlined | Reachable only by **changing the tag in the compose file** (e.g. `v2.1.4` → `v2.1.5`). That is [stage 2](ROADMAP.md#stage-2--version-jumps-change-the-tag-in-the-compose-file). |
+| dashed, grey | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. |
+| colour | green = patch, gold = minor, red = major |
 
-> **Achtung bei `latest` und ähnlichen Tags:** Sie liefern beim Update auch Major-Versionen. Steht bei Nextcloud `apache` ein gefülltes rotes „Major 35.0.1“, springt ein Klick auf *Update* von 34 auf 35. Vor solchen Sprüngen die Release Notes lesen (Nextcloud erlaubt nur einen Major-Schritt auf einmal).
+> **Careful with `latest` and similar tags:** they deliver major versions on update too. If Nextcloud `apache` shows a filled red “Major 35.0.1”, a click on *Update* jumps from 34 to 35. Read the release notes before such jumps (Nextcloud allows only one major step at a time).
 
 ---
 
-## Wie die installierte Version ermittelt wird
+## How the installed version is determined
 
-Der Tag allein reicht oft nicht: `latest` oder `16-alpine` sagen nicht, was wirklich läuft. Die erste passende Quelle gewinnt:
+The tag alone is often not enough: `latest` or `16-alpine` do not say what really runs. The first matching source wins:
 
-| # | Quelle | Beispiel | Wo | Verlässlichkeit |
+| # | Source | Example | Where | Reliability |
 |---|---|---|---|---|
-| 1 | **Tag** ist schon eine exakte Version | `v2.1.4` → 2.1.4, `24.3.3.102-alpine` → 24.3.3.102 | Inventar (sofort) | sicher |
-| 2 | **Versions-Variable** der App im Image | `PG_VERSION=16.14`, `GLITCHTIP_VERSION=6.1.8`, `NEXTCLOUD_VERSION=34.0.3` | Inventar (sofort) | sicher; muss zum Tag passen (`16-alpine` + `PG_VERSION=17.2` wird verworfen) |
-| 3 | **Image-Label** `org.opencontainers.image.version` | calcom `v6.2.0`, rustdesk `1.1.15` | Radar (alle 6 h) | nur wenn es diese Version in der Registry **als Tag gibt** (ollama erbt „24.04“ vom Ubuntu-Basis-Image → verworfen) |
-| 4 | **Digest-Abgleich**: Welcher Versions-Tag in der Registry zeigt genau auf das installierte Image? | ollama `latest` → 0.30.11, docuseal → 3.1.6 | Radar (alle 6 h) | sicher, wenn gefunden; Ergebnis wird je Image-ID gespeichert |
+| 1 | **Tag** is already an exact version | `v2.1.4` → 2.1.4, `24.3.3.102-alpine` → 24.3.3.102 | inventory (immediately) | certain |
+| 2 | **Version variable** of the app in the image | `PG_VERSION=16.14`, `GLITCHTIP_VERSION=6.1.8`, `NEXTCLOUD_VERSION=34.0.3` | inventory (immediately) | certain; must fit the tag (`16-alpine` + `PG_VERSION=17.2` is dropped) |
+| 3 | **Image label** `org.opencontainers.image.version` | calcom `v6.2.0`, rustdesk `1.1.15` | radar (every 6 h) | only if this version **exists as a tag** in the registry (ollama inherits “24.04” from its Ubuntu base image → dropped) |
+| 4 | **Digest match**: which version tag in the registry points to exactly the installed image? | ollama `latest` → 0.30.11, docuseal → 3.1.6 | radar (every 6 h) | certain when found; the result is stored per image ID |
 
-Zu Quelle 2: Laufzeit-Variablen wie `NODE_VERSION`, `PYTHON_VERSION` oder `PHP_VERSION` gehören nicht zur App und werden ignoriert. Gelesen wird `<IMAGENAME>_VERSION` bzw. `<NAMESPACE>_VERSION`, für Postgres-Abkömmlinge (postgres, postgis, pgvector, timescaledb) `PG_VERSION`.
+On source 2: runtime variables such as `NODE_VERSION`, `PYTHON_VERSION` or `PHP_VERSION` do not belong to the app and are ignored. Read are `<IMAGENAME>_VERSION` or `<NAMESPACE>_VERSION`, and `PG_VERSION` for Postgres derivatives (postgres, postgis, pgvector, timescaledb).
 
-Zu Quelle 4:
-- **Docker Hub:** Die Hub-API liefert die Tag-Liste mit Digests. Das zählt **nicht** gegen das Pull-Limit. Gesucht wird nach Aktualität, maximal 10 Seiten à 100 Tags.
-- **Andere Registries (ghcr.io …):** Verglichen werden die Manifeste der 20 neuesten Versions-Tags (`skopeo inspect --raw`).
-- **Speicherung:** Treffer bleiben dauerhaft gespeichert, Fehlschläge werden nach 7 Tagen erneut versucht.
+On source 4:
+- **Docker Hub:** the hub API returns the tag list with digests. This does **not** count against the pull limit. The search goes by recency, at most 10 pages of 100 tags.
+- **Other registries (ghcr.io …):** the manifests of the 20 newest version tags are compared (`skopeo inspect --raw`).
+- **Storage:** hits are kept for good, misses are retried after 7 days.
 
-Was nicht ermittelbar ist, bleibt `?`. Typischer Fall: `latest` wird bei jedem Commit gebaut und entspricht keinem Release.
+What cannot be determined stays `?`. Typical case: `latest` is built on every commit and matches no release.
 
 ---
 
-## Wie neuere Versionen gefunden werden
+## How newer versions are found
 
-Der Radar (`diun-versions.py`, systemd-Timer alle 6 h) liest die Tag-Liste jedes Images mit `skopeo list-tags`. Das ist kein Pull. Verglichen wird im **Schema der installierten Version**:
+The radar (`diun-versions.py`, systemd timer every 6 h) reads every image's tag list with `skopeo list-tags`. That is not a pull. It compares in the **scheme of the installed version**:
 
 ```
-Schema = Präfix + Anzahl Zahlenblöcke + Suffix
+scheme = prefix + number of number blocks + suffix
 v2.1.4             -> "v"  3 ""
 16.14-alpine       -> ""   2 "-alpine"
 24.3.3.102-alpine  -> ""   4 "-alpine"
 ```
 
-- Nur Tags mit identischem Schema zählen. `-rc1`, `-beta` oder `-alpine3.22` werden nie als Update angeboten.
-- Konfiguriert `16-alpine`, installiert 16.14: verglichen wird mit `16.N-alpine` bzw. `N.N-alpine`. Ergebnis: Minor `16.15-alpine`, Major `18.6-alpine`.
-- Konfiguriert `apache` (Nextcloud), installiert 34.0.3: verglichen wird mit `N.N.N-apache`.
-- **Patch / Minor / Major** ergeben sich aus dem ersten abweichenden Zahlenblock. Bei zweistelligen Schemata wie Postgres `16.14` heißt der zweite Block „Minor“.
-- **Erreichbarkeit** („reach“): Wie viele Zahlenblöcke legt der konfigurierte Tag fest? `latest` = 0 → alles erreichbar. `16-alpine` = 1 → Patch und Minor erreichbar. `3.12-slim` = 2 → nur Patch. `v2.1.4` = 3 → nichts.
-- **Datenbank-Images** (postgres, mariadb, mysql, redis, valkey, clickhouse, mongo …) sind markiert. Ihre Majors erscheinen als graue Info.
-- Fällt eine Registry aus, bleibt das letzte gute Ergebnis stehen und ist als „(Stand älter)“ markiert.
+- Only tags with an identical scheme count. `-rc1`, `-beta` or `-alpine3.22` are never offered as an update.
+- Configured `16-alpine`, installed 16.14: compared with `16.N-alpine` or `N.N-alpine`. Result: minor `16.15-alpine`, major `18.6-alpine`.
+- Configured `apache` (Nextcloud), installed 34.0.3: compared with `N.N.N-apache`.
+- **Patch / minor / major** follow from the first differing number block. With two-block schemes such as Postgres `16.14` the second block is called “minor”.
+- **Reach**: how many number blocks does the configured tag fix? `latest` = 0 → everything reachable. `16-alpine` = 1 → patch and minor reachable. `3.12-slim` = 2 → patch only. `v2.1.4` = 3 → nothing.
+- **Database images** (postgres, mariadb, mysql, redis, valkey, clickhouse, mongo …) are marked. Their majors appear as grey info.
+- If a registry fails, the last good result stays and is marked “(older data)”.
 
 ---
 
-## Update und Rollback (Stufe 1)
+## Update and rollback (stage 1)
 
-Stufe 1 ändert **nie** die Compose-Datei. Sie holt das aktuelle Image **desselben Tags** und erstellt die Container neu. Versionssprünge über einen anderen Tag sind [Stufe 2](ROADMAP.md).
+Stage 1 **never** changes the compose file. It fetches the current image of **the same tag** and recreates the containers. Version jumps via a different tag are [stage 2](ROADMAP.md).
 
 ```mermaid
 sequenceDiagram
-    participant U as Cockpit (Browser)
+    participant U as Cockpit (browser)
     participant H as diun-update.py (root)
     participant D as Docker / Compose
     U->>H: plan <container>
-    H-->>U: Services, Container, DBs (+ Größe), freier Platz, Compose geändert?
+    H-->>U: services, containers, DBs (+ size), free space, compose changed?
     U->>H: update <container> [--no-dump]
-    H->>D: pg_dumpall / mariadb-dump je DB-Container des Projekts
-    H->>D: docker tag <altes Image> <repo>:rollback-<Zeit>
+    H->>D: pg_dumpall / mariadb-dump per DB container of the project
+    H->>D: docker tag <old image> <repo>:rollback-<time>
     H->>D: compose pull --ignore-pull-failures <services>
-    alt kein neueres Image
-        H-->>U: nochange (Rollback-Tag wieder entfernt)
-    else neueres Image
+    alt no newer image
+        H-->>U: nochange (rollback tag removed again)
+    else newer image
         H->>D: compose up -d --no-deps --pull never <services>
-        H->>D: warten bis healthy / 15 s stabil (max. 180 s)
-        H-->>U: ok oder failed (+ Log-Zeilen)
+        H->>D: wait until healthy / 15 s stable (max. 180 s)
+        H-->>U: ok or failed (+ log lines)
     end
     U->>H: rollback <op-id> (optional)
-    H->>D: Tag zurück auf Rollback-Image, compose up -d --no-deps
+    H->>D: tag back to the rollback image, compose up -d --no-deps
 ```
 
-**Was mitgenommen wird:** alle Services des Compose-Projekts, die **dasselbe Image** nutzen. Bei GlitchTip zum Beispiel `web`, `worker` und `migrate`. Einmal-Jobs, die mit Exit 0 enden (Migrationen), gelten als erfolgreich.
+**What is included:** all services of the compose project that use **the same image**. With GlitchTip, for example, `web`, `worker` and `migrate`. One-off jobs that end with exit 0 (migrations) count as successful.
 
-**Datenbank-Dump:** Vor dem Update wird jeder unterstützte Datenbank-Container **des Projekts** gesichert:
-- **Postgres:** `pg_dumpall` mit dem Superuser `POSTGRES_USER` (Standard `postgres`, lokaler Socket).
-- **MariaDB/MySQL:** `mariadb-dump`/`mysqldump --all-databases` mit `MARIADB_ROOT_PASSWORD`/`MYSQL_ROOT_PASSWORD` aus der Umgebung des Containers.
-- **Ob ein Container als Datenbank zählt:** nur wenn sein Befehl wirklich den Server startet. Hilfscontainer, die das Postgres-Image nur nutzen (`sh -c …`), werden nicht gedumpt.
-- **Wann abgebrochen wird:** wenn ein Dump fehlschlägt oder unvollständig ist (Endmarke fehlt) oder zu wenig Platz frei ist. Dann bricht das Update **vor jeder Änderung** ab (Exit 5).
+**Database dump:** before the update every supported database container **of the project** is backed up:
+- **Postgres:** `pg_dumpall` with the superuser `POSTGRES_USER` (default `postgres`, local socket).
+- **MariaDB/MySQL:** `mariadb-dump`/`mysqldump --all-databases` with `MARIADB_ROOT_PASSWORD`/`MYSQL_ROOT_PASSWORD` from the container's environment.
+- **Whether a container counts as a database:** only if its command really starts the server. Helper containers that merely use the Postgres image (`sh -c …`) are not dumped.
+- **When it stops:** if a dump fails or is incomplete (end marker missing) or there is too little free space. Then the update stops **before any change** (exit 5).
 
-**Rollback** setzt den Tag auf die Rollback-Kopie zurück und erstellt dieselben Services neu.
+**Rollback** points the tag back to the rollback copy and recreates the same services.
 
-> **Rollback ≠ Daten zurück.** Hat die neue Version beim Start ihre Datenbank migriert, passen altes Programm und neue Daten nicht mehr zusammen. Dann hilft nur der Dump, und das Einspielen ist bewusst ein manueller Schritt (siehe unten).
+> **Rollback ≠ data back.** If the new version migrated its database on start, the old program and the new data no longer fit together. Then only the dump helps, and restoring it is deliberately a manual step (see below).
 
-**Sperren:** Es läuft immer nur ein Update oder Rollback gleichzeitig (`/run/lock/diun-update.lock`). Ein zweiter Versuch bekommt sofort „läuft bereits“.
+**Locks:** only one update or rollback runs at a time (`/run/lock/diun-update.lock`). A second attempt immediately gets “already running”.
 
-**Nicht über das Addon möglich** (der Dialog nennt jeweils den Grund):
-- Container ohne docker compose
-- per Digest gepinnte Images (`@sha256:`)
-- lokal gebaute Images (`build:`)
-- fehlende Compose-Datei
-- fehlerhafte Compose-Konfiguration
+**Not possible from the add-on** (the dialog names the reason in each case):
+- containers without docker compose
+- images pinned by digest (`@sha256:`)
+- locally built images (`build:`)
+- missing compose file
+- broken compose configuration
 
 ---
 
-## Backups & Dumps
+## Backups & dumps
 
-| Was | Wo | Rechte |
+| What | Where | Rights |
 |---|---|---|
-| Datenbank-Dumps | `/var/backups/image-updates/dumps/<projekt>/<JJJJMMTT-HHMMSS>_<container>.sql.gz` | Datei 0600, Ordner 0700 (nur root) |
-| Update-Verlauf | `/var/backups/image-updates/operations.jsonl` | 0600 |
-| Rollback-Images | lokale Docker-Tags `<repo>:rollback-<JJJJMMTT-HHMMSS>` | – |
+| Database dumps | `/var/backups/image-updates/dumps/<project>/<YYYYMMDD-HHMMSS>_<container>.sql.gz` | file 0600, folder 0700 (root only) |
+| Update history | `/var/backups/image-updates/operations.jsonl` | 0600 |
+| Rollback images | local Docker tags `<repo>:rollback-<YYYYMMDD-HHMMSS>` | – |
 
-- **Löschen** geht im Tab *Backups & Dumps*. Ein Rollback-Image, das noch ein Container nutzt, lässt sich nicht löschen. Das ist z. B. so, solange andere Datenbanken noch auf demselben alten Postgres-Build laufen.
-- **Aufräumen** passiert derzeit **nicht automatisch**, siehe [Ausbaustufen](ROADMAP.md).
-- **Server-Backup:** `/var/backups/image-updates` sollte im Backup enthalten sein (z. B. restic), sonst liegen die Dumps nur auf derselben Platte wie die Datenbank.
+- **Delete** in the *Backups & dumps* tab. A rollback image still used by a container cannot be deleted. That is the case, for example, as long as other databases still run on the same old Postgres build.
+- **Cleanup** does **not happen automatically** yet, see [Stages](ROADMAP.md).
+- **Server backup:** `/var/backups/image-updates` should be part of the backup (e.g. restic), otherwise the dumps live only on the same disk as the database.
 
-**Dump einspielen (manuell, mit Bedacht)**
+**Restoring a dump (manually, with care)**
 
-Ein `pg_dumpall`-Dump legt Rollen und Datenbanken neu an. Er gehört in eine **leere** Postgres-Instanz. In eine laufende Instanz mit denselben Datenbanken eingespielt, gibt es „already exists“-Fehler und gemischte Stände. Bewährter Weg: App stoppen, Daten-Volume sichern bzw. umbenennen, Datenbank-Container mit leerem Volume starten, dann:
+A `pg_dumpall` dump creates roles and databases anew. It belongs in an **empty** Postgres instance. Restored into a running instance with the same databases, it gives “already exists” errors and mixed states. A proven way: stop the app, back up or rename the data volume, start the database container with an empty volume, then:
 
 ```bash
 # Postgres
-zcat /var/backups/image-updates/dumps/<projekt>/<datei>.sql.gz \
+zcat /var/backups/image-updates/dumps/<project>/<file>.sql.gz \
   | docker exec -i <db-container> psql -U postgres -d postgres
 
 # MariaDB
-zcat /var/backups/image-updates/dumps/<projekt>/<datei>.sql.gz \
+zcat /var/backups/image-updates/dumps/<project>/<file>.sql.gz \
   | docker exec -i <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
 # MySQL: mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
 ```
 
 ---
 
-## Architektur
+## Architecture
 
 ```mermaid
 flowchart LR
     subgraph B["Browser"]
-        P["Cockpit-Plugin<br/>plugin/diun.js"]
+        P["Cockpit plugin<br/>plugin/diun.js"]
     end
-    subgraph H["Server - root-Helfer in /usr/local/lib/diun-radar"]
-        INV["diun-inventory.py<br/>bei jedem Laden"]
+    subgraph H["Server - root helpers in /usr/local/lib/diun-radar"]
+        INV["diun-inventory.py<br/>on every load"]
         UPD["diun-update.py<br/>plan / update / rollback / backups"]
         DEP["diun-deps.sh<br/>check / install"]
-        RAD["diun-versions.py<br/>Timer alle 6 h"]
+        RAD["diun-versions.py<br/>timer every 6 h"]
     end
     VJ[("versions.json<br/>/var/lib/diun-radar")]
     EV[("events.jsonl<br/>/var/lib/diun")]
     BK[("/var/backups/image-updates")]
     DK["Docker Engine + Compose"]
-    subgraph DS["Diun-Stack /opt/diun"]
+    subgraph DS["Diun stack /opt/diun"]
         DI["Diun"]
         SP["docker-socket-proxy<br/>read-only"]
     end
     REG[("Registries<br/>Docker Hub, ghcr.io")]
 
-    P -->|"cockpit.spawn als root"| INV
-    P -->|"cockpit.spawn als root"| UPD
-    P -->|"cockpit.spawn als root"| DEP
-    P -->|"cockpit.file lesen"| VJ
-    P -->|"cockpit.file lesen"| EV
+    P -->|"cockpit.spawn as root"| INV
+    P -->|"cockpit.spawn as root"| UPD
+    P -->|"cockpit.spawn as root"| DEP
+    P -->|"cockpit.file read"| VJ
+    P -->|"cockpit.file read"| EV
     INV --> DK
     UPD --> DK
     UPD --> BK
@@ -239,102 +240,113 @@ flowchart LR
     DI --> SP
     SP --> DK
     DI --> REG
-    DI -->|"Script-Notifier"| EV
+    DI -->|"script notifier"| EV
 ```
 
-| Teil | Installiert nach | Aufgabe |
+| Part | Installed to | Job |
 |---|---|---|
-| `plugin/` | `/usr/share/cockpit/diun/` | Oberfläche (Vanilla-JS, kein Build-Schritt), DE/EN |
-| `lib/diun-inventory.py` | `/usr/local/lib/diun-radar/` | Laufende Container: Tag, Version (Tag/Variable), Digest, Compose-Zuordnung, „gezogen, nicht ausgerollt“ |
-| `lib/diun-versions.py` | `/usr/local/lib/diun-radar/` | Versions-Radar: installierte Version (Label/Digest), neuere Versionen → `versions.json` |
-| `lib/diun-update.py` | `/usr/local/lib/diun-radar/` | Plan, Update mit Dump, Rollback, Backup-Liste, Löschen |
-| `lib/diun-deps.sh` | `/usr/local/lib/diun-radar/` | Voraussetzungen prüfen; skopeo, Diun-Stack, Radar-Timer installieren |
-| `lib/diunlib.py` | `/usr/local/lib/diun-radar/` | gemeinsame Funktionen (Tag-Schema, Versions-Variablen, Erreichbarkeit) |
-| `diun-radar.service/.timer` | `/etc/systemd/system/` | angelegt von `diun-deps.sh install radar`; Lauf alle 6 h (`00/6:17`), gehärtet (`ProtectSystem=strict` …) |
-| Diun-Stack | `/opt/diun/`, Daten `/var/lib/diun/` | angelegt von `diun-deps.sh install diun`: Diun 4.33.0 + `docker-socket-proxy` (nur lesend), Script-Notifier schreibt JSON-Zeilen |
+| `plugin/` | `/usr/share/cockpit/diun/` | user interface (vanilla JS, no build step), EN/DE |
+| `lib/diun-inventory.py` | `/usr/local/lib/diun-radar/` | running containers: tag, version (tag/variable), digest, compose mapping, “pulled, not rolled out” |
+| `lib/diun-versions.py` | `/usr/local/lib/diun-radar/` | version radar: installed version (label/digest), newer versions → `versions.json` |
+| `lib/diun-update.py` | `/usr/local/lib/diun-radar/` | plan, update with dump, rollback, backup list, delete |
+| `lib/diun-deps.sh` | `/usr/local/lib/diun-radar/` | check requirements; install skopeo, Diun stack, radar timer |
+| `lib/diunlib.py` | `/usr/local/lib/diun-radar/` | shared functions (tag scheme, version variables, reach) |
+| `diun-radar.service/.timer` | `/etc/systemd/system/` | created by `diun-deps.sh install radar`; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
+| Diun stack | `/opt/diun/`, data `/var/lib/diun/` | created by `diun-deps.sh install diun`: Diun 4.33.0 + `docker-socket-proxy` (read-only), the script notifier writes JSON lines |
 
-Die genauen Aufrufe, JSON-Formate und Exit-Codes stehen in [docs/INTERNALS.md](docs/INTERNALS.md).
-
----
-
-## Sicherheitsmodell
-
-- **Root-Code nur an einer Stelle.** Alles, was Cockpit oder systemd als root ausführt, liegt in `/usr/local/lib/diun-radar` (root-owned). `/var/lib/diun` ist **im Diun-Container beschreibbar**, von dort wird nie etwas ausgeführt.
-- **Feste Verben, geprüfte Argumente.** Das Plugin ruft nur festgelegte Befehle auf (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `check`, `install skopeo|diun|radar`, `start diun`).
-  - Container-Namen, Vorgangs-IDs, Dump-Pfade und Rollback-Tags werden per Regex geprüft. Pfad-Tricks (`../`) werden abgelehnt.
-  - `delete-image` löscht nur `…:rollback-JJJJMMTT-HHMMSS` und nie ein Image, das in Benutzung ist.
-- **Cockpit-Rechte.** Lesen läuft mit `superuser: "try"`, Aktionen mit `superuser: "require"`. Ohne administrativen Zugriff in Cockpit gibt es eine klare Meldung statt eines Fehlers.
-- **Diun ohne Docker-Socket.** Nur der `docker-socket-proxy` sieht `/var/run/docker.sock` (read-only). Er gibt eine gefilterte, nur lesende API frei (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) und veröffentlicht keinen Port.
-- **Dumps nur für root.** Ordner 0700, Dateien 0600, atomar geschrieben (`.part` → Umbenennen). Passwörter werden nur im Datenbank-Container aus dessen Umgebung gelesen, nie gespeichert oder geloggt.
-- **Kein Netz aus dem Browser.** Keine CDNs, keine Webfonts; Cockpits strikte CSP bleibt unverändert. Registry-Zugriffe macht nur der Radar auf dem Server.
-- **Nebenläufigkeit.** `flock` für Inventar und Update (Exit 75 bei „läuft schon“). Das Plugin startet nie zwei Ladevorgänge parallel.
-- **Nichts überschreiben.** `diun-deps.sh` bricht ab, wenn Ziel-Dateien oder ein Diun-Container schon existieren. `install.sh` sichert die vorige Version, bevor es ersetzt.
+The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INTERNALS.md).
 
 ---
 
-## Voraussetzungen
+## Security model
 
-- Linux-Server mit **Cockpit ≥ 266** (systemd)
-- **Docker Engine** mit **Compose v2** (`docker compose`)
-- **Python ≥ 3.8** (nur Standardbibliothek) und `bash`
-- Für den Radar: **skopeo** (das Addon installiert es auf Wunsch per `apt-get` oder `dnf`)
-- Für Digest-Updates: **Diun** (das Addon richtet `/opt/diun` auf Wunsch ein)
+- **Root code in one place only.** Everything Cockpit or systemd runs as root lives in `/usr/local/lib/diun-radar` (root-owned). `/var/lib/diun` is **writable from the Diun container**; nothing is ever run from there.
+- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `check`, `install skopeo|diun|radar`, `start diun`).
+  - Container names, operation IDs, dump paths and rollback tags are checked by regex. Path tricks (`../`) are refused.
+  - `delete-image` deletes only `…:rollback-YYYYMMDD-HHMMSS` and never an image in use.
+- **Cockpit rights.** Reading runs with `superuser: "try"`, actions with `superuser: "require"`. Without administrative access in Cockpit there is a clear message instead of an error.
+- **Diun without the Docker socket.** Only the `docker-socket-proxy` sees `/var/run/docker.sock` (read-only). It exposes a filtered, read-only API (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) and publishes no port.
+- **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords are read only inside the database container from its environment, never stored or logged.
+- **No network from the browser.** No CDNs, no web fonts; Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries.
+- **Concurrency.** `flock` for inventory and update (exit 75 for “already running”). The plugin never starts two loads in parallel.
+- **Overwrite nothing.** `diun-deps.sh` stops if target files or a Diun container exist already. `install.sh` backs up the previous version before replacing it.
 
 ---
 
-## Installation, Aktualisierung, Deinstallation
+## Requirements
 
-**Installieren / aktualisieren**
+- Linux server with **Cockpit ≥ 266** (systemd)
+- **Docker Engine** with **Compose v2** (`docker compose`)
+- **Python ≥ 3.8** (standard library only) and `bash`
+- For the radar: **skopeo** (the add-on installs it on request with `apt-get` or `dnf`)
+- For digest updates: **Diun** (the add-on sets up `/opt/diun` on request)
+
+---
+
+## Install, update, uninstall
+
+**Install / update from a release** (recommended; `X.Y.Z` is the version from the [releases page](https://github.com/Azentrius/cockpit-image-update-monitor/releases))
+
+```bash
+curl -LO https://github.com/Azentrius/cockpit-image-update-monitor/releases/download/vX.Y.Z/cockpit-image-update-monitor-X.Y.Z.tar.gz
+curl -LO https://github.com/Azentrius/cockpit-image-update-monitor/releases/download/vX.Y.Z/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+tar -xzf cockpit-image-update-monitor-X.Y.Z.tar.gz && cd cockpit-image-update-monitor-X.Y.Z
+sudo ./install.sh --dry-run   # only shows what would happen
+sudo ./install.sh
+```
+
+**Install / update from source**
 
 ```bash
 git clone https://github.com/Azentrius/cockpit-image-update-monitor.git
 cd cockpit-image-update-monitor
-sudo ./install.sh --dry-run   # zeigt nur, was passieren würde
+sudo ./install.sh --dry-run   # only shows what would happen
 sudo ./install.sh
 ```
 
-`install.sh` kopiert `plugin/` nach `/usr/share/cockpit/diun/` und `lib/` nach `/usr/local/lib/diun-radar/` mit Besitzer root. Es sichert eine vorhandene Installation vorher nach `/usr/local/lib/diun-radar/backup-<Zeitstempel>/` und stößt einen Radar-Lauf an, falls der Timer schon eingerichtet ist.
+`install.sh` copies `plugin/` to `/usr/share/cockpit/diun/` and `lib/` to `/usr/local/lib/diun-radar/`, owned by root. It backs up an existing installation to `/usr/local/lib/diun-radar/backup-<timestamp>/` first and starts a radar run if the timer is set up already.
 
-Danach in Cockpit **„Image-Updates“** öffnen (administrativen Zugriff einschalten). Fehlt etwas, zeigt das Addon oben das Panel *Voraussetzungen unvollständig* mit Installieren-Knöpfen. Alternativ auf der Konsole:
+Then open **“Image updates”** in Cockpit (switch on administrative access). If something is missing, the add-on shows the *Missing requirements* panel at the top with install buttons. Alternatively on the console:
 
 ```bash
 sudo /usr/local/lib/diun-radar/diun-deps.sh check
 sudo /usr/local/lib/diun-radar/diun-deps.sh install skopeo
-sudo /usr/local/lib/diun-radar/diun-deps.sh install diun     # legt /opt/diun an und startet den Stack
+sudo /usr/local/lib/diun-radar/diun-deps.sh install diun     # creates /opt/diun and starts the stack
 sudo /usr/local/lib/diun-radar/diun-deps.sh install radar    # diun-radar.service + .timer
-# Probelauf ohne Änderungen: DIUN_DEPS_DRYRUN=1 … install diun
+# dry run without changes: DIUN_DEPS_DRYRUN=1 … install diun
 ```
 
-**Vorhandenes Diun weiterverwenden:** Das Addon braucht nur die Ereignis-Datei `/var/lib/diun/events.jsonl`. Den Script-Notifier `diun-notify.sh` (in `lib/diun-deps.sh` enthalten) in die eigene `diun.yml` eintragen und `/var/lib/diun` als `/data` mounten.
+**Keep using an existing Diun:** the add-on only needs the event file `/var/lib/diun/events.jsonl`. Add the script notifier `diun-notify.sh` (contained in `lib/diun-deps.sh`) to your own `diun.yml` and mount `/var/lib/diun` as `/data`.
 
-**Deinstallieren**
+**Uninstall**
 
 ```bash
 sudo systemctl disable --now diun-radar.timer
 sudo rm /etc/systemd/system/diun-radar.service /etc/systemd/system/diun-radar.timer
 sudo systemctl daemon-reload
 sudo rm -r /usr/share/cockpit/diun
-sudo rm -r /usr/local/lib/diun-radar        # enthält auch die install.sh-Sicherungen
+sudo rm -r /usr/local/lib/diun-radar        # also holds the install.sh backups
 sudo rm -r /var/lib/diun-radar
-# Optional - Diun-Stack:     cd /opt/diun && sudo docker compose down && sudo rm -r /opt/diun /var/lib/diun
-# Bewusst NICHT automatisch: /var/backups/image-updates (Dumps) und Rollback-Images
+# Optional - Diun stack:     cd /opt/diun && sudo docker compose down && sudo rm -r /opt/diun /var/lib/diun
+# Deliberately NOT automatic: /var/backups/image-updates (dumps) and rollback images
 #   docker image ls --format '{{.Repository}}:{{.Tag}}' | grep ':rollback-'
 ```
 
 ---
 
-## Betrieb und Fehlersuche
+## Operation and troubleshooting
 
 ```bash
-# Radar sofort laufen lassen und Ergebnis ansehen
+# Run the radar now and look at the result
 sudo systemctl start diun-radar.service
 journalctl -u diun-radar.service -n 20
-sudo python3 /usr/local/lib/diun-radar/diun-versions.py --table     # Tabelle, schreibt nichts
+sudo python3 /usr/local/lib/diun-radar/diun-versions.py --table     # table, writes nothing
 
-# Was sieht das Plugin?
-sudo /usr/local/lib/diun-radar/diun-inventory.py                    # eine JSON-Zeile je Container
-sudo /usr/local/lib/diun-radar/diun-update.py plan <container>      # Plan, ändert nichts
-sudo /usr/local/lib/diun-radar/diun-update.py backups               # Dumps, Rollback-Images, Verlauf
+# What does the plugin see?
+sudo /usr/local/lib/diun-radar/diun-inventory.py                    # one JSON line per container
+sudo /usr/local/lib/diun-radar/diun-update.py plan <container>      # plan, changes nothing
+sudo /usr/local/lib/diun-radar/diun-update.py backups               # dumps, rollback images, history
 sudo /usr/local/lib/diun-radar/diun-deps.sh check
 
 # Diun
@@ -342,118 +354,130 @@ docker logs diun --tail 50
 tail -n 5 /var/lib/diun/events.jsonl
 ```
 
-| Symptom | Ursache / Abhilfe |
+| Symptom | Cause / remedy |
 |---|---|
-| „Container-Inventar nicht verfügbar“ | Administrativen Zugriff in Cockpit einschalten, sonst Docker prüfen. |
-| Spalte *Installiert* zeigt `?` nach einem Update | Label/Digest kommen vom Radar (alle 6 h). `systemctl start diun-radar.service` aktualisiert sofort. |
-| „Radar: noch keine Daten“ / „(veraltet)“ | Timer fehlt oder läuft nicht: Panel *Voraussetzungen* oder `systemctl status diun-radar.timer`. |
-| „Registry-Fehler“, „(Stand älter)“ | Registry nicht erreichbar oder Rate-Limit; das letzte gute Ergebnis wird weiter angezeigt. |
-| Update bricht mit „Dump … fehlgeschlagen“ ab | Nichts wurde geändert. Datenbank-Logs prüfen; zur Not „Vorher Datenbank-Dump erstellen“ abwählen (bewusste Entscheidung). |
-| Rollback-Image lässt sich nicht löschen | Ein Container nutzt das Image noch; erst alle Container auf dem alten Build aktualisieren. |
+| “Container inventory unavailable” | Switch on administrative access in Cockpit, otherwise check Docker. |
+| Column *Installed* shows `?` after an update | Label/digest come from the radar (every 6 h). `systemctl start diun-radar.service` refreshes right away. |
+| “Radar: no data yet” / “(outdated)” | Timer missing or not running: *Missing requirements* panel or `systemctl status diun-radar.timer`. |
+| “Registry error”, “(older data)” | Registry unreachable or rate limit; the last good result stays visible. |
+| Update stops with “dump … failed” | Nothing was changed. Check the database logs; if need be, untick “Create database dump first” (a deliberate decision). |
+| Rollback image cannot be deleted | A container still uses the image; first update all containers on the old build. |
 
-**Exit-Codes der Helfer:**
+**Exit codes of the helpers:**
 
-| Code | Bedeutung |
+| Code | Meaning |
 |---|---|
 | 0 | ok |
-| 2 | nicht gefunden / nicht möglich |
-| 3 | abgelehnt, z. B. schon zurückgerollt oder Datei existiert |
-| 4 | Container laufen nach Update/Rollback nicht stabil |
-| 5 | vor jeder Änderung abgebrochen (Dump, Platz) |
-| 64 | falscher Aufruf |
-| 75 | läuft schon |
-| 77 | keine root-Rechte |
+| 2 | not found / not possible |
+| 3 | refused, e.g. already rolled back or file exists |
+| 4 | containers do not run stably after update/rollback |
+| 5 | stopped before any change (dump, space) |
+| 64 | wrong call |
+| 75 | already running |
+| 77 | no root rights |
 
 ---
 
-## Entwicklung
+## Development
 
 ```
-plugin/            Cockpit-Paket (manifest, index.html, diun.js, diun.css, Menü-Übersetzung)
-lib/               root-Helfer (Python 3 / POSIX sh), werden nach /usr/local/lib/diun-radar installiert
-install.sh         Installer (DESTDIR, --dry-run, Sicherung der Vorversion)
-test/              Offline-Tests (Python + jsdom) und der End-to-End-Test für einen echten Docker-Host
-tools/preview/     Plugin im normalen Browser mit Testdaten + Screenshots (Playwright)
-tools/probe-versions.py   Diagnose: welche Versions-Quellen ein Host hergibt (nur lesend)
-docs/              INTERNALS.md (Schnittstellen, Formate), Bilder
+plugin/            Cockpit package (manifest, index.html, diun.js, diun.css, menu translation)
+lib/               root helpers (Python 3 / POSIX sh), installed to /usr/local/lib/diun-radar
+install.sh         installer (DESTDIR, --dry-run, backup of the previous version)
+test/              offline tests (Python + jsdom) and the end-to-end test for a real Docker host
+tools/preview/     the plugin in a normal browser with test data + screenshots (Playwright)
+tools/probe-versions.py   diagnosis: which version sources a host offers (read-only)
+tools/check-version.sh    version in diun.js, index.html and CHANGELOG.md agree
+tools/release-notes.sh    release notes from CHANGELOG.md
+docs/              INTERNALS.md (interfaces, formats), images
 ```
 
-**Tests** (kein Docker, kein root, kein Netz):
+**Tests** (no Docker, no root, no network; the `test` workflow runs them on every push and pull request):
 
 ```bash
 cd test && npm ci && ./run-all.sh
 ```
 
-Abgedeckt sind unter anderem:
-- Versionsquellen und Tag-Schemata
-- Docker-Hub- und Registry-Abgleich (mit Fakes)
-- Cache und Registry-Ausfall
-- Inventar
-- Ladeanzeige und Mehrfach-Laden
-- Sprache DE/EN
-- Voraussetzungs-Panel
-- Update-, Rollback- und Lösch-Dialoge
-- die Versions-Spalten
+Covered, among other things:
+- version sources and tag schemes
+- Docker Hub and registry matching (with fakes)
+- cache and registry outage
+- inventory
+- loading indicator and repeated loads
+- language EN/DE
+- requirements panel
+- update, rollback and delete dialogs
+- the version columns
+- version and changelog agree
 
-**Vorschau ohne Server:**
+**Preview without a server:**
 
 ```bash
-python3 tools/preview/build.py      # -> tools/preview/out/diun/index.html?lang=de
-python3 tools/preview/shoot.py      # Screenshots nach docs/img (braucht playwright + chromium)
+python3 tools/preview/build.py      # -> tools/preview/out/diun/index.html?lang=en
+python3 tools/preview/shoot.py      # screenshots to docs/img (needs playwright + chromium)
 ```
 
-**End-to-End auf einem echten Host** (legt ein Wegwerf-Compose-Projekt `imgupd-test` an, fasst sonst nichts an, räumt danach auf):
+**End-to-end on a real host** (creates a throw-away compose project `imgupd-test`, touches nothing else, cleans up afterwards):
 
 ```bash
 sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e2e-server.sh
 ```
 
-Der Test prüft:
-- Plan
-- Update mit Dump, das absichtlich scheitert
-- Rollback, doppelter Rollback wird abgelehnt
-- Update ohne Dump
-- „nichts Neueres“
-- Sperre
-- Backup-Liste
-- Löschen, auch mit manipuliertem Pfad
+The test checks:
+- plan
+- update with dump that fails on purpose
+- rollback; a second rollback is refused
+- update without dump
+- “nothing newer”
+- lock
+- backup list
+- delete, also with a manipulated path
 
-Hinweise für die Weiterarbeit mit Claude Code stehen in [CLAUDE.md](CLAUDE.md), die Änderungen in [CHANGELOG.md](CHANGELOG.md).
-
----
-
-## Bekannte Grenzen
-
-- **Nur Docker mit Compose v2.** Podman, Swarm und Kubernetes werden nicht unterstützt. Container ohne Compose werden angezeigt, aber nicht aktualisiert.
-- **Private Registries:** Der Radar läuft gehärtet (`ProtectHome=yes`) und sieht daher keine Zugangsdaten in `/root/.docker/config.json`. Private Images erscheinen als „Registry-Fehler“.
-- **Version nicht ermittelbar** bei `latest`-Builds ohne Release-Bezug (z. B. Builds aus dem Hauptzweig).
-- **MariaDB/MySQL-Dump** ist implementiert, aber bisher nur gegen Postgres Ende-zu-Ende getestet.
-- **Kein automatisches Aufräumen** alter Dumps und Rollback-Images.
-- **Versionssprünge** über einen anderen Tag und **Datenbank-Majors** sind manuell (Compose-Datei ändern).
-- Nach Updates von Images, deren Version nur per Label/Digest bestimmbar ist, steht bis zum nächsten Radar-Lauf `?`.
+Notes for working on the code with Claude Code are in [CLAUDE.md](CLAUDE.md), the changes in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-## Ausbaustufen
+## Releasing
 
-Ausführlich mit Zielen, Umfang und Abnahmekriterien in **[ROADMAP.md](ROADMAP.md)**.
+Versions follow [Semantic Versioning](https://semver.org/). The version lives in `const VERSION` in `plugin/diun.js`; `plugin/index.html` loads `diun.js` and `diun.css` with `?v=<version>`.
 
-| Stufe | Inhalt | Stand |
+1. Raise `VERSION` and the two `?v=`, add a section `## X.Y.Z – YYYY-MM-DD` to `CHANGELOG.md`, merge.
+2. Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, packs `cockpit-image-update-monitor-X.Y.Z.tar.gz` with `SHA256SUMS` and creates the tag `vX.Y.Z` with a release whose notes come from `CHANGELOG.md`.
+
+---
+
+## Known limits
+
+- **Docker with Compose v2 only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated.
+- **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “Registry error”.
+- **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
+- **MariaDB/MySQL dump** is implemented, but tested end-to-end only against Postgres so far.
+- **No automatic cleanup** of old dumps and rollback images.
+- **Version jumps** via a different tag and **database majors** are manual (change the compose file).
+- After updates of images whose version can only be determined by label/digest, `?` shows until the next radar run.
+
+---
+
+## Stages
+
+In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.md)**.
+
+| Stage | Content | State |
 |---|---|---|
-| 1 | Update/Ausrollen mit gleichem Tag, DB-Dump, Rollback, Backups-Tab | **fertig** |
-| 1.1 | Feinschliff: Radar nach Update anstoßen, Aufräumregeln, „Radar jetzt prüfen“, Versionen im Verlauf, MariaDB-E2E, CI | geplant |
-| 2 | Versionssprünge: Ziel-Tag wählen, Compose-Datei (und `.env`) sicher ändern, Diff-Vorschau, gleicher Update-Ablauf | geplant |
-| 3 | Release Notes / Changelog-Links je Version, Hinweise auf Breaking Changes | Idee |
-| 4 | Automatische Updates nach Regeln (z. B. Patch nachts), Benachrichtigungen, Auto-Rollback | Idee |
-| 5 | Datenbank-Majors begleitet (Dump → neue Instanz → Restore, `pg_upgrade`) | Idee |
-| 6 | Verteilung: Debian-Paket, private Registries, Podman, mehrere Hosts | Idee |
+| 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
+| 1.1 | Polish: start the radar after an update, cleanup rules, “Check radar now”, versions in the history, MariaDB E2E, lint in CI | planned |
+| 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
+| 3 | Release notes / changelog links per version, hints on breaking changes | idea |
+| 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
+| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | idea |
+| 6 | Distribution: Debian package, private registries, Podman, several hosts | idea |
 
 ---
 
-## Lizenz
+## License
 
 [Apache License 2.0](LICENSE).
 
-Das Addon enthält keinen Code aus Cockpit (LGPL-2.1+); es nutzt nur zur Laufzeit dessen API `cockpit.js`, die Cockpit selbst ausliefert.
+The add-on contains no code from Cockpit (LGPL-2.1+); it only uses Cockpit's API `cockpit.js` at runtime, which Cockpit itself ships.
 
-Sicherheitslücken bitte vertraulich melden, siehe [SECURITY.md](SECURITY.md).
+Please report security issues privately, see [SECURITY.md](SECURITY.md).

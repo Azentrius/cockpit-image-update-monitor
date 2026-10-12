@@ -31,6 +31,9 @@
     "use strict";
 
     // --- Configuration -----------------------------------------------------
+    // The one place for the version (SemVer). index.html loads this file and
+    // diun.css with ?v=VERSION; tools/check-version.sh keeps them in step.
+    const VERSION = "0.6.1";
     const LIB = "/usr/local/lib/diun-radar/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
