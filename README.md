@@ -525,7 +525,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
-| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, dependencies in the plan | planned |
+| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | planned |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
