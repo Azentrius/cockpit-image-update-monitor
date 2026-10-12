@@ -5,173 +5,215 @@
     <meta charset="utf-8">
     <title data-i18n="app.title">Image updates</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <!-- Shared Azentrius design files (identical in every add-on, see
+         tools/design-files.sha256): the theme script comes first so the page
+         never flashes in the wrong brightness, then the shared stylesheet,
+         then what only this page needs. Everything is local, so Cockpit's
+         default (strict) CSP applies unchanged. -->
+    <script src="azentrius-theme.js?v=0.7.0"></script>
+    <link rel="stylesheet" href="azentrius.css?v=0.7.0">
+    <link rel="stylesheet" href="diun.css?v=0.7.0">
     <!-- Cockpit base API + Cockpit's own translation file for the session
-         language (sets cockpit.language, e.g. "de"; absent for English).
-         No external resources are loaded, so the default (strict) Cockpit
-         CSP applies unchanged. -->
+         language (sets cockpit.language, e.g. "de"; absent for English). -->
     <script src="../base1/cockpit.js"></script>
     <script src="../base1/po.js"></script>
-    <link rel="stylesheet" href="diun.css?v=0.7.0">
+    <script src="icons.js?v=0.7.0"></script>
 </head>
 <body>
     <!-- Static texts are English (the fallback) and get translated by
          diun.js before anything is interactive; see data-i18n. -->
-    <main class="dm-wrap">
-        <header class="dm-head">
-            <h1><span data-i18n="app.title">Image updates</span> <span class="dm-accent">monitor</span></h1>
-            <div class="dm-actions">
-                <span id="dm-meta" class="dm-meta"></span>
-                <!-- Runs the version radar now; hidden while the radar is not set up. -->
-                <button id="dm-radar" class="dm-btn dm-btn-ghost" hidden>
-                    <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label" data-i18n="btn.radar">Run radar now</span>
-                </button>
+    <div class="az-page">
+        <header class="az-page-header">
+            <h1 class="az-page-title"><span data-i18n="app.title">Image updates</span> <span class="az-page-title__suffix">monitor</span></h1>
+            <div class="az-page-actions">
+                <span id="dm-meta" class="az-meta"></span>
                 <!-- Starts busy: the first load begins as soon as diun.js runs. -->
-                <button id="dm-refresh" class="dm-btn is-busy" disabled>
-                    <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label" data-i18n="btn.loading">Loading …</span>
+                <button id="dm-refresh" class="az-btn az-btn--primary is-busy" type="button" disabled aria-busy="true">
+                    <span class="dm-btn-spinner" aria-hidden="true"></span><span data-icon="sync-alt"></span><span class="dm-btn-label" data-i18n="btn.loading">Loading …</span>
                 </button>
             </div>
         </header>
 
-        <nav class="dm-tabs" role="tablist">
-            <button id="dm-tab-btn-updates" class="dm-tab is-active" role="tab" aria-selected="true"
+        <nav class="az-tabs" role="tablist" aria-label="Sections" data-i18n-aria="tabs.label">
+            <button id="dm-tab-btn-updates" class="az-tab" role="tab" type="button" aria-selected="true"
                     aria-controls="dm-tab-updates" data-tab="updates" data-i18n="tab.updates">Updates</button>
-            <button id="dm-tab-btn-backups" class="dm-tab" role="tab" aria-selected="false"
+            <button id="dm-tab-btn-backups" class="az-tab" role="tab" type="button" aria-selected="false" tabindex="-1"
                     aria-controls="dm-tab-backups" data-tab="backups" data-i18n="tab.backups">Backups &amp; dumps</button>
         </nav>
 
-        <div id="dm-status" class="dm-status" hidden></div>
+        <!-- Messages for the whole page: right under the tabs, in every tab. -->
+        <div id="dm-status" class="az-alert dm-status" role="status" hidden></div>
 
-        <!-- ===================== Tab: Updates ===================== -->
-        <section id="dm-tab-updates" role="tabpanel" aria-labelledby="dm-tab-btn-updates">
-            <!-- Requirements panel: only shown when something is missing. -->
-            <section id="dm-deps" class="dm-deps" hidden aria-labelledby="dm-deps-title">
-                <h2 id="dm-deps-title" class="dm-deps-title" data-i18n="deps.title">Missing requirements</h2>
+        <!-- Requirements: only shown when something is missing. -->
+        <section id="dm-deps" class="az-alert az-alert--warning dm-deps" hidden aria-labelledby="dm-deps-title">
+            <span class="az-alert__icon"><span data-icon="exclamation-triangle"></span></span>
+            <h2 id="dm-deps-title" class="az-alert__title" data-i18n="deps.title">Missing requirements</h2>
+            <div class="az-alert__body">
                 <p id="dm-deps-intro" class="dm-deps-intro"></p>
                 <ul id="dm-deps-list" class="dm-deps-list"></ul>
+            </div>
+        </section>
+
+        <!-- ===================== Tab: Updates ===================== -->
+        <section id="dm-tab-updates" class="dm-panel" role="tabpanel" aria-labelledby="dm-tab-btn-updates">
+            <section class="az-card" aria-labelledby="dm-upd-title">
+                <div class="az-card__header">
+                    <h2 class="az-card__title" id="dm-upd-title" data-i18n="upd.cardTitle">Running containers</h2>
+                    <div class="az-card__actions">
+                        <!-- Runs the version radar now; hidden while the radar is not set up. -->
+                        <button id="dm-radar" class="az-btn az-btn--secondary az-btn--sm" type="button" hidden>
+                            <span class="dm-btn-spinner" aria-hidden="true"></span><span data-icon="play"></span><span class="dm-btn-label" data-i18n="btn.radar">Run radar now</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Visible from the very first paint until the first load finishes
+                     (inventory script + Diun log + radar file). -->
+                <div id="dm-loading" class="dm-loading" role="status" aria-live="polite">
+                    <span class="dm-spinner" aria-hidden="true"></span>
+                    <span>
+                        <span class="dm-loading-title" data-i18n="loading.title">Loading overview …</span>
+                        <span class="dm-loading-sub" data-i18n="loading.sub">Inventorying containers and matching them against Diun and the version radar.</span>
+                    </span>
+                </div>
+
+                <div id="dm-table-wrap" class="az-card__body--flush az-table-wrap dm-table-wrap" aria-busy="true">
+                    <table class="az-table az-table--stack" id="dm-table" hidden>
+                        <thead>
+                            <tr>
+                                <th data-i18n="col.container">Container</th>
+                                <th data-i18n="col.image">Image</th>
+                                <th data-i18n="col.configured">Configured</th>
+                                <th data-i18n="col.installed">Installed</th>
+                                <th data-i18n="col.new">Newest version</th>
+                                <th data-i18n="col.status">Status</th>
+                                <th><span class="az-sr" data-i18n="col.actions">Actions</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="dm-rows"></tbody>
+                    </table>
+                </div>
+
+                <!-- What the chip styles in "Newest version" mean. -->
+                <p id="dm-legend" class="dm-legend" hidden>
+                    <span class="dm-legend-item"><span class="dm-chip dm-chip-minor">Minor</span>
+                        <span data-i18n="legend.filled">reachable with the Update button</span></span>
+                    <span class="dm-legend-item"><span class="dm-chip dm-chip-minor dm-chip-manual">Minor</span>
+                        <span data-i18n="legend.outlined">needs a different tag in the compose file</span></span>
+                    <span class="dm-legend-item"><span class="dm-chip dm-chip-info">Major</span>
+                        <span data-i18n="legend.dashed">database major – needs a migration</span></span>
+                </p>
+
+                <p id="dm-empty" class="dm-card-empty" hidden data-i18n="empty">No running containers found.</p>
             </section>
-
-            <!-- Visible from the very first paint until the first load finishes
-                 (inventory script + Diun log + radar file). -->
-            <div id="dm-loading" class="dm-loading" role="status" aria-live="polite">
-                <span class="dm-spinner" aria-hidden="true"></span>
-                <span>
-                    <span class="dm-loading-title" data-i18n="loading.title">Loading overview …</span>
-                    <span class="dm-loading-sub" data-i18n="loading.sub">Inventorying containers and matching them against Diun and the version radar.</span>
-                </span>
-            </div>
-
-            <div id="dm-table-wrap" class="dm-table-wrap" aria-busy="true">
-                <table class="dm-table" id="dm-table" hidden>
-                    <thead>
-                        <tr>
-                            <th data-i18n="col.container">Container</th>
-                            <th data-i18n="col.image">Image</th>
-                            <th data-i18n="col.configured">Configured</th>
-                            <th data-i18n="col.installed">Installed</th>
-                            <th data-i18n="col.new">Newest version</th>
-                            <th data-i18n="col.status">Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="dm-rows"></tbody>
-                </table>
-            </div>
-
-            <!-- What the chip styles in "Newest version" mean. -->
-            <p id="dm-legend" class="dm-legend" hidden>
-                <span class="dm-legend-item"><span class="dm-chip dm-chip-minor">Minor</span>
-                    <span data-i18n="legend.filled">reachable with the Update button</span></span>
-                <span class="dm-legend-item"><span class="dm-chip dm-chip-minor dm-chip-manual">Minor</span>
-                    <span data-i18n="legend.outlined">needs a different tag in the compose file</span></span>
-                <span class="dm-legend-item"><span class="dm-chip dm-chip-info">Major</span>
-                    <span data-i18n="legend.dashed">database major – needs a migration</span></span>
-            </p>
-
-            <div id="dm-empty" class="dm-empty" hidden data-i18n="empty">
-                No running containers found.
-            </div>
         </section>
 
         <!-- ===================== Tab: Backups ===================== -->
-        <section id="dm-tab-backups" role="tabpanel" aria-labelledby="dm-tab-btn-backups" hidden>
-            <p id="dm-bk-summary" class="dm-bk-summary"></p>
-            <p class="dm-bk-note" data-i18n="bk.note">Restoring a dump is deliberately a manual step. Dump files are readable by root only.</p>
+        <section id="dm-tab-backups" class="dm-panel" role="tabpanel" aria-labelledby="dm-tab-btn-backups" hidden>
+            <div class="dm-bk-head">
+                <p id="dm-bk-summary" class="dm-bk-summary"></p>
+                <p class="dm-bk-note" data-i18n="bk.note">Restoring a dump is deliberately a manual step. Dump files are readable by root only.</p>
+            </div>
 
             <!-- Cleanup rules, the daily timer and what would be deleted now. -->
-            <section id="dm-cleanup" class="dm-cleanup" hidden aria-labelledby="dm-cleanup-title">
-                <h2 id="dm-cleanup-title" class="dm-h2" data-i18n="cl.title">Cleanup</h2>
-                <p id="dm-cleanup-rules"></p>
-                <p id="dm-cleanup-timer"></p>
-                <div class="dm-cleanup-now">
-                    <span id="dm-cleanup-preview"></span>
-                    <button id="dm-cleanup-btn" class="dm-btn dm-btn-ghost dm-btn-ghost-danger" hidden data-i18n="cl.button">Clean up now</button>
+            <section id="dm-cleanup" class="az-card" hidden aria-labelledby="dm-cleanup-title">
+                <div class="az-card__header">
+                    <h2 class="az-card__title" id="dm-cleanup-title" data-i18n="cl.title">Cleanup</h2>
+                    <div class="az-card__actions">
+                        <button id="dm-cleanup-btn" class="az-btn az-btn--secondary az-btn--sm" type="button" hidden>
+                            <span data-icon="trash"></span><span data-i18n="cl.button">Clean up now</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="az-card__body dm-cleanup-body">
+                    <p id="dm-cleanup-rules"></p>
+                    <p id="dm-cleanup-timer"></p>
+                    <p id="dm-cleanup-preview" class="dm-cleanup-preview"></p>
                 </div>
             </section>
 
-            <h2 class="dm-h2" data-i18n="bk.ops">Update history</h2>
-            <div class="dm-table-wrap"><table class="dm-table" id="dm-ops-table">
-                <thead><tr>
-                    <th data-i18n="col.when">When</th>
-                    <th data-i18n="col.container">Container</th>
-                    <th data-i18n="col.image">Image</th>
-                    <th data-i18n="col.version">Version</th>
-                    <th data-i18n="col.result">Result</th>
-                    <th data-i18n="col.dumps">Dumps</th>
-                    <th></th>
-                </tr></thead>
-                <tbody id="dm-ops"></tbody>
-            </table></div>
-            <p id="dm-ops-empty" class="dm-empty-small" hidden data-i18n="bk.noOps">No updates yet.</p>
+            <section class="az-card" aria-labelledby="dm-ops-title">
+                <div class="az-card__header">
+                    <h2 class="az-card__title" id="dm-ops-title" data-i18n="bk.ops">Update history</h2>
+                </div>
+                <div class="az-card__body--flush az-table-wrap"><table class="az-table az-table--stack" id="dm-ops-table">
+                    <thead><tr>
+                        <th data-i18n="col.when">When</th>
+                        <th data-i18n="col.container">Container</th>
+                        <th data-i18n="col.image">Image</th>
+                        <th data-i18n="col.version">Version</th>
+                        <th data-i18n="col.result">Result</th>
+                        <th data-i18n="col.dumps">Dumps</th>
+                        <th><span class="az-sr" data-i18n="col.actions">Actions</span></th>
+                    </tr></thead>
+                    <tbody id="dm-ops"></tbody>
+                </table></div>
+                <p id="dm-ops-empty" class="dm-card-empty" hidden data-i18n="bk.noOps">No updates yet.</p>
+            </section>
 
-            <h2 class="dm-h2" data-i18n="bk.dumps">Database dumps</h2>
-            <div class="dm-table-wrap"><table class="dm-table" id="dm-dumps-table">
-                <thead><tr>
-                    <th data-i18n="col.created">Created</th>
-                    <th data-i18n="col.project">Project</th>
-                    <th data-i18n="col.container">Container</th>
-                    <th data-i18n="col.file">File</th>
-                    <th data-i18n="col.size">Size</th>
-                    <th></th>
-                </tr></thead>
-                <tbody id="dm-dumps"></tbody>
-            </table></div>
-            <p id="dm-dumps-empty" class="dm-empty-small" hidden data-i18n="bk.noDumps">No dumps.</p>
+            <section class="az-card" aria-labelledby="dm-dumps-title">
+                <div class="az-card__header">
+                    <h2 class="az-card__title" id="dm-dumps-title" data-i18n="bk.dumps">Database dumps</h2>
+                </div>
+                <div class="az-card__body--flush az-table-wrap"><table class="az-table az-table--stack" id="dm-dumps-table">
+                    <thead><tr>
+                        <th data-i18n="col.created">Created</th>
+                        <th data-i18n="col.project">Project</th>
+                        <th data-i18n="col.container">Container</th>
+                        <th data-i18n="col.file">File</th>
+                        <th data-i18n="col.size">Size</th>
+                        <th><span class="az-sr" data-i18n="col.actions">Actions</span></th>
+                    </tr></thead>
+                    <tbody id="dm-dumps"></tbody>
+                </table></div>
+                <p id="dm-dumps-empty" class="dm-card-empty" hidden data-i18n="bk.noDumps">No dumps.</p>
+            </section>
 
-            <h2 class="dm-h2" data-i18n="bk.images">Rollback images</h2>
-            <div class="dm-table-wrap"><table class="dm-table" id="dm-images-table">
-                <thead><tr>
-                    <th data-i18n="col.image">Image</th>
-                    <th data-i18n="col.created">Created</th>
-                    <th data-i18n="col.size">Size</th>
-                    <th data-i18n="col.status">Status</th>
-                    <th></th>
-                </tr></thead>
-                <tbody id="dm-images"></tbody>
-            </table></div>
-            <p id="dm-images-empty" class="dm-empty-small" hidden data-i18n="bk.noImages">No rollback images.</p>
+            <section class="az-card" aria-labelledby="dm-images-title">
+                <div class="az-card__header">
+                    <h2 class="az-card__title" id="dm-images-title" data-i18n="bk.images">Rollback images</h2>
+                </div>
+                <div class="az-card__body--flush az-table-wrap"><table class="az-table az-table--stack" id="dm-images-table">
+                    <thead><tr>
+                        <th data-i18n="col.image">Image</th>
+                        <th data-i18n="col.created">Created</th>
+                        <th data-i18n="col.size">Size</th>
+                        <th data-i18n="col.status">Status</th>
+                        <th><span class="az-sr" data-i18n="col.actions">Actions</span></th>
+                    </tr></thead>
+                    <tbody id="dm-images"></tbody>
+                </table></div>
+                <p id="dm-images-empty" class="dm-card-empty" hidden data-i18n="bk.noImages">No rollback images.</p>
+            </section>
         </section>
-    </main>
+
+        <footer class="az-signature">
+            <a class="az-signature__mark" href="https://github.com/Azentrius/cockpit-image-update-monitor" target="_blank" rel="noopener noreferrer">Azentrius</a>
+            <span class="az-signature__meta"><span id="dm-sig-version">Image updates monitor</span><span id="dm-sig-host" hidden></span></span>
+        </footer>
+    </div>
 
     <!-- One dialog for every action: install requirement, update, rollback,
-         delete. Shows a confirmation first, then the live output. -->
-    <dialog id="dm-dialog" class="dm-dialog" aria-labelledby="dm-dialog-title">
-        <h2 id="dm-dialog-title" class="dm-dialog-title"></h2>
-        <p id="dm-dialog-desc" class="dm-dialog-desc"></p>
-        <div id="dm-dialog-body" class="dm-dialog-body"></div>
-        <p id="dm-dialog-note" class="dm-dialog-note" data-i18n="dialog.note">Runs with administrator privileges via Cockpit. Output appears here live.</p>
-        <pre id="dm-dialog-log" class="dm-dialog-log" hidden></pre>
-        <div class="dm-dialog-foot">
-            <span id="dm-dialog-result" class="dm-dialog-result" role="status" aria-live="polite"></span>
-            <span class="dm-dialog-buttons">
-                <button id="dm-dialog-cancel" class="dm-btn dm-btn-ghost" data-i18n="dialog.cancel">Cancel</button>
-                <button id="dm-dialog-extra" class="dm-btn dm-btn-danger" hidden>
-                    <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label"></span>
-                </button>
-                <button id="dm-dialog-confirm" class="dm-btn">
-                    <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label"></span>
-                </button>
-            </span>
+         delete, cleanup. Shows a confirmation first, then the live output. -->
+    <dialog id="dm-dialog" class="az-modal dm-dialog" aria-labelledby="dm-dialog-title">
+        <div class="az-modal__header">
+            <h2 id="dm-dialog-title" class="az-modal__title"></h2>
+        </div>
+        <div class="az-modal__body">
+            <p id="dm-dialog-desc" class="dm-dialog-desc"></p>
+            <div id="dm-dialog-body" class="dm-dialog-body"></div>
+            <p id="dm-dialog-note" class="dm-dialog-note" data-i18n="dialog.note">Runs with administrator privileges via Cockpit. Output appears here live.</p>
+            <pre id="dm-dialog-log" class="dm-dialog-log" hidden></pre>
+            <p id="dm-dialog-result" class="dm-dialog-result" role="status" aria-live="polite"></p>
+        </div>
+        <div class="az-modal__footer">
+            <button id="dm-dialog-confirm" class="az-btn az-btn--primary" type="button">
+                <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label"></span>
+            </button>
+            <button id="dm-dialog-extra" class="az-btn az-btn--primary" type="button" hidden>
+                <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label"></span>
+            </button>
+            <button id="dm-dialog-cancel" class="az-btn az-btn--link" type="button" data-i18n="dialog.cancel">Cancel</button>
         </div>
     </dialog>
 

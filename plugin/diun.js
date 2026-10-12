@@ -32,8 +32,9 @@
     "use strict";
 
     // --- Configuration -----------------------------------------------------
-    // The one place for the version (SemVer). index.html loads this file and
-    // diun.css with ?v=VERSION; tools/check-version.sh keeps them in step.
+    // The one place for the version (SemVer). index.html loads every script and
+    // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
+    // them in step.
     const VERSION = "0.7.0";
     const LIB = "/usr/local/lib/diun-radar/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
@@ -52,6 +53,7 @@
             "app.title": "Image updates",
             "tab.updates": "Updates",
             "tab.backups": "Backups & dumps",
+            "tabs.label": "Sections",
             "btn.refresh": "Refresh",
             "btn.loading": "Loading …",
             "btn.dismiss": "Dismiss",
@@ -79,13 +81,14 @@
             "col.file": "File",
             "col.size": "Size",
             "col.version": "Version",
+            "col.actions": "Actions",
             "empty": "No running containers found.",
             "badge.update": "Update available",
             "badge.pulled": "Roll-out pending",
             "badge.pulledTip": "A newer image is already on the server, but the container still runs the old one.",
             "badge.newver": "New version",
-            "badge.ok": "up to date",
-            "badge.unknown": "unknown",
+            "badge.ok": "Up to date",
+            "badge.unknown": "Unknown",
             "row.manualOnly": "manual only",
             "row.manualOnlyTip": "Not started with docker compose – the add-on cannot recreate it safely.",
             "cfg.tip": "Tag as set in the compose file (or with docker run).",
@@ -164,6 +167,7 @@
             "upd.titlePulled": "Roll out {name}?",
             "upd.desc": "Pulls the current image for {image} and recreates the affected containers. The image running now is kept as a rollback copy first.",
             "upd.descPulled": "The newer image for {image} is already on the server. The affected containers are recreated with it; the image running now is kept as a rollback copy first.",
+            "upd.cardTitle": "Running containers",
             "upd.planning": "Checking what the update affects …",
             "upd.containers": "Affected containers",
             "upd.project": "Compose project",
@@ -261,6 +265,7 @@
             "app.title": "Image-Updates",
             "tab.updates": "Updates",
             "tab.backups": "Backups & Dumps",
+            "tabs.label": "Bereiche",
             "btn.refresh": "Aktualisieren",
             "btn.loading": "Lädt …",
             "btn.dismiss": "Erledigt",
@@ -288,13 +293,14 @@
             "col.file": "Datei",
             "col.size": "Größe",
             "col.version": "Version",
+            "col.actions": "Aktionen",
             "empty": "Keine laufenden Container gefunden.",
             "badge.update": "Update verfügbar",
             "badge.pulled": "Ausrollen ausstehend",
             "badge.pulledTip": "Ein neueres Image liegt schon auf dem Server, der Container läuft aber noch auf dem alten.",
             "badge.newver": "Neue Version",
-            "badge.ok": "aktuell",
-            "badge.unknown": "unbekannt",
+            "badge.ok": "Aktuell",
+            "badge.unknown": "Unbekannt",
             "row.manualOnly": "nur manuell",
             "row.manualOnlyTip": "Nicht mit docker compose gestartet – das Addon kann ihn nicht sicher neu erstellen.",
             "cfg.tip": "Tag, wie er in der Compose-Datei (bzw. bei docker run) steht.",
@@ -373,6 +379,7 @@
             "upd.titlePulled": "{name} ausrollen?",
             "upd.desc": "Zieht das aktuelle Image für {image} und erstellt die betroffenen Container neu. Das jetzt laufende Image wird vorher als Rollback-Kopie gesichert.",
             "upd.descPulled": "Das neuere Image für {image} liegt schon auf dem Server. Die betroffenen Container werden damit neu erstellt; das jetzt laufende Image wird vorher als Rollback-Kopie gesichert.",
+            "upd.cardTitle": "Laufende Container",
             "upd.planning": "Prüfe, was das Update betrifft …",
             "upd.containers": "Betroffene Container",
             "upd.project": "Compose-Projekt",
@@ -478,10 +485,32 @@
         return s.replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m));
     }
 
+    // --- Icons -------------------------------------------------------------
+    // The shared set is window.AzIcons from icons.js (Font Awesome Free 5 Solid,
+    // CC BY 4.0, as shipped by PatternFly). "ban" is not in it yet; it comes
+    // from the same set, path as in the design system's assets/Icons/ban.svg.
+    const LOCAL_ICONS = {
+        "ban": { viewBox: "0 0 512 512", d: "M256 8C119.034 8 8 119.033 8 256s111.034 248 248 248 248-111.034 248-248S392.967 8 256 8zm130.108 117.892c65.448 65.448 70 165.481 20.677 235.637L150.47 105.216c70.204-49.356 170.226-44.735 235.638 20.676zM125.892 386.108c-65.448-65.448-70-165.481-20.677-235.637L361.53 406.784c-70.203 49.356-170.226 44.736-235.638-20.676z" },
+    };
+
+    // Inline SVG (HTML string) in the text colour; "" when the set is missing.
+    function icon(name) {
+        const def = (window.AzIcons || {})[name] || LOCAL_ICONS[name];
+        if (!def) return "";
+        return `<svg class="az-icon" viewBox="${def.viewBox}" aria-hidden="true" focusable="false" data-icon="${name}">` +
+               `<path d="${def.d}"></path></svg>`;
+    }
+
     function applyStaticTexts() {
         document.documentElement.lang = LANG;
         document.querySelectorAll("[data-i18n]").forEach((el) => {
             el.textContent = t(el.dataset.i18n);
+        });
+        document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+            el.setAttribute("aria-label", t(el.dataset.i18nAria));
+        });
+        document.querySelectorAll("span[data-icon]").forEach((el) => {
+            el.outerHTML = icon(el.dataset.icon);
         });
     }
 
@@ -591,12 +620,31 @@
 
     // --- Rendering: updates table ------------------------------------------
     function badge(kind) {
-        const map = { update: ["upd", "badge.update"], pulled: ["upd", "badge.pulled"],
-                      newver: ["new", "badge.newver"], ok: ["ok", "badge.ok"],
-                      unknown: ["unknown", "badge.unknown"] };
-        const [cls, key] = map[kind] || map.unknown;
-        const tip = kind === "pulled" ? ` title="${esc(t("badge.pulledTip"))}"` : "";
-        return `<span class="dm-badge dm-badge-${cls}"${tip}>${esc(t(key))}</span>`;
+        const [cls, ic, key] = STATUS[kind] || STATUS.unknown;
+        return label(cls, ic, t(key), kind === "pulled" ? t("badge.pulledTip") : "");
+    }
+
+    // Status language of the design system: colour, icon and word say the
+    // same; gold is never a status. kind "" = without judgement.
+    const STATUS = {
+        update: ["info", "info-circle", "badge.update"],
+        pulled: ["info", "info-circle", "badge.pulled"],
+        newver: ["info", "info-circle", "badge.newver"],
+        ok: ["success", "check-circle", "badge.ok"],
+        unknown: ["", "ban", "badge.unknown"],
+    };
+    function label(kind, iconName, text, title) {
+        return `<span class="az-label${kind ? " az-label--" + kind : ""}"${title ? ` title="${esc(title)}"` : ""}>` +
+               `${iconName ? icon(iconName) : ""}${esc(text)}</span>`;
+    }
+    // Text button with an icon on the left (az-btn--secondary az-btn--sm).
+    function textButton(iconName, text, attrs) {
+        return `<button class="az-btn az-btn--secondary az-btn--sm" type="button" ${attrs}>${icon(iconName)}<span>${esc(text)}</span></button>`;
+    }
+    // Tool in a row: icon only, the word as aria-label and tooltip.
+    function iconButton(iconName, text, attrs, title) {
+        return `<button class="az-btn az-btn--plain az-btn--sm" type="button" aria-label="${esc(text)}" ` +
+               `title="${esc(title || text)}" ${attrs}>${icon(iconName)}</button>`;
     }
 
     const LEVELS = [["patch", "Patch"], ["minor", "Minor"], ["major", "Major"]];
@@ -709,25 +757,25 @@
         const actions = [];
         if (kind === "update" || kind === "pulled") {
             if (ctn.managed) {
-                actions.push(`<button class="dm-btn dm-btn-ghost dm-btn-strong" data-update="${esc(ctn.name)}" data-kind="${kind}">` +
-                             `${esc(t(kind === "pulled" ? "btn.rollout" : "btn.update"))}</button>`);
+                actions.push(textButton("arrow-circle-up", t(kind === "pulled" ? "btn.rollout" : "btn.update"),
+                                        `data-update="${esc(ctn.name)}" data-kind="${kind}"`));
             } else {
                 actions.push(`<span class="dm-muted dm-small" title="${esc(t("row.manualOnlyTip"))}">${esc(t("row.manualOnly"))}</span>`);
             }
         }
         if (kind === "update") {
-            actions.push(`<button class="dm-btn dm-btn-ghost" data-key="${esc(evKey(ev))}">${esc(t("btn.dismiss"))}</button>`);
+            actions.push(iconButton("check", t("btn.dismiss"), `data-key="${esc(evKey(ev))}"`));
         }
 
         const L = (key) => esc(t(key));
         return { kind, html:
             `<td data-label="${L("col.container")}"><span class="dm-cell">${esc(ctn.name)}</span></td>` +
-            `<td data-label="${L("col.image")}" class="dm-img"><span class="dm-cell">${imgCell}</span></td>` +
+            `<td data-label="${L("col.image")}" class="dm-img"><span class="dm-cell az-mono">${imgCell}</span></td>` +
             `<td data-label="${L("col.configured")}"><span class="dm-cell dm-ver dm-cfg" title="${L("cfg.tip")}">${esc(ctn.tag)}</span></td>` +
-            `<td data-label="${L("col.installed")}"><span class="dm-cell">${installedCell(ctn, rec, inst)}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.installed")}"><span class="dm-cell">${installedCell(ctn, rec, inst)}</span></td>` +
             `<td data-label="${L("col.new")}"><span class="dm-cell">${ver.html}</span></td>` +
             `<td data-label="${L("col.status")}"><span class="dm-cell">${badge(kind)}</span></td>` +
-            `<td class="dm-action" data-label=""><span class="dm-cell">${actions.join("")}</span></td>`
+            `<td class="az-cell-actions"><span class="dm-cell">${actions.join("")}</span></td>`
         };
     }
 
@@ -842,12 +890,13 @@
             const li = document.createElement("li");
             li.className = "dm-dep";
             const btn = p.action
-                ? `<button class="dm-btn dm-btn-ghost" data-verb="${esc(p.action[0])}" data-target="${esc(p.action[1])}">${esc(t(p.action[2]))}</button>`
+                ? textButton(p.action[0] === "start" ? "play" : "plus", t(p.action[2]),
+                             `data-verb="${esc(p.action[0])}" data-target="${esc(p.action[1])}"`)
                 : "";
             li.innerHTML =
                 `<div class="dm-dep-main">` +
                   `<span class="dm-dep-name">${esc(t("dep." + p.id))}</span> ` +
-                  `<span class="dm-badge dm-badge-warn">${esc(p.state)}</span>` +
+                  label("warning", "exclamation-triangle", p.state) +
                   `<div class="dm-dep-desc">${esc(t("dep." + p.id + ".desc"))}</div>` +
                   (p.hint ? `<div class="dm-dep-hint">${esc(p.hint)}</div>` : "") +
                 `</div>` +
@@ -913,7 +962,8 @@
             b.hidden = !opts.visible;
             b.disabled = !!opts.busy || !!opts.disabled;
             b.classList.toggle("is-busy", !!opts.busy);
-            b.classList.toggle("dm-btn-danger", !!opts.danger);
+            b.classList.toggle("az-btn--danger", !!opts.danger);
+            b.classList.toggle("az-btn--primary", !opts.danger);
             b.querySelector(".dm-btn-label").textContent = label || "";
         },
 
@@ -1144,7 +1194,7 @@
     }
 
     function offerRollback(op, name) {
-        dlg.btn("dm-dialog-extra", t("rb.button"), { visible: true, danger: true });
+        dlg.btn("dm-dialog-extra", t("rb.button"), { visible: true });
         dlg.onExtra = () => {
             dlg.run([UPDATE_CMD, "rollback", op]).then((o) => {
                 dlg.result(o.ok ? t("rb.ok") : (o.noAdmin ? t("dialog.noAdmin") : t("rb.failed")), !!o.ok);
@@ -1157,7 +1207,7 @@
         confirmAndRun({
             title: t("rb.title", { name: op.container }),
             desc: t("rb.desc", { image: op.image, rb: op.rollback, services: (op.services || []).join(", ") }),
-            confirm: { label: t("rb.button"), danger: true, argv: () => [UPDATE_CMD, "rollback", op.id] },
+            confirm: { label: t("rb.button"), argv: () => [UPDATE_CMD, "rollback", op.id] },
             onDone: (o) => {
                 if (o.ok) { dlg.result(t("rb.ok"), true); return true; }
                 if (o.exit === 4) { dlg.result(t("rb.failed"), false); return true; }
@@ -1169,13 +1219,15 @@
     // --- Backups tab -------------------------------------------------------
     let backups = null;
 
+    let backupsError = "";
+
     function loadBackups() {
-        return spawnHelper([UPDATE_CMD, "backups"], "try")
-            .then((out) => { backups = JSON.parse(out); renderBackups(); })
+        return Promise.resolve().then(() => spawnHelper([UPDATE_CMD, "backups"], "try"))
+            .then((out) => { backups = JSON.parse(out); backupsError = ""; renderBackups(); })
             .catch((ex) => {
                 backups = null;
-                showStatus(isNoAdmin(ex) ? t("bk.needAdmin")
-                                         : t("bk.error", { msg: (ex && (ex.message || ex.problem)) || ex }), true);
+                backupsError = isNoAdmin(ex) ? t("bk.needAdmin")
+                    : t("bk.error", { msg: (ex && (ex.message || ex.problem)) || ex });
                 renderBackups();
             });
     }
@@ -1183,13 +1235,14 @@
     function opResult(o) {
         if (o.rolled_back) {
             return o.rollback_status === "failed"
-                ? `<span class="dm-badge dm-badge-warn">${esc(t("res.rollbackFailed"))}</span>`
-                : `<span class="dm-badge dm-badge-unknown">${esc(t("res.rolledBack"))}</span>`;
+                ? label("danger", "exclamation-circle", t("res.rollbackFailed"))
+                : label("", "history", t("res.rolledBack"));
         }
-        const map = { ok: ["ok", "res.ok"], nochange: ["unknown", "res.nochange"],
-                      failed: ["warn", "res.failed"], running: ["warn", "res.running"] };
-        const [cls, key] = map[o.status] || map.running;
-        return `<span class="dm-badge dm-badge-${cls}">${esc(t(key))}</span>`;
+        const map = { ok: ["success", "check-circle", "res.ok"], nochange: ["", null, "res.nochange"],
+                      failed: ["danger", "exclamation-circle", "res.failed"],
+                      running: ["warning", "exclamation-triangle", "res.running"] };
+        const [cls, ic, key] = map[o.status] || map.running;
+        return label(cls, ic, t(key));
     }
 
     // "16.14 → 16.15"; older history entries have no versions.
@@ -1201,7 +1254,7 @@
     }
 
     function cleanupMark() {
-        return ` <span class="dm-badge dm-badge-warn" title="${esc(t("cl.markTip"))}">${esc(t("cl.mark"))}</span>`;
+        return " " + label("warning", "exclamation-triangle", t("cl.mark"), t("cl.markTip"));
     }
 
     // Rules, daily timer and "what would be deleted now" (from `backups`),
@@ -1212,7 +1265,7 @@
         if (!c) return;
         const rules = $("dm-cleanup-rules");
         if (c.error) {
-            rules.innerHTML = `<span class="dm-warn-text">${esc(t("cl.error", { msg: c.error }))}</span>`;
+            rules.innerHTML = `<span class="dm-danger-text">${esc(t("cl.error", { msg: c.error }))}</span>`;
         } else {
             const keep = c.keep_dumps ? t("cl.keep", { n: c.keep_dumps }) : t("cl.keepOff");
             const days = c.image_days ? t("cl.days", { n: c.image_days }) : t("cl.daysOff");
@@ -1225,11 +1278,8 @@
         timer.hidden = !cl;
         timer.textContent = cl ? t(cl.state === "active" ? "cl.timerOn" : "cl.timerOff") : "";
         if (cl && cl.state !== "active" && cl.can_install) {
-            const setup = document.createElement("button");
-            setup.className = "dm-btn dm-btn-ghost dm-btn-inline";
-            setup.textContent = t("action.setup");
-            setup.addEventListener("click", () => openInstallDialog("install", "cleanup"));
-            timer.append(" ", setup);
+            timer.insertAdjacentHTML("beforeend", " " + textButton("plus", t("action.setup"), 'data-setup="cleanup"'));
+            timer.querySelector("button[data-setup]").addEventListener("click", () => openInstallDialog("install", "cleanup"));
         }
         const nd = (c.dumps || []).length, ni = (c.images || []).length;
         $("dm-cleanup-preview").textContent = c.error ? "" : (nd + ni)
@@ -1266,27 +1316,29 @@
         const L = (key) => esc(t(key));
         const doomed = new Set(b.cleanup ? (b.cleanup.dumps || []).concat(b.cleanup.images || []) : []);
         renderCleanup();
+        const summary = $("dm-bk-summary");
+        summary.classList.toggle("dm-danger-text", !backups && !!backupsError);
         if (backups) {
-            $("dm-bk-summary").textContent = t("bk.summary", {
+            summary.textContent = t("bk.summary", {
                 dumps: t("bk.dumpsN", { n: b.dumps.length, size: human(b.dump_bytes) }),
                 images: t("bk.imagesN", { n: b.images.length }),
                 free: human(b.free_bytes), dir: b.dir,
             });
         } else {
-            $("dm-bk-summary").textContent = "";
+            summary.textContent = backupsError;
         }
 
         const ops = $("dm-ops");
         ops.innerHTML = b.ops.map((o, i) =>
             `<tr>` +
-            `<td data-label="${L("col.when")}"><span class="dm-cell">${esc(fmtDate(new Date(o.ts)))}</span></td>` +
-            `<td data-label="${L("col.container")}"><span class="dm-cell">${esc(o.container || "")}</span></td>` +
-            `<td data-label="${L("col.image")}"><span class="dm-cell dm-ver">${esc(o.image || "")}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.when")}"><span class="dm-cell">${esc(fmtDate(new Date(o.ts)))}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.container")}"><span class="dm-cell">${esc(o.container || "")}</span></td>` +
+            `<td data-label="${L("col.image")}"><span class="dm-cell az-mono">${esc(o.image || "")}</span></td>` +
             `<td data-label="${L("col.version")}"><span class="dm-cell">${opVersions(o)}</span></td>` +
             `<td data-label="${L("col.result")}"><span class="dm-cell">${opResult(o)}</span></td>` +
             `<td data-label="${L("col.dumps")}"><span class="dm-cell">${(o.dumps || []).length}</span></td>` +
-            `<td class="dm-action" data-label=""><span class="dm-cell">` +
-              (o.can_rollback ? `<button class="dm-btn dm-btn-ghost" data-op="${i}">${L("rb.button")}</button>` : "") +
+            `<td class="az-cell-actions"><span class="dm-cell">` +
+              (o.can_rollback ? textButton("history", t("rb.button"), `data-op="${i}"`) : "") +
             `</span></td></tr>`).join("");
         $("dm-ops-empty").hidden = b.ops.length > 0;
         $("dm-ops-table").hidden = b.ops.length === 0;
@@ -1297,14 +1349,14 @@
         const dumps = $("dm-dumps");
         dumps.innerHTML = b.dumps.map((d, i) =>
             `<tr>` +
-            `<td data-label="${L("col.created")}"><span class="dm-cell">${esc(fmtDate(new Date(d.mtime * 1000)))}</span></td>` +
-            `<td data-label="${L("col.project")}"><span class="dm-cell">${esc(d.project)}</span></td>` +
-            `<td data-label="${L("col.container")}"><span class="dm-cell">${esc(d.container)}</span></td>` +
-            `<td data-label="${L("col.file")}"><span class="dm-cell"><span class="dm-digest">${esc(d.path.split("/").pop())}</span>` +
+            `<td class="az-nowrap" data-label="${L("col.created")}"><span class="dm-cell">${esc(fmtDate(new Date(d.mtime * 1000)))}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.project")}"><span class="dm-cell">${esc(d.project)}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.container")}"><span class="dm-cell">${esc(d.container)}</span></td>` +
+            `<td data-label="${L("col.file")}"><span class="dm-cell"><span class="az-mono dm-digest">${esc(d.path.split("/").pop())}</span>` +
               `${doomed.has(d.path) ? cleanupMark() : ""}</span></td>` +
-            `<td data-label="${L("col.size")}"><span class="dm-cell">${esc(human(d.size))}</span></td>` +
-            `<td class="dm-action" data-label=""><span class="dm-cell">` +
-              `<button class="dm-btn dm-btn-ghost dm-btn-ghost-danger" data-dump="${i}">${L("btn.delete")}</button>` +
+            `<td class="az-nowrap" data-label="${L("col.size")}"><span class="dm-cell">${esc(human(d.size))}</span></td>` +
+            `<td class="az-cell-actions"><span class="dm-cell">` +
+              iconButton("trash", t("btn.delete"), `data-dump="${i}"`) +
             `</span></td></tr>`).join("");
         $("dm-dumps-empty").hidden = b.dumps.length > 0;
         $("dm-dumps-table").hidden = b.dumps.length === 0;
@@ -1321,16 +1373,16 @@
         const imgs = $("dm-images");
         imgs.innerHTML = b.images.map((im, i) =>
             `<tr>` +
-            `<td data-label="${L("col.image")}"><span class="dm-cell dm-ver">${esc(im.ref)}</span></td>` +
-            `<td data-label="${L("col.created")}"><span class="dm-cell">${esc(String(im.created || "").slice(0, 16))}</span></td>` +
-            `<td data-label="${L("col.size")}"><span class="dm-cell">${esc(im.size)}</span></td>` +
+            `<td data-label="${L("col.image")}"><span class="dm-cell az-mono">${esc(im.ref)}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.created")}"><span class="dm-cell">${esc(String(im.created || "").slice(0, 16))}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.size")}"><span class="dm-cell">${esc(im.size)}</span></td>` +
             `<td data-label="${L("col.status")}"><span class="dm-cell">` +
-              (im.in_use ? `<span class="dm-badge dm-badge-new" title="${L("img.inUseTip")}">${L("img.inUse")}</span>`
+              (im.in_use ? label("", null, t("img.inUse"), t("img.inUseTip"))
                          : `<span class="dm-muted">${L("img.free")}</span>${doomed.has(im.ref) ? cleanupMark() : ""}`) +
             `</span></td>` +
-            `<td class="dm-action" data-label=""><span class="dm-cell">` +
-              `<button class="dm-btn dm-btn-ghost dm-btn-ghost-danger" data-img="${i}"` +
-              (im.in_use ? ` disabled title="${L("img.inUseTip")}"` : "") + `>${L("btn.delete")}</button>` +
+            `<td class="az-cell-actions"><span class="dm-cell">` +
+              iconButton("trash", t("btn.delete"), `data-img="${i}"` + (im.in_use ? " disabled" : ""),
+                         im.in_use ? t("img.inUseTip") : "") +
             `</span></td></tr>`).join("");
         $("dm-images-empty").hidden = b.images.length > 0;
         $("dm-images-table").hidden = b.images.length === 0;
@@ -1348,16 +1400,35 @@
     // --- Tabs ----------------------------------------------------------------
     let currentTab = "updates";
 
-    function showTab(name) {
+    // WAI-ARIA tabs: only the tab shown is reachable with Tab, the arrow keys
+    // move between the tabs, Home and End go to the first and the last.
+    // Switching only shows another panel; it loads nothing, and "Refresh"
+    // keeps the tab that is shown.
+    const tabButtons = () => Array.from(document.querySelectorAll('.az-tabs [role="tab"]'));
+
+    function showTab(name, focus) {
         currentTab = name;
-        document.querySelectorAll(".dm-tab").forEach((b) => {
+        tabButtons().forEach((b) => {
             const on = b.dataset.tab === name;
-            b.classList.toggle("is-active", on);
             b.setAttribute("aria-selected", on ? "true" : "false");
+            if (on) b.removeAttribute("tabindex"); else b.setAttribute("tabindex", "-1");
+            $(b.getAttribute("aria-controls")).hidden = !on;
+            if (on && focus) b.focus();
         });
-        $("dm-tab-updates").hidden = name !== "updates";
-        $("dm-tab-backups").hidden = name !== "backups";
-        if (name === "backups") safeLoad();
+    }
+
+    function onTabKey(ev) {
+        const all = tabButtons();
+        const k = all.indexOf(document.activeElement);
+        if (k < 0) return;
+        let next = null;
+        if (ev.key === "ArrowRight") next = all[(k + 1) % all.length];
+        else if (ev.key === "ArrowLeft") next = all[(k - 1 + all.length) % all.length];
+        else if (ev.key === "Home") next = all[0];
+        else if (ev.key === "End") next = all[all.length - 1];
+        if (!next) return;
+        ev.preventDefault();
+        showTab(next.dataset.tab, true);
     }
 
     // --- State -------------------------------------------------------------
@@ -1369,9 +1440,23 @@
     }
     function showStatus(msg, isError) {
         const el = $("dm-status");
-        el.textContent = msg;
-        el.classList.toggle("dm-status-error", !!isError);
+        el.innerHTML = `<span class="az-alert__icon">${icon(isError ? "exclamation-circle" : "info-circle")}</span>` +
+                       `<p class="az-alert__body">${esc(msg)}</p>`;
+        el.classList.toggle("az-alert--danger", !!isError);
         el.hidden = false;
+    }
+
+    // --- Signature -----------------------------------------------------------
+    // Foot of the page: product name with version, then the server's host name.
+    function renderSignature() {
+        $("dm-sig-version").textContent = t("app.title") + " monitor " + VERSION;
+        Promise.resolve().then(() => cockpit.file("/etc/hostname").read())
+            .then((text) => {
+                const host = String(text || "").trim().split(/\s+/)[0];
+                $("dm-sig-host").textContent = host;
+                $("dm-sig-host").hidden = !host;
+            })
+            .catch(() => { /* no host name: the signature shows the product only */ });
     }
 
     // --- Load --------------------------------------------------------------
@@ -1405,8 +1490,8 @@
         }).catch((err) => {
             showStatus(t("status.loadError", { msg: err.message || err }), true);
         });
-        // The backups listing runs only while its tab is open.
-        return currentTab === "backups" ? jobs.then(loadBackups) : jobs;
+        // Both tabs are loaded together, so switching tabs loads nothing.
+        return jobs.then(loadBackups);
     }
 
     // Loading indicator.
@@ -1418,6 +1503,7 @@
         const btn = $("dm-refresh");
         btn.disabled = on;
         btn.classList.toggle("is-busy", on);
+        btn.setAttribute("aria-busy", on ? "true" : "false");
         btn.querySelector(".dm-btn-label").textContent = t(on ? "btn.loading" : "btn.refresh");
         document.querySelectorAll(".dm-table-wrap").forEach((wrap) => {
             wrap.classList.toggle("is-busy", on);
@@ -1466,9 +1552,9 @@
     $("dm-refresh").addEventListener("click", () => safeLoad());
     $("dm-radar").addEventListener("click", runRadar);
     $("dm-cleanup-btn").addEventListener("click", startCleanup);
-    document.querySelectorAll(".dm-tab").forEach((b) => {
-        b.addEventListener("click", () => showTab(b.dataset.tab));
-    });
+    tabButtons().forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab, false)));
+    document.querySelector(".az-tabs").addEventListener("keydown", onTabKey);
+    renderSignature();
     $("dm-dialog-confirm").addEventListener("click", () => {
         if (!dlg.running && dlg.onConfirm) dlg.onConfirm();
     });

@@ -85,13 +85,14 @@ async function scenario(name, { files = fixtures, spawnOk = true, now = "2026-10
 
     // E: a changed versions.json tag must trigger exactly one reload, same tag none.
     const { w, calls, watchers } = await scenario("E: watch behaviour");
-    const before = calls.spawn.length;
+    const inventoryRuns = () => calls.spawn.filter((c) => c.includes("diun-inventory.py")).length;
+    const before = inventoryRuns();
     const vw = watchers.find((x) => x.p.endsWith("versions.json"));
     vw.cb(fixtures["/var/lib/diun-radar/versions.json"], "tag-1");   // same tag
     await new Promise((r) => setTimeout(r, 50));
-    const same = calls.spawn.length - before;
+    const same = inventoryRuns() - before;
     w.__setTag("/var/lib/diun-radar/versions.json", "tag-2");        // file changed on disk
     vw.cb(fixtures["/var/lib/diun-radar/versions.json"], "tag-2");
     await new Promise((r) => setTimeout(r, 50));
-    console.log(`reloads after same tag: ${same}, after new tag: ${calls.spawn.length - before - same}`);
+    console.log(`reloads after same tag: ${same}, after new tag: ${inventoryRuns() - before - same}`);
 })();

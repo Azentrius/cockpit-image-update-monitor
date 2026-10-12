@@ -1,439 +1,211 @@
-/* SPDX-License-Identifier: Apache-2.0 */
-/* Azentrius palette. Fonts are intentionally a system stack so the admin
- * UI makes zero external requests (DSGVO-clean, strict CSP). To match the
- * brand exactly, drop DM Sans / DM Serif Display woff2 files next to this
- * file and add @font-face here — still fully local, no fonts.bunny.net call. */
+/* Image updates monitor: only what this page needs on top of azentrius.css
+ * (tokens for light and dark, page frame, buttons, cards, tables, labels,
+ * dialogs). Colours always come from the tokens there.
+ * SPDX-License-Identifier: Apache-2.0 */
 
-:root {
-    --az-bg: #0a0a0f;
-    --az-surface: #14141c;
-    --az-line: #26262f;
-    --az-text: #e8e6e0;
-    --az-muted: #8d8a82;
-    --az-gold: #c8a96e;
+/* The name suffix "monitor": DM Serif Display italic, subset to its letters. */
+@font-face { font-family: "DM Serif Display"; src: url("DMSerifDisplay-Italic.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--bg-page); }
+
+/* A tab's panel: its cards with the page's spacing. */
+.dm-panel { display: flex; flex-direction: column; gap: var(--space-lg); }
+.az-alert__body { overflow-wrap: anywhere; }
+
+/* ---------- busy states ---------- */
+
+@keyframes dm-spin { to { transform: rotate(360deg); } }
+
+/* In a busy button the spinner takes the place of the icon. */
+.dm-btn-spinner {
+    display: none;
+    flex: none;
+    inline-size: 1em;
+    block-size: 1em;
+    border: 2px solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: 50%;
+    animation: dm-spin 0.8s linear infinite;
 }
+.az-btn.is-busy .dm-btn-spinner { display: inline-block; }
+.az-btn.is-busy .az-icon { display: none; }
+.az-btn.is-busy { cursor: progress; }
 
-html, body {
-    margin: 0;
-    padding: 0;
-    background: var(--az-bg);
+/* First load: a block in place of the table. Later loads dim the table. */
+.dm-loading { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-xl) var(--space-lg); }
+.dm-spinner {
+    flex: none;
+    inline-size: 22px;
+    block-size: 22px;
+    border: 2px solid var(--line-control);
+    border-block-start-color: var(--signature);
+    border-radius: 50%;
+    animation: dm-spin 0.8s linear infinite;
 }
+.dm-loading-title { display: block; font-weight: 600; }
+.dm-loading-sub { display: block; margin-block-start: 2px; color: var(--text-subtle); font-size: 13px; }
+.dm-table-wrap { transition: opacity 0.15s ease; }
+.dm-table-wrap.is-busy { opacity: 0.5; pointer-events: none; }
 
-.dm-wrap {
-    background: var(--az-bg);
-    color: var(--az-text);
-    font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-    min-height: 100vh;
-    padding: 1.5rem 2rem;
-    box-sizing: border-box;
-}
+/* ---------- table cells ---------- */
 
-.dm-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 1rem;
-    border-bottom: 1px solid var(--az-line);
-    padding-bottom: 0.85rem;
-    margin-bottom: 1.25rem;
-    flex-wrap: wrap;
-}
-
-.dm-head h1 {
-    font-size: 1.5rem;
-    font-weight: 500;
-    margin: 0;
-    letter-spacing: 0.01em;
-}
-
-.dm-accent {
-    font-family: "DM Serif Display", Georgia, serif;
-    font-style: italic;
-    color: var(--az-gold);
-    font-weight: 400;
-}
-
-.dm-actions { display: flex; align-items: center; gap: 1rem; }
-.dm-meta { color: var(--az-muted); font-size: 0.85rem; }
-
-.dm-btn {
-    background: var(--az-gold);
-    color: #0a0a0f;
-    border: none;
-    border-radius: 4px;
-    padding: 0.45rem 0.95rem;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-}
-.dm-btn:hover { filter: brightness(1.08); }
-
-.dm-btn-ghost {
-    background: transparent;
-    color: var(--az-gold);
-    border: 1px solid var(--az-line);
-    font-weight: 500;
-    padding: 0.3rem 0.7rem;
-}
-.dm-btn-ghost:hover { border-color: var(--az-gold); }
-
-.dm-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-}
-.dm-table th {
-    text-align: left;
-    color: var(--az-muted);
-    font-weight: 500;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid var(--az-line);
-}
-.dm-table td {
-    padding: 0.6rem 0.75rem;
-    border-bottom: 1px solid var(--az-surface);
-    vertical-align: middle;
-}
-.dm-img a { color: var(--az-gold); text-decoration: none; }
-.dm-img a:hover { text-decoration: underline; }
-.dm-digest { font-family: ui-monospace, monospace; color: var(--az-muted); }
-
-.dm-badge {
-    display: inline-block;
-    padding: 0.1rem 0.55rem;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    white-space: nowrap;
-}
-.dm-badge-new { background: rgba(200, 169, 110, 0.18); color: var(--az-gold); }
-.dm-badge-upd { background: rgba(200, 169, 110, 0.18); color: var(--az-gold); }
-.dm-badge-ok { background: rgba(110, 170, 120, 0.16); color: #8fcf9c; }
-.dm-badge-unknown { background: rgba(140, 138, 130, 0.16); color: var(--az-muted); }
-
-.dm-ver { font-family: ui-monospace, monospace; }
-.dm-arrow { color: var(--az-gold); font-family: inherit; }
-
-.dm-empty { color: var(--az-muted); padding: 2rem 0.75rem; }
-
-.dm-status {
-    background: var(--az-surface);
-    border: 1px solid var(--az-line);
-    border-radius: 4px;
-    padding: 0.75rem 1rem;
-    margin-bottom: 1rem;
-    color: var(--az-muted);
-}
-.dm-status-error { border-color: #7a2e2e; color: #e6a3a3; }
-
-/* ---------- Versions-Radar (column "Neue Version") ---------- */
-
-.dm-muted { color: var(--az-muted); }
-
-.dm-chips { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; }
-.dm-chip {
-    display: inline-block;
-    padding: 0.1rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    white-space: nowrap;
-    border: 1px solid transparent;
-}
-.dm-chip .dm-ver { font-weight: 500; }
-/* Patch = low risk, minor = attention, major = read the release notes first. */
-.dm-chip-patch { background: rgba(110, 170, 120, 0.16); color: #8fcf9c; }
-.dm-chip-minor { background: rgba(200, 169, 110, 0.18); color: var(--az-gold); }
-.dm-chip-major { background: rgba(200, 90, 90, 0.18); color: #e6a3a3; }
-/* Database major: information, not an alarm (needs a planned migration). */
-.dm-chip-info  { background: transparent; color: var(--az-muted); border-color: var(--az-line); border-style: dashed; }
-/* Newer version exists, but the configured tag does not deliver it
-   (v2.1.4 -> v2.1.5, 16-alpine -> 18-alpine): outlined instead of filled. */
-.dm-chip.dm-chip-manual { background: transparent; border-color: currentColor; }
-
-/* Configured tag (as written in the compose file) vs. installed version. */
-.dm-cfg { color: var(--az-muted); }
-.dm-uptodate { color: #8fcf9c; font-family: ui-monospace, monospace; white-space: nowrap; }
+.az-cell-actions .dm-cell { display: inline-flex; align-items: center; gap: var(--space-xs); }
+.dm-ver { font-family: var(--az-font-code); font-size: 13px; }
+.dm-cfg, .dm-muted, .dm-digest { color: var(--text-subtle); }
+.dm-small { font-size: 12px; }
 .dm-inst { white-space: nowrap; }
-.dm-inst .dm-arrow { font-family: ui-monospace, monospace; }
+/* "→ 16.15": the newer image is on the server but not rolled out (as "Roll-out pending"). */
+.dm-arrow { color: var(--status-info); }
+.dm-uptodate { color: var(--status-success); font-family: var(--az-font-code); font-size: 13px; white-space: nowrap; }
+.dm-img a { overflow-wrap: anywhere; }
+/* The image may break anywhere (az-mono), so without a floor the short columns
+   would squeeze it to a few letters per line; narrower, the table scrolls. */
+.az-table td.dm-img .dm-cell { display: inline-block; min-inline-size: 10rem; }
+.dm-warn-text, .dm-danger-text { color: var(--danger-text); }
+
+/* ---------- chips in "Newest version" ---------- */
+
+.dm-chips { display: inline-flex; flex-wrap: wrap; gap: var(--space-xs); }
+.dm-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-xs);
+    padding: 1px var(--space-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    line-height: 1.5;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.dm-chip .dm-ver { font-size: 12px; }
+/* Patch = low risk, minor = attention, major = read the release notes first. */
+.dm-chip-patch { background: var(--tint-success); color: var(--on-tint-success); }
+.dm-chip-minor { background: var(--tint-neutral); color: var(--signature); }
+.dm-chip-major { background: var(--tint-danger); color: var(--on-tint-danger); }
+/* Outlined: a newer version exists, but only a different tag delivers it. */
+.dm-chip.dm-chip-manual { background: transparent; }
+.dm-chip-minor.dm-chip-manual { border-color: var(--signature); color: var(--signature); }
+.dm-chip-patch.dm-chip-manual { border-color: var(--status-success); color: var(--status-success); }
+.dm-chip-major.dm-chip-manual { border-color: var(--status-danger); color: var(--danger-text); }
+/* Database major: information, not an alarm (needs a planned migration). Its own
+   card-coloured fill keeps the border at 3:1 on a highlighted row as well. */
+.dm-chip-info { background: var(--bg-card); border: 1px dashed var(--line-control); color: var(--text-subtle); }
 
 .dm-legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem 1.25rem;
-    margin: 0.85rem 0.75rem 0;
-    color: var(--az-muted);
-    font-size: 0.8rem;
+    gap: var(--space-sm) var(--space-lg);
+    margin: 0;
+    padding: var(--space-sm) var(--space-lg) var(--space-md);
+    border-block-start: 1px solid var(--line);
+    color: var(--text-subtle);
+    font-size: 12px;
 }
-.dm-legend[hidden] { display: none; }
-.dm-legend-item { display: inline-flex; align-items: center; gap: 0.4rem; }
+.dm-legend-item { display: inline-flex; align-items: center; gap: var(--space-sm); }
+.dm-card-empty { margin: 0; padding: var(--space-md) var(--space-lg) var(--space-lg); color: var(--text-subtle); }
 
-/* ---------- Loading indicator ---------- */
+/* ---------- requirements (an alert under the tabs) ---------- */
 
-@keyframes dm-spin { to { transform: rotate(360deg); } }
-
-/* First load: full-width block in place of the table. */
-.dm-loading {
-    display: flex;
-    align-items: center;
-    gap: 0.9rem;
-    padding: 2.5rem 0.75rem;
-    color: var(--az-text);
-}
-.dm-loading[hidden] { display: none; }   /* display:flex would beat [hidden] */
-.dm-loading-title { display: block; font-weight: 500; }
-.dm-loading-sub { display: block; color: var(--az-muted); font-size: 0.85rem; margin-top: 0.2rem; }
-
-.dm-spinner {
-    flex: 0 0 auto;
-    width: 1.4rem;
-    height: 1.4rem;
-    border: 2px solid var(--az-line);
-    border-top-color: var(--az-gold);
-    border-radius: 50%;
-    animation: dm-spin 0.8s linear infinite;
-}
-
-/* Later loads: spinner inside the refresh button, table dimmed. */
-.dm-btn-spinner {
-    display: none;
-    width: 0.8rem;
-    height: 0.8rem;
-    margin-right: 0.45rem;
-    vertical-align: -0.1rem;
-    border: 2px solid rgba(10, 10, 15, 0.25);
-    border-top-color: #0a0a0f;
-    border-radius: 50%;
-    animation: dm-spin 0.8s linear infinite;
-}
-.dm-btn.is-busy .dm-btn-spinner { display: inline-block; }
-.dm-btn:disabled { cursor: progress; opacity: 0.85; filter: none; }
-
-.dm-table-wrap { transition: opacity 0.15s ease; }
-.dm-table-wrap.is-busy { opacity: 0.5; pointer-events: none; }
-
-/* ---------- Requirements panel ---------- */
-
-.dm-deps {
-    border: 1px solid rgba(200, 169, 110, 0.35);
-    background: rgba(200, 169, 110, 0.06);
-    border-radius: 6px;
-    padding: 0.9rem 1rem 0.4rem;
-    margin-bottom: 1.25rem;
-}
-.dm-deps[hidden] { display: none; }
-.dm-deps-title { margin: 0 0 0.25rem; font-size: 1rem; font-weight: 600; color: var(--az-gold); }
-.dm-deps-intro { margin: 0 0 0.6rem; color: var(--az-muted); font-size: 0.85rem; }
+.dm-deps-intro { margin: 0 0 var(--space-sm); color: var(--text-subtle); }
 .dm-deps-list { list-style: none; margin: 0; padding: 0; }
 .dm-dep {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0.6rem 0;
-    border-top: 1px solid var(--az-line);
+    gap: var(--space-md);
+    padding: var(--space-sm) 0;
+    border-block-start: 1px solid var(--line);
 }
-.dm-dep-name { font-weight: 600; }
-.dm-dep-desc { color: var(--az-muted); font-size: 0.85rem; margin-top: 0.15rem; }
-.dm-dep-hint { color: #e6a3a3; font-size: 0.85rem; margin-top: 0.15rem; }
-.dm-dep-action { flex: 0 0 auto; }
-.dm-badge-warn { background: rgba(200, 90, 90, 0.18); color: #e6a3a3; margin-left: 0.35rem; }
+.dm-dep:first-child { border-block-start: 0; }
+.dm-dep-name { margin-inline-end: var(--space-xs); font-weight: 600; }
+.dm-dep-desc { margin-block-start: 2px; color: var(--text-subtle); font-size: 13px; }
+.dm-dep-hint { margin-block-start: 2px; color: var(--danger-text); font-size: 13px; }
+.dm-dep-action { flex: none; }
 
-/* ---------- Install dialog ---------- */
+/* ---------- backups tab ---------- */
 
-.dm-dialog {
-    width: min(42rem, calc(100vw - 2rem));
-    box-sizing: border-box;
-    background: var(--az-surface);
-    color: var(--az-text);
-    border: 1px solid var(--az-line);
-    border-radius: 8px;
-    padding: 1.25rem 1.25rem 1rem;
-    font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-}
-.dm-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
-.dm-dialog-title { margin: 0 0 0.5rem; font-size: 1.15rem; font-weight: 600; }
-.dm-dialog-desc { margin: 0 0 0.5rem; line-height: 1.45; }
-.dm-dialog-note { margin: 0 0 0.75rem; color: var(--az-muted); font-size: 0.85rem; }
+.dm-bk-head p { margin: 0; }
+.dm-bk-summary { font-weight: 600; }
+.dm-bk-head .dm-bk-note { margin-block-start: var(--space-xs); color: var(--text-subtle); font-size: 13px; }
+.dm-cleanup-body p { margin: 0 0 var(--space-sm); color: var(--text-subtle); }
+.dm-cleanup-body p:last-child { margin-block-end: 0; }
+.dm-cleanup-body .dm-cleanup-preview { color: var(--text); font-weight: 500; }
+
+/* ---------- the one dialog: a native <dialog> in the shared modal ---------- */
+
+dialog.dm-dialog { padding: 0; border: 0; }
+dialog.dm-dialog:not([open]) { display: none; }   /* az-modal sets display */
+dialog.dm-dialog::backdrop { background: var(--backdrop); }
+.dm-dialog .az-modal__body { padding-block-end: var(--space-xs); }
+.dm-dialog-desc, .dm-dialog-note, .dm-dialog-result { margin: 0; }
+.dm-dialog-note { color: var(--text-subtle); font-size: 13px; }
 .dm-dialog-log {
-    background: var(--az-bg);
-    border: 1px solid var(--az-line);
-    border-radius: 4px;
-    padding: 0.6rem 0.75rem;
-    max-height: 16rem;
+    margin: 0;
+    max-block-size: 18rem;
     overflow: auto;
-    font-family: ui-monospace, monospace;
-    font-size: 0.78rem;
-    line-height: 1.4;
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-small);
+    background: var(--bg-page);
+    color: var(--text);
+    font-family: var(--az-font-code);
+    font-size: 12px;
+    line-height: 1.5;
     white-space: pre-wrap;
-    word-break: break-word;
-    margin: 0 0 0.75rem;
+    overflow-wrap: anywhere;
 }
-.dm-dialog-log[hidden] { display: none; }
-.dm-dialog-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-.dm-dialog-result { font-size: 0.9rem; }
-.dm-dialog-result.is-ok { color: #8fcf9c; }
-.dm-dialog-result.is-error { color: #e6a3a3; }
-.dm-dialog-buttons { display: flex; gap: 0.6rem; margin-left: auto; }
-.dm-dialog-buttons .dm-btn[hidden] { display: none; }
+.dm-dialog-result:empty { display: none; }
+.dm-dialog-result.is-ok { color: var(--status-success); }
+.dm-dialog-result.is-error { color: var(--danger-text); }
 
-/* ---------- Tabs ---------- */
-
-.dm-tabs { display: flex; gap: 0.25rem; margin: -0.5rem 0 1.25rem; border-bottom: 1px solid var(--az-line); }
-.dm-tab {
-    background: transparent;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    color: var(--az-muted);
-    font: inherit;
-    font-weight: 500;
-    padding: 0.55rem 0.9rem;
-    margin-bottom: -1px;
-    cursor: pointer;
-}
-.dm-tab:hover { color: var(--az-text); }
-.dm-tab.is-active { color: var(--az-gold); border-bottom-color: var(--az-gold); }
-[role="tabpanel"][hidden] { display: none; }
-.dm-table[hidden] { display: none !important; }
-
-/* ---------- Row actions ---------- */
-
-.dm-action .dm-cell { display: inline-flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.dm-btn-strong { border-color: rgba(200, 169, 110, 0.55); font-weight: 600; }
-.dm-small { font-size: 0.8rem; }
-.dm-btn-danger { background: #c25b5b; color: #fff; }
-.dm-btn-ghost.dm-btn-ghost-danger { color: #e6a3a3; }
-.dm-btn-ghost.dm-btn-ghost-danger:hover { border-color: #c25b5b; }
-.dm-btn:disabled.dm-btn-ghost { opacity: 0.4; cursor: not-allowed; }
-
-/* ---------- Backups tab ---------- */
-
-.dm-bk-summary { margin: 0 0 0.35rem; font-weight: 500; }
-.dm-bk-note { margin: 0 0 1.25rem; color: var(--az-muted); font-size: 0.85rem; }
-.dm-h2 { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; color: var(--az-text); }
-.dm-empty-small { color: var(--az-muted); font-size: 0.9rem; margin: 0.25rem 0 0; }
-
-/* Cleanup rules, daily timer, "to be deleted now". */
-.dm-cleanup {
-    margin: 0 0 1.25rem;
-    padding: 0.75rem 1rem;
-    background: var(--az-surface);
-    border: 1px solid var(--az-line);
-    border-radius: 8px;
-}
-.dm-cleanup[hidden], .dm-cleanup p[hidden] { display: none; }
-.dm-cleanup .dm-h2 { margin: 0 0 0.35rem; }
-.dm-cleanup p { margin: 0 0 0.35rem; color: var(--az-muted); font-size: 0.85rem; line-height: 1.45; }
-.dm-cleanup-now { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; font-size: 0.9rem; }
-.dm-cleanup-now .dm-btn[hidden] { display: none; }
-.dm-btn-inline { padding: 0.1rem 0.55rem; font-size: 0.85rem; }
-.dm-list { list-style: none; margin: 0 0 0.75rem; padding: 0; max-height: 14rem; overflow-y: auto; font-size: 0.85rem; }
-.dm-list li { padding: 0.15rem 0; overflow-wrap: anywhere; }
-
-/* ---------- Dialog body (plan details) ---------- */
-
-.dm-dialog-body[hidden] { display: none; }
-.dm-dialog-desc[hidden], .dm-dialog-note[hidden] { display: none; }
-.dm-kv { list-style: none; margin: 0 0 0.75rem; padding: 0; font-size: 0.88rem; }
-.dm-kv li { display: flex; gap: 0.75rem; padding: 0.3rem 0; border-top: 1px solid var(--az-line); }
-.dm-kv li:first-child { border-top: 0; }
-.dm-kv-k { flex: 0 0 10rem; color: var(--az-muted); }
+/* Plan of an update */
+.dm-kv { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.dm-kv li { display: flex; gap: var(--space-md); padding: 6px 0; border-block-start: 1px solid var(--line); }
+.dm-kv li:first-child { border-block-start: 0; }
+.dm-kv-k { flex: 0 0 10rem; color: var(--text-subtle); }
 .dm-kv-v { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.dm-dialog code, .dm-kv code {
-    font-family: ui-monospace, monospace;
-    font-size: 0.82rem;
-    background: var(--az-bg);
-    border: 1px solid var(--az-line);
-    border-radius: 3px;
-    padding: 0 0.3rem;
+.dm-dialog code {
+    padding: 0 4px;
+    border-radius: var(--radius-tiny);
+    background: var(--tint-neutral);
+    color: var(--on-tint-neutral);
+    font-family: var(--az-font-code);
+    font-size: 13px;
 }
-.dm-check { display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0 0.75rem; cursor: pointer; }
-.dm-check input { accent-color: var(--az-gold); width: 1rem; height: 1rem; }
+.dm-check { display: flex; align-items: center; gap: var(--space-sm); margin: var(--space-sm) 0 0; cursor: pointer; }
+.dm-check input { inline-size: 16px; block-size: 16px; accent-color: var(--primary); }
 .dm-callout {
-    margin: 0 0 0.75rem;
-    padding: 0.55rem 0.75rem;
-    border-left: 3px solid var(--az-line);
-    background: var(--az-bg);
-    color: var(--az-muted);
-    font-size: 0.85rem;
-    line-height: 1.45;
+    margin: var(--space-sm) 0 0;
+    padding: var(--space-sm) var(--space-md);
+    border-inline-start: 3px solid var(--line-control);
+    color: var(--text-subtle);
+    font-size: 13px;
+    line-height: 1.5;
 }
-.dm-callout-warn { border-left-color: #c25b5b; color: #e6a3a3; }
-.dm-warn-text { color: #e6a3a3; }
+.dm-callout-warn { border-inline-start-color: var(--status-warning); color: var(--text); }
+.dm-list { list-style: none; margin: 0; padding: 0; max-block-size: 14rem; overflow-y: auto; font-size: 13px; }
+.dm-list li { padding: 2px 0; overflow-wrap: anywhere; }
+
+/* ---------- narrow screens (rows are blocks there, see az-table--stack) ---------- */
+
+@media (max-width: 640px) {
+    .az-table--stack .dm-cell { min-width: 0; text-align: end; overflow-wrap: anywhere; }
+    .az-table--stack .dm-chips { justify-content: flex-end; }
+    .az-table--stack td.az-cell-actions .dm-cell { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-sm); }
+    .dm-loading { padding: var(--space-lg) var(--space-md); }
+    .dm-legend { flex-direction: column; padding-inline: var(--space-md); }
+    .dm-card-empty { padding-inline: var(--space-md); }
+    .dm-dep { flex-direction: column; align-items: stretch; }
+    .dm-dep-action .az-btn { inline-size: 100%; }
+    .dm-kv li { flex-direction: column; gap: 2px; }
+    .dm-kv-k { flex: none; }
+}
 
 /* Still signal activity, just calmer. */
 @media (prefers-reduced-motion: reduce) {
     .dm-spinner, .dm-btn-spinner { animation-duration: 2.4s; }
     .dm-table-wrap { transition: none; }
-}
-
-/* ---------- Responsive ---------- */
-
-/* Tablets / mid widths: scroll the table horizontally instead of overflowing. */
-.dm-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
-/* Smartphones: each row collapses into a stacked card (label : value). */
-@media (max-width: 640px) {
-    .dm-wrap { padding: 1rem; }
-    .dm-head { gap: 0.6rem; }
-    .dm-head h1 { font-size: 1.25rem; }
-    .dm-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 0.6rem; }
-    .dm-meta { flex: 1 1 100%; }
-    .dm-btn { padding: 0.6rem 1rem; min-height: 44px; }
-    .dm-cleanup-now .dm-btn { width: 100%; }
-
-    /* Visually hide the header row (labels move into each cell). */
-    .dm-table thead {
-        position: absolute;
-        width: 1px; height: 1px;
-        margin: -1px; padding: 0; border: 0;
-        overflow: hidden; clip: rect(0 0 0 0);
-    }
-    /* border-box: width 100% + card padding must not overflow the phone width */
-    .dm-table, .dm-table tbody, .dm-table tr, .dm-table td { display: block; width: 100%; box-sizing: border-box; }
-
-    .dm-table tr {
-        background: var(--az-surface);
-        border: 1px solid var(--az-line);
-        border-radius: 8px;
-        margin-bottom: 0.7rem;
-        padding: 0.25rem 0.85rem;
-    }
-    .dm-table td {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        border: 0;
-        padding: 0.45rem 0;
-    }
-    .dm-table td + td { border-top: 1px solid rgba(255, 255, 255, 0.05); }
-    .dm-table td::before {
-        content: attr(data-label);
-        color: var(--az-muted);
-        font-weight: 500;
-        white-space: nowrap;
-        flex: 0 0 auto;
-    }
-    .dm-table-wrap { overflow-x: visible; }
-    .dm-cell { text-align: right; min-width: 0; overflow-wrap: anywhere; }
-    .dm-chips { justify-content: flex-end; }
-    .dm-digest { word-break: break-all; }
-
-    /* Action row: full-width tap target, no label, hidden when empty. */
-    .dm-action::before { content: ""; }
-    .dm-action .dm-cell { width: 100%; }
-    .dm-action .dm-btn-ghost { width: 100%; min-height: 44px; padding: 0.6rem; }
-    .dm-action:has(.dm-cell:empty) { display: none; }
-
-    .dm-action .dm-cell { display: flex; flex-direction: column; align-items: stretch; }
-    .dm-kv li { flex-direction: column; gap: 0.15rem; }
-    .dm-kv-k { flex: none; }
-    .dm-tab { flex: 1; padding: 0.6rem 0.4rem; }
-
-    .dm-legend { margin: 0.5rem 0 0; flex-direction: column; }
-    .dm-dep { flex-direction: column; align-items: stretch; gap: 0.5rem; }
-    .dm-dep-action .dm-btn-ghost { width: 100%; min-height: 44px; }
-    .dm-dialog-buttons { width: 100%; }
-    .dm-dialog-buttons .dm-btn { flex: 1; }
 }

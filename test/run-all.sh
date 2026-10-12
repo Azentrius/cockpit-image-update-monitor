@@ -37,8 +37,11 @@ run "plugin: language + requirements"   node i18n-deps.js
 run "plugin: update, rollback, backups" node update-backups.js
 run "plugin: radar now, cleanup, history" node radar-cleanup.js
 run "plugin: version columns"           node version-cols.js
+run "plugin: page frame, tabs, labels"  node page-frame.js
+run "design: contrast (light + dark)"   python3 contrast_test.py
 run "plugin: whole table (smoke)"       node harness.js
 run "repo:   version + changelog"       sh ../tools/check-version.sh
+run "repo:   shared design files"       sh ../tools/check-design-files.sh
 
 echo
 if [ $fail = 0 ]; then echo "ALL TESTS PASSED"; else echo "THERE ARE FAILURES"; fi

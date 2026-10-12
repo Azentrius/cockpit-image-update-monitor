@@ -87,7 +87,7 @@ const cells = (tr) => [...tr.querySelectorAll("td")];
     console.log("formbricks-app:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
     assert.strictEqual(c[3].textContent.trim(), "?");
     assert.strictEqual(c[4].textContent.trim(), "neueste: 6.0.2");
-    assert.strictEqual(c[5].textContent.trim(), "unbekannt");
+    assert.strictEqual(c[5].textContent.trim(), "Unbekannt");
 
     // stale registry data is marked
     assert(cells(row(d, "diun-socket-proxy"))[4].textContent.includes("(Stand älter)"));
