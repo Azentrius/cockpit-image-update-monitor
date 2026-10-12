@@ -258,7 +258,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   style, `shell:style`), `icons.js` (`window.AzIcons`), the fonts and `OFL.txt`. They are copies of
   `src/` in Azentrius/cockpit-cronjobs, pinned in `tools/design-files.sha256` and never edited here;
   `diun.css` holds only what this page needs on top. Icons are inline SVG from `icon(name)` in
-  `diun.js` (`ban` lives there too until the shared set has it).
+  `diun.js`, all from the shared set.
 - **Frame:** header (`az-page-header`, the only `az-btn--primary` is Refresh), tabs (`az-tabs`,
   WAI-ARIA keyboard), `#dm-status` and `#dm-deps` under the tabs, the panels, the signature (version,
   host from `/etc/hostname`). Both tabs are loaded together with every load; switching loads nothing.

@@ -486,16 +486,11 @@
     }
 
     // --- Icons -------------------------------------------------------------
-    // The shared set is window.AzIcons from icons.js (Font Awesome Free 5 Solid,
-    // CC BY 4.0, as shipped by PatternFly). "ban" is not in it yet; it comes
-    // from the same set, path as in the design system's assets/Icons/ban.svg.
-    const LOCAL_ICONS = {
-        "ban": { viewBox: "0 0 512 512", d: "M256 8C119.034 8 8 119.033 8 256s111.034 248 248 248 248-111.034 248-248S392.967 8 256 8zm130.108 117.892c65.448 65.448 70 165.481 20.677 235.637L150.47 105.216c70.204-49.356 170.226-44.735 235.638 20.676zM125.892 386.108c-65.448-65.448-70-165.481-20.677-235.637L361.53 406.784c-70.203 49.356-170.226 44.736-235.638-20.676z" },
-    };
-
+    // All icons come from the shared set, window.AzIcons in icons.js (Font
+    // Awesome Free 5 Solid, CC BY 4.0, as shipped by PatternFly).
     // Inline SVG (HTML string) in the text colour; "" when the set is missing.
     function icon(name) {
-        const def = (window.AzIcons || {})[name] || LOCAL_ICONS[name];
+        const def = (window.AzIcons || {})[name];
         if (!def) return "";
         return `<svg class="az-icon" viewBox="${def.viewBox}" aria-hidden="true" focusable="false" data-icon="${name}">` +
                `<path d="${def.d}"></path></svg>`;
