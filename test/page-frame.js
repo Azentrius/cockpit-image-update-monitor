@@ -160,6 +160,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
         assert.deepStrictEqual([l.className, iconOf(l), l.textContent], [cls, ic, text]);
     }
     assert.strictEqual(b.d.querySelectorAll(".dm-badge").length, 0, "no old badges left");
+    assert(!/LOCAL_ICONS|M256 8C119\.034/.test(js), "every icon comes from the shared icons.js");
 
     // 4. Buttons per place
     const upd = b.d.querySelector('button[data-update="ollama"]');
