@@ -1,0 +1,24 @@
+[Unit]
+Description=Versions-Radar for the Cockpit Image-Updates plugin (registry tag check)
+Documentation=file:///usr/local/lib/diun-radar/diun-versions.py
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/diun-radar/diun-versions.py --output /var/lib/diun-radar/versions.json
+# Creates /var/lib/diun-radar (root-owned, NOT mounted into any container).
+StateDirectory=diun-radar
+StateDirectoryMode=0755
+Nice=10
+TimeoutStartSec=15min
+
+# Hardening: the job only reads Docker and talks to registries.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes

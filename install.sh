@@ -8,11 +8,13 @@
 # What it does:
 #   plugin/*  -> /usr/share/cockpit/diun/           (644)
 #   lib/*     -> /usr/local/lib/diun-radar/         (scripts 755, diunlib.py 644)
+#   systemd/* -> /usr/local/lib/diun-radar/systemd/ (644, the templates diun-deps.sh installs)
 #   an existing installation is copied to /usr/local/lib/diun-radar/backup-<timestamp>/ first
 #   if diun-radar.service exists, one radar run is started (rebuilds versions.json)
 #
-# What it does NOT do: install Diun, skopeo or the radar timer. The plugin
-# offers that itself (panel "Missing requirements"), or run as root:
+# What it does NOT do: install Diun, skopeo or the timers, or change units in
+# /etc/systemd/system (it only reports when they differ from the templates).
+# The plugin offers that itself (panel "Missing requirements"), or run as root:
 #   /usr/local/lib/diun-radar/diun-deps.sh check
 #   /usr/local/lib/diun-radar/diun-deps.sh install skopeo|diun|radar
 #
@@ -25,15 +27,18 @@ SRC=$(cd "$(dirname "$0")" && pwd)
 DEST=${DESTDIR:-}
 PLUGIN_DIR=$DEST/usr/share/cockpit/diun
 LIB_DIR=$DEST/usr/local/lib/diun-radar
+UNIT_SRC_DIR=$LIB_DIR/systemd
+UNIT_DIR=/etc/systemd/system
 PLUGIN_FILES=(manifest.json po.manifest.de.js index.html diun.js diun.css)
 LIB_SCRIPTS=(diun-inventory.py diun-versions.py diun-update.py diun-deps.sh)
 LIB_MODULES=(diunlib.py)
+UNITS=(diun-radar.service diun-radar.timer)
 
 DRY=0
 case "${1:-}" in
     "") ;;
     --dry-run) DRY=1 ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1 (--dry-run, --help)" >&2; exit 64 ;;
 esac
 
@@ -54,6 +59,7 @@ if [ "$(id -u)" = 0 ]; then OWN=(-o root -g root); fi
 # 0. Sanity: all source files present, Python files parse.
 for f in "${PLUGIN_FILES[@]}"; do [ -f "$SRC/plugin/$f" ] || { echo "missing: plugin/$f" >&2; exit 1; }; done
 for f in "${LIB_SCRIPTS[@]}" "${LIB_MODULES[@]}"; do [ -f "$SRC/lib/$f" ] || { echo "missing: lib/$f" >&2; exit 1; }; done
+for f in "${UNITS[@]}"; do [ -f "$SRC/systemd/$f" ] || { echo "missing: systemd/$f" >&2; exit 1; }; done
 python3 - "$SRC"/lib/*.py <<'PY'
 import ast, sys
 for f in sys.argv[1:]:
@@ -71,10 +77,11 @@ if [ -d "$PLUGIN_DIR" ] || [ -d "$LIB_DIR" ]; then
     for f in "${LIB_SCRIPTS[@]}" "${LIB_MODULES[@]}"; do
         if [ -f "$LIB_DIR/$f" ]; then run cp -a "$LIB_DIR/$f" "$BK/"; fi
     done
+    if [ -d "$UNIT_SRC_DIR" ]; then run cp -a "$UNIT_SRC_DIR" "$BK/"; fi
 fi
 
 # 2. Install.
-run install -d -m 755 "${OWN[@]}" "$PLUGIN_DIR" "$LIB_DIR"
+run install -d -m 755 "${OWN[@]}" "$PLUGIN_DIR" "$LIB_DIR" "$UNIT_SRC_DIR"
 for f in "${PLUGIN_FILES[@]}"; do
     run install -m 644 "${OWN[@]}" "$SRC/plugin/$f" "$PLUGIN_DIR/$f"
 done
@@ -84,8 +91,21 @@ done
 for f in "${LIB_SCRIPTS[@]}"; do
     run install -m 755 "${OWN[@]}" "$SRC/lib/$f" "$LIB_DIR/$f"
 done
+for f in "${UNITS[@]}"; do
+    run install -m 644 "${OWN[@]}" "$SRC/systemd/$f" "$UNIT_SRC_DIR/$f"
+done
 
-# 3. Refresh the radar data (its format may have changed with this version).
+# 3. Units already set up are never replaced; say so when they differ from
+#    the templates (adopt with: cp <template> /etc/systemd/system/ && systemctl daemon-reload).
+if [ -z "$DEST" ]; then
+    for f in "${UNITS[@]}"; do
+        if [ -f "$UNIT_DIR/$f" ] && ! cmp -s "$SRC/systemd/$f" "$UNIT_DIR/$f"; then
+            echo "Note: $UNIT_DIR/$f differs from the template $UNIT_SRC_DIR/$f – left unchanged."
+        fi
+    done
+fi
+
+# 4. Refresh the radar data (its format may have changed with this version).
 if [ -z "$DEST" ] && command -v systemctl >/dev/null 2>&1 \
         && systemctl cat diun-radar.service >/dev/null 2>&1; then
     run systemctl start --no-block diun-radar.service

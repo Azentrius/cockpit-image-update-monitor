@@ -23,6 +23,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 LIB=/usr/local/lib/diun-radar
+UNIT_SRC=$LIB/systemd        # unit files, installed by install.sh from systemd/
 DIUN_DIR=/opt/diun
 DIUN_DATA=/var/lib/diun
 DIUN_IMAGE=crazymax/diun:4.33.0
@@ -112,7 +113,8 @@ do_check() {
             ra_state=inactive
         fi
     fi
-    if [ -f "$LIB/diun-versions.py" ] && command -v python3 >/dev/null 2>&1; then
+    if [ -f "$LIB/diun-versions.py" ] && [ -f "$UNIT_SRC/diun-radar.service" ] \
+       && command -v python3 >/dev/null 2>&1; then
         ra_install=1
     fi
 
@@ -299,6 +301,18 @@ start_diun() {
     msg "Diun gestartet." "Diun started."
 }
 
+# install_unit NAME: copy $UNIT_SRC/NAME to $UNIT_DIR unless it exists there.
+install_unit() {
+    if [ -f "$UNIT_DIR/$1" ]; then
+        msg "$1 existiert bereits – unverändert." "$1 already exists – left unchanged."
+        return 0
+    fi
+    [ -f "$UNIT_SRC/$1" ] || die 2 \
+        "Unit-Vorlage $UNIT_SRC/$1 fehlt (install.sh erneut ausführen)." \
+        "Unit template $UNIT_SRC/$1 is missing (run install.sh again)."
+    write_file "$UNIT_DIR/$1" 644 < "$UNIT_SRC/$1"
+}
+
 install_radar() {
     [ -f "$LIB/diun-versions.py" ] || die 2 \
         "Radar-Skript $LIB/diun-versions.py fehlt." "Radar script $LIB/diun-versions.py is missing."
@@ -307,56 +321,8 @@ install_radar() {
         "Hinweis: skopeo fehlt noch – der Radar meldet bis dahin Registry-Fehler." \
         "Note: skopeo is still missing – the radar reports registry errors until it is installed."
 
-    if [ ! -f "$UNIT_DIR/diun-radar.service" ]; then
-        write_file "$UNIT_DIR/diun-radar.service" 644 <<'EOF'
-[Unit]
-Description=Versions-Radar for the Cockpit Image-Updates plugin (registry tag check)
-Documentation=file:///usr/local/lib/diun-radar/diun-versions.py
-After=docker.service network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 /usr/local/lib/diun-radar/diun-versions.py --output /var/lib/diun-radar/versions.json
-# Creates /var/lib/diun-radar (root-owned, NOT mounted into any container).
-StateDirectory=diun-radar
-StateDirectoryMode=0755
-Nice=10
-TimeoutStartSec=15min
-
-# Hardening: the job only reads Docker and talks to registries.
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictSUIDSGID=yes
-EOF
-    else
-        msg "diun-radar.service existiert bereits – unverändert." \
-            "diun-radar.service already exists – left unchanged."
-    fi
-    if [ ! -f "$UNIT_DIR/diun-radar.timer" ]; then
-        write_file "$UNIT_DIR/diun-radar.timer" 644 <<'EOF'
-[Unit]
-Description=Run the Versions-Radar every 6 hours
-
-[Timer]
-# Offset from Diun's own schedule (0 */6 * * *).
-OnCalendar=*-*-* 00/6:17:00
-RandomizedDelaySec=10min
-OnBootSec=5min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-    else
-        msg "diun-radar.timer existiert bereits – unverändert." \
-            "diun-radar.timer already exists – left unchanged."
-    fi
+    install_unit diun-radar.service
+    install_unit diun-radar.timer
     run systemctl daemon-reload
     run systemctl enable --now diun-radar.timer
     msg "Erster Radar-Lauf …" "First radar run …"
