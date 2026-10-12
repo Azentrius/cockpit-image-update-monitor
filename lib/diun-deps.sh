@@ -266,12 +266,12 @@ services:
     volumes:
       - ./diun.yml:/etc/diun/diun.yml:ro
       - @DIUN_DATA@:/data
-      # No docker.sock here — Diun reaches the API only through the
+      # No docker.sock here: Diun reaches the API only through the
       # filtered socket-proxy (tcp://socket-proxy:2375, see diun.yml).
 EOF
 
     write_file "$DIUN_DIR/diun.yml" 644 <<'EOF'
-# Diun — Docker Image Update Notifier
+# Diun: Docker Image Update Notifier
 # Config precedence: environment variables > this file > defaults.
 
 db:
