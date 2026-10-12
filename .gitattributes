@@ -1,0 +1,5 @@
+# LF everywhere: the files run on Linux servers (shell scripts break with CRLF),
+# whatever the checkout platform.
+* text=auto eol=lf
+
+*.png binary

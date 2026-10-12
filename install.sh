@@ -34,11 +34,11 @@ case "${1:-}" in
     "") ;;
     --dry-run) DRY=1 ;;
     -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
-    *) echo "Unbekannte Option: $1 (--dry-run, --help)" >&2; exit 64 ;;
+    *) echo "Unknown option: $1 (--dry-run, --help)" >&2; exit 64 ;;
 esac
 
 if [ -z "$DEST" ] && [ "$(id -u)" != 0 ] && [ $DRY = 0 ]; then
-    echo "Bitte als root ausführen (sudo ./install.sh) oder DESTDIR setzen." >&2
+    echo "Run as root (sudo ./install.sh) or set DESTDIR." >&2
     exit 77
 fi
 
@@ -52,8 +52,8 @@ OWN=()
 if [ "$(id -u)" = 0 ]; then OWN=(-o root -g root); fi
 
 # 0. Sanity: all source files present, Python files parse.
-for f in "${PLUGIN_FILES[@]}"; do [ -f "$SRC/plugin/$f" ] || { echo "fehlt: plugin/$f" >&2; exit 1; }; done
-for f in "${LIB_SCRIPTS[@]}" "${LIB_MODULES[@]}"; do [ -f "$SRC/lib/$f" ] || { echo "fehlt: lib/$f" >&2; exit 1; }; done
+for f in "${PLUGIN_FILES[@]}"; do [ -f "$SRC/plugin/$f" ] || { echo "missing: plugin/$f" >&2; exit 1; }; done
+for f in "${LIB_SCRIPTS[@]}" "${LIB_MODULES[@]}"; do [ -f "$SRC/lib/$f" ] || { echo "missing: lib/$f" >&2; exit 1; }; done
 python3 - "$SRC"/lib/*.py <<'PY'
 import ast, sys
 for f in sys.argv[1:]:
@@ -89,12 +89,12 @@ done
 if [ -z "$DEST" ] && command -v systemctl >/dev/null 2>&1 \
         && systemctl cat diun-radar.service >/dev/null 2>&1; then
     run systemctl start --no-block diun-radar.service
-    echo "Versions-Radar gestartet (Ergebnis: journalctl -u diun-radar.service)."
+    echo "Version radar started (result: journalctl -u diun-radar.service)."
 fi
 
 echo
-echo "Fertig. Cockpit-Seite neu laden (Menü: Image-Updates / Image updates)."
+echo "Done. Reload the Cockpit page (menu: Image updates / Image-Updates)."
 if [ -z "$DEST" ] && [ $DRY = 0 ] && [ -x "$LIB_DIR/diun-deps.sh" ]; then
-    echo "Voraussetzungen:"
+    echo "Requirements:"
     "$LIB_DIR/diun-deps.sh" check || true
 fi

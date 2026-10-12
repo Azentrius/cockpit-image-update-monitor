@@ -65,7 +65,7 @@ function boot(spawnImpl) {
     assert(a.before.loader && a.before.btnDisabled && !a.before.tableVisible, "loader must show in static HTML");
     await sleep(100);
     const during = a.state();
-    console.log("während Laden :", JSON.stringify(during));
+    console.log("while loading :", JSON.stringify(during));
     assert(during.loader && during.btnDisabled && during.btnBusy && !during.tableVisible && during.ariaBusy === "true");
     await sleep(400);
     const after = a.state();
@@ -90,7 +90,7 @@ function boot(spawnImpl) {
     const b = boot(() => Promise.reject(new Error("not permitted")));
     await sleep(100);
     const failed = b.state();
-    console.log("Inventar-Fehler:", JSON.stringify(failed));
+    console.log("inventory error:", JSON.stringify(failed));
     assert(!failed.loader && !failed.btnDisabled && failed.status.includes("Inventar nicht verfügbar"));
 
     // 4. spawn throws synchronously -> indicator must not get stuck
@@ -100,5 +100,5 @@ function boot(spawnImpl) {
     console.log("spawn wirft   :", JSON.stringify(thrown));
     assert(!thrown.loader && !thrown.btnDisabled && thrown.status.includes("Fehler beim Laden"));
 
-    console.log("\nALLE CHECKS OK");
+    console.log("\nALL CHECKS PASSED");
 })().catch((e) => { console.error("FEHLGESCHLAGEN:", e.message); process.exit(1); });

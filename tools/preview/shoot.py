@@ -22,7 +22,7 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "docs", "img")
 
 def main():
     if not os.path.exists(PAGE):
-        sys.exit("Erst bauen: python3 tools/preview/build.py")
+        sys.exit("Build first: python3 tools/preview/build.py")
     os.makedirs(OUT, exist_ok=True)
     errors = []
     with sync_playwright() as p:
@@ -59,9 +59,9 @@ def main():
 
     print("Screenshots:", OUT)
     if errors:
-        sys.exit("JavaScript-Fehler: " + "; ".join(errors))
+        sys.exit("JavaScript errors: " + "; ".join(errors))
     if widths[0] > widths[1]:
-        sys.exit(f"Horizontales Scrollen auf dem Handy: {widths}")
+        sys.exit(f"Horizontal scrolling on the phone: {widths}")
 
 
 if __name__ == "__main__":
