@@ -544,8 +544,18 @@ def cmd_update(name, do_dump=True):
         if plan["free_bytes"] is not None and plan["free_bytes"] < need:
             raise Abort(5, f"Zu wenig Platz in {BASE}: {human(plan['free_bytes'])} frei, {human(need)} nötig.",
                         f"Not enough space in {BASE}: {human(plan['free_bytes'])} free, {human(need)} needed.")
-        for d in dumpable:
-            op["dumps"].append(dump_db(project, d, st))
+        try:
+            for d in dumpable:
+                op["dumps"].append(dump_db(project, d, st))
+        except Abort:
+            # An aborted update leaves nothing behind, not even the dumps
+            # of the other databases that worked.
+            for rel in op["dumps"]:
+                try:
+                    remove_dump(rel)
+                except (Abort, OSError):
+                    pass
+            raise
     elif do_dump:
         say("Kein unterstützter Datenbank-Container im Projekt – kein Dump.",
             "No supported database container in this project – no dump.")

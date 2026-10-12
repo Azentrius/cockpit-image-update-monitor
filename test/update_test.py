@@ -380,6 +380,17 @@ FakePopen.script = {"glitchtip-postgres": (b"-- no end marker\n", 0)}
 check("dump without end marker -> exit 5", quiet(U.cmd_update, "glitchtip-postgres")[0], 5)
 release_lock()
 
+# Two databases, the second dump fails (wrong password) -> no dump left at all
+D.add(ctn("glitchtip-mariadb", "mariadb:11", "sha256:m", project="glitchtip", service="mariadb",
+          cmd=["mariadbd"], env=["MARIADB_VERSION=1:11.4.5+maria~ubu2404"]))
+FakePopen.script = {"glitchtip-postgres": (DUMP_OK, 0), "glitchtip-mariadb": (b"", 2)}
+rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+release_lock()
+check("second dump fails -> exit 5, the first dump removed again", (rc, dumps_of("glitchtip")), (5, []))
+check("second dump fails -> message names the database",
+      "Dump of glitchtip-mariadb failed (mariadb-dump: Got error: 1045" in out, True)
+del D.containers["glitchtip-mariadb"]
+
 # Too little space -> exit 5
 FakePopen.script = {"glitchtip-postgres": (DUMP_OK, 0)}
 U.FREE_MARGIN = 1 << 62
