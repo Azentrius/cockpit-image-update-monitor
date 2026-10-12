@@ -4,7 +4,7 @@ A [Cockpit](https://cockpit-project.org/) add-on that shows three things for eve
 Updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button.
 Everything that runs as root for this is a small, fixed set of helper scripts. The browser makes no external requests, and Diun sees Docker only through a read-only socket proxy.
 
-![Overview: Configured, Installed, Newest version](docs/img/updates-en.png)
+![Overview: Configured, Installed, Newest version](docs/img/updates.png)
 
 **Contents**
 
@@ -398,7 +398,15 @@ docs/              INTERNALS.md (interfaces, formats), images
 cd test && npm ci && ./run-all.sh
 ```
 
-Covered, among other things:
+**Lint** (the `test` workflow runs it too; the tools are pinned in `test/requirements.txt`):
+
+```bash
+pip install -r test/requirements.txt
+shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh
+ruff check .
+```
+
+Covered by the tests, among other things:
 - version sources and tag schemes
 - Docker Hub and registry matching (with fakes)
 - cache and registry outage
@@ -465,7 +473,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 | Stage | Content | State |
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
-| 1.1 | Polish: start the radar after an update, cleanup rules, “Check radar now”, versions in the history, MariaDB E2E, lint in CI | planned |
+| 1.1 | Polish: start the radar after an update, cleanup rules, “Check radar now”, versions in the history, MariaDB E2E | planned |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |

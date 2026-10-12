@@ -1,0 +1,5 @@
+# Python tools for the checks in CI (lint, preview screenshots), pinned;
+# Dependabot keeps them current. The add-on itself needs none of them.
+playwright==1.63.0
+ruff==0.17.0
+shellcheck-py==0.11.0.1

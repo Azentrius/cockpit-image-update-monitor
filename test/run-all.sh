@@ -3,7 +3,7 @@
 #   cd test && npm ci && ./run-all.sh
 # The end-to-end test against a real Docker host is separate: e2e-server.sh
 set -u
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 2
 
 if [ ! -d node_modules/jsdom ]; then
     echo "jsdom missing – run first: (cd test && npm ci)" >&2

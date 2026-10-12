@@ -1,0 +1,9 @@
+# Python checks in CI (ruff check). The root helpers must run on Python 3.8,
+# so newer syntax is reported as an error.
+target-version = "py38"
+
+[lint]
+# Mistakes, not style: pyflakes (unused or undefined names, broken imports)
+# and syntax errors. Fixed here so that a newer ruff with other defaults does
+# not change what CI checks.
+select = ["E9", "F"]
