@@ -1,5 +1,6 @@
 #!/bin/bash
 # shellcheck disable=SC2034
+# SPDX-License-Identifier: Apache-2.0
 # End-to-end test of diun-update.py on a real Docker host, inside the
 # throw-away compose projects "imgupd-test" and "imgupd-test-my". No other
 # container, compose file, volume or dump is touched; everything created here

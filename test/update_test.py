@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Offline tests for lib/diun-update.py: Docker, docker compose and systemctl
 are replaced by fakes, /var/backups/image-updates and the other paths by a
 temporary directory. Covers database detection, plan reasons, argument checks

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Screenshots of the preview (desktop + phone), e.g. for the README or to
 check a UI change. Needs Playwright with Chromium:
 

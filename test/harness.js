@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Runs the real diun.js against a stubbed Cockpit API inside jsdom and
 // prints the rendered table as text. Scenarios cover the normal case, a
 // missing radar file, an unavailable inventory, and the watch/reload loop.

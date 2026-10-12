@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """`diun-deps.sh check` builds its JSON with printf: whatever this machine has
 (Docker or not, systemd or not, root or not), stdin must be one valid object
 with the fields the plugin reads.
