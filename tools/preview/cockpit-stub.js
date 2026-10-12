@@ -51,6 +51,14 @@
             }
             if (tool === "diun-update.py" && verb === "backups") return fakeProcess(JSON.stringify(FX.backups), []);
             if (tool === "diun-update.py" && verb.indexOf("delete-") === 0) return fakeProcess("", ["Deleted.\n"]);
+            if (tool === "diun-update.py" && verb === "radar") return fakeProcess("", ["Version radar running …\n", "Version radar finished.\n"]);
+            if (tool === "diun-update.py" && verb === "cleanup") {
+                const c = FX.backups.cleanup;
+                return fakeProcess("", c.dumps.map((p) => "Deleted dump " + p + "\n")
+                    .concat(c.images.map((r) => "Removed rollback image " + r + "\n"))
+                    .concat(["@@RESULT " + JSON.stringify({ status: "ok", dumps: c.dumps, images: c.images,
+                                                            bytes: c.bytes, failed: [] }) + "\n"]));
+            }
             return fakeProcess("", FX.log);    // update / rollback / install: live log
         },
         transport: { wait() {} },

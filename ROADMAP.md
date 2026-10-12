@@ -24,18 +24,25 @@ Done (see [CHANGELOG](CHANGELOG.md)):
 
 ---
 
-## Stage 1.1 – Polish (small, next)
+## Stage 1.1 – Polish ✅
 
-| # | Topic | Scope | Done when … |
-|---|---|---|---|
-| 1 | **Start the radar after an update** | After a successful update/rollback `diun-update.py` runs `systemctl start --no-block diun-radar.service` (only if the unit exists). The plugin reloads as soon as `versions.json` changes; the watch is already there. | after updating e.g. ollama (`latest`) the *Installed* column shows the new version within ~1 min instead of `?` |
-| 2 | **“Check radar now”** | Button next to *Refresh*; a new fixed verb (e.g. `diun-update.py radar`) that starts the service. Shows “running …” until `versions.json` is new. | the button starts exactly one run; a double click does not start a second one (systemd oneshot) |
-| 3 | **Cleanup rules** | Default: keep the last **3** dumps per container, delete unused rollback images after **14 days**. Configurable in `/etc/image-updates.conf`, root-owned, a plain `KEY=VALUE` file. Runs after every successful update and daily by timer. In the backups tab: a “would be deleted” preview and a “Clean up now” button. | tests with a fake file system; a dump of the **last** update or an image in use is never deleted |
-| 4 | **Versions in the history** | `operations.jsonl` gets `from_version` / `to_version` (via `diunlib.local_version` or the radar cache). The history shows “16.14 → 16.15”. | old entries without the fields are still shown |
-| 5 | **MariaDB/MySQL end-to-end** | Extend `test/e2e-server.sh` with a throw-away project using `mariadb:11` (and `mysql:8`): the dump contains test data, abort on a wrong password. | E2E green for Postgres, MariaDB, MySQL |
-| 6 | **Offline tests for `diun-update.py`** | Fake `docker`/`compose` like `test/inv_test.py`: plan reasons, database detection (`kind_of`), exit codes, path checks. | `run-all.sh` covers `diun-update.py` without Docker |
-| 7 | **CI** ✅ | The `test` workflow runs lint (`shellcheck`, `ruff`), `test/run-all.sh`, the installer and the browser preview on every push and PR. | done |
-| 8 | **systemd units as files** | `diun-radar.service/.timer` live as a heredoc in `diun-deps.sh` today. Move them to `systemd/`; `install.sh` and `diun-deps.sh` use the same source. | one source of truth; `diun-deps.sh install radar` works unchanged |
+Done in 0.7.0 (see [CHANGELOG](CHANGELOG.md)):
+- Radar starts after every successful update/rollback; “Run radar now” next to *Refresh*
+  (`diun-update.py radar`, waits for the run, a second click joins it).
+- Cleanup rules (`/etc/image-updates.conf`: `KEEP_DUMPS=3`, `ROLLBACK_IMAGE_DAYS=14`) after every
+  update for that project, daily via `diun-cleanup.timer` (set up on request), preview and “Clean up
+  now” in the backups tab.
+- `from_version` / `to_version` in the history.
+- End-to-end test for MariaDB and MySQL; offline tests for `diun-update.py`; lint (shellcheck, ruff), the browser
+  preview and `systemd-analyze verify` in CI; systemd units as files in `systemd/`.
+
+Decided on the way:
+- The cleanup after an update stays inside that project and image; only the timer and “Clean up now”
+  work on everything.
+- The daily timer is optional and set up from the backups tab, not from the requirements panel.
+- Rules that are not understood stop the cleanup; there is no fallback to the defaults.
+
+Still open: the end-to-end test has to run once on the reference host.
 
 ---
 
@@ -156,9 +163,8 @@ and tested.
 | Topic | Proposal |
 |---|---|
 | `plugin/diun.js` has ~1,300 lines in one file | split into ES modules (`<script type="module">` works under Cockpit's CSP without a build step): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
-| Package name `diun` (URL `/cockpit/@host/diun`) no longer fits the scope | rename to `image-updates`, `install.sh` removes the old directory; bookmarks change |
-| Units as a heredoc in `diun-deps.sh` | see 1.1 #8 |
-| `diun-update.py` only tested by E2E | offline tests (1.1 #6) |
+| Package name `diun` (URL `/cockpit/@host/diun`) no longer fits the scope | rename to `image-updates`, `install.sh` removes the old directory; bookmarks change; the units (`diun-radar`, `diun-cleanup`) and `/usr/local/lib/diun-radar` would follow |
+| Changed unit templates do not reach existing installations | `install.sh` only reports the difference; an opt-in `diun-deps.sh update units` with a backup |
 | Radar run fixed at `:17` every 6 h | `RandomizedDelaySec=` against registry peaks |
 | Documentation of the JSON formats | update `docs/INTERNALS.md` and the fixtures in `test/fixtures/` with every format change |
 

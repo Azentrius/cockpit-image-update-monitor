@@ -32,9 +32,9 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | Area | Function |
 |---|---|
 | **Overview** | All running containers with *Configured* (tag from compose), *Installed* (real version), *Newest version* (patch / minor / major) and status. Sorted by urgency. |
-| **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
-| **Update / roll out** | One click first shows a plan (affected containers, compose project, databases, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result. If that fails, there is a rollback button. |
-| **Backups & dumps** | A tab of its own with the update history, database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. |
+| **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**”. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
+| **Update / roll out** | One click first shows a plan (affected containers, compose project, databases, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If that fails, there is a rollback button. |
+| **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
 | **Use** | English and German following Cockpit's language (fallback English), loading indicator, cards on phones, no external resources (strict Cockpit CSP). |
 
@@ -122,6 +122,9 @@ v2.1.4             -> "v"  3 ""
 - **Reach**: how many number blocks does the configured tag fix? `latest` = 0 → everything reachable. `16-alpine` = 1 → patch and minor reachable. `3.12-slim` = 2 → patch only. `v2.1.4` = 3 → nothing.
 - **Database images** (postgres, mariadb, mysql, redis, valkey, clickhouse, mongo …) are marked. Their majors appear as grey info.
 - If a registry fails, the last good result stays and is marked “(older data)”.
+- **When:** every 6 hours (`diun-radar.timer`), in the background after every successful update or
+  rollback, and on **“Run radar now”** next to *Refresh*. The button stays busy until the run is over;
+  systemd never runs the radar twice at once.
 
 ---
 
@@ -145,7 +148,8 @@ sequenceDiagram
     else newer image
         H->>D: compose up -d --no-deps --pull never <services>
         H->>D: wait until healthy / 15 s stable (max. 180 s)
-        H-->>U: ok or failed (+ log lines)
+        H->>H: on ok: cleanup of this project by the rules, start the radar
+        H-->>U: ok (16.14 → 16.15) or failed (+ log lines)
     end
     U->>H: rollback <op-id> (optional)
     H->>D: tag back to the rollback image, compose up -d --no-deps
@@ -157,7 +161,7 @@ sequenceDiagram
 - **Postgres:** `pg_dumpall` with the superuser `POSTGRES_USER` (default `postgres`, local socket).
 - **MariaDB/MySQL:** `mariadb-dump`/`mysqldump --all-databases` with `MARIADB_ROOT_PASSWORD`/`MYSQL_ROOT_PASSWORD` from the container's environment.
 - **Whether a container counts as a database:** only if its command really starts the server. Helper containers that merely use the Postgres image (`sh -c …`) are not dumped.
-- **When it stops:** if a dump fails or is incomplete (end marker missing) or there is too little free space. Then the update stops **before any change** (exit 5).
+- **When it stops:** if a dump fails or is incomplete (end marker missing), for example because of a wrong password, or there is too little free space. Then the update stops **before any change** (exit 5); dumps of the other databases made in that attempt are removed again.
 
 **Rollback** points the tag back to the rollback copy and recreates the same services.
 
@@ -183,8 +187,27 @@ sequenceDiagram
 | Rollback images | local Docker tags `<repo>:rollback-<YYYYMMDD-HHMMSS>` | – |
 
 - **Delete** in the *Backups & dumps* tab. A rollback image still used by a container cannot be deleted. That is the case, for example, as long as other databases still run on the same old Postgres build.
-- **Cleanup** does **not happen automatically** yet, see [Stages](ROADMAP.md).
 - **Server backup:** `/var/backups/image-updates` should be part of the backup (e.g. restic), otherwise the dumps live only on the same disk as the database.
+
+**Cleanup rules**
+
+| Rule | Default | Key in `/etc/image-updates.conf` |
+|---|---|---|
+| Dumps kept per database container (newest first) | 3 | `KEEP_DUMPS` (`0` = never delete dumps) |
+| Unused rollback images removed after | 14 days | `ROLLBACK_IMAGE_DAYS` (`0` = never) |
+
+- **Never deleted:** the dumps of each project's last update, rollback images a container (running or stopped) still uses, files in the dump folder that the add-on did not name.
+- **When:** after every successful update, for that project's dumps and that image's rollback copies only; daily for everything once `diun-cleanup.timer` is set up (button in the tab, or `diun-deps.sh install cleanup`); on **“Clean up now”** in the tab.
+- **Preview:** the tab names the rules and marks every dump and image the next run would delete. On the console: `sudo /usr/local/lib/diun-radar/diun-update.py cleanup --dry-run`.
+- **The file** is optional, root-owned and not writable by others, with plain `KEY=VALUE` lines:
+
+  ```bash
+  # /etc/image-updates.conf
+  KEEP_DUMPS=5
+  ROLLBACK_IMAGE_DAYS=30
+  ```
+
+  A line that is not understood stops the cleanup with a message instead of guessing.
 
 **Restoring a dump (manually, with care)**
 
@@ -248,10 +271,12 @@ flowchart LR
 | `plugin/` | `/usr/share/cockpit/diun/` | user interface (vanilla JS, no build step), EN/DE |
 | `lib/diun-inventory.py` | `/usr/local/lib/diun-radar/` | running containers: tag, version (tag/variable), digest, compose mapping, “pulled, not rolled out” |
 | `lib/diun-versions.py` | `/usr/local/lib/diun-radar/` | version radar: installed version (label/digest), newer versions → `versions.json` |
-| `lib/diun-update.py` | `/usr/local/lib/diun-radar/` | plan, update with dump, rollback, backup list, delete |
-| `lib/diun-deps.sh` | `/usr/local/lib/diun-radar/` | check requirements; install skopeo, Diun stack, radar timer |
+| `lib/diun-update.py` | `/usr/local/lib/diun-radar/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run |
+| `lib/diun-deps.sh` | `/usr/local/lib/diun-radar/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
 | `lib/diunlib.py` | `/usr/local/lib/diun-radar/` | shared functions (tag scheme, version variables, reach) |
+| `systemd/*` | `/usr/local/lib/diun-radar/systemd/` | unit templates; `diun-deps.sh` copies them to `/etc/systemd/system/` |
 | `diun-radar.service/.timer` | `/etc/systemd/system/` | created by `diun-deps.sh install radar`; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
+| `diun-cleanup.service/.timer` | `/etc/systemd/system/` | created by `diun-deps.sh install cleanup`; runs daily (04:40) |
 | Diun stack | `/opt/diun/`, data `/var/lib/diun/` | created by `diun-deps.sh install diun`: Diun 4.33.0 + `docker-socket-proxy` (read-only), the script notifier writes JSON lines |
 
 The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INTERNALS.md).
@@ -261,9 +286,10 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 ## Security model
 
 - **Root code in one place only.** Everything Cockpit or systemd runs as root lives in `/usr/local/lib/diun-radar` (root-owned). `/var/lib/diun` is **writable from the Diun container**; nothing is ever run from there.
-- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `check`, `install skopeo|diun|radar`, `start diun`).
+- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`).
   - Container names, operation IDs, dump paths and rollback tags are checked by regex. Path tricks (`../`) are refused.
-  - `delete-image` deletes only `…:rollback-YYYYMMDD-HHMMSS` and never an image in use.
+  - `delete-image` and the cleanup delete only `…:rollback-YYYYMMDD-HHMMSS` and never an image in use.
+  - The cleanup rules come from `/etc/image-updates.conf` only if it belongs to root and nobody else can write it.
 - **Cockpit rights.** Reading runs with `superuser: "try"`, actions with `superuser: "require"`. Without administrative access in Cockpit there is a clear message instead of an error.
 - **Diun without the Docker socket.** Only the `docker-socket-proxy` sees `/var/run/docker.sock` (read-only). It exposes a filtered, read-only API (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) and publishes no port.
 - **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords are read only inside the database container from its environment, never stored or logged.
@@ -305,7 +331,7 @@ sudo ./install.sh --dry-run   # only shows what would happen
 sudo ./install.sh
 ```
 
-`install.sh` copies `plugin/` to `/usr/share/cockpit/diun/` and `lib/` to `/usr/local/lib/diun-radar/`, owned by root. It backs up an existing installation to `/usr/local/lib/diun-radar/backup-<timestamp>/` first and starts a radar run if the timer is set up already.
+`install.sh` copies `plugin/` to `/usr/share/cockpit/diun/`, `lib/` to `/usr/local/lib/diun-radar/` and the unit templates from `systemd/` to `/usr/local/lib/diun-radar/systemd/`, owned by root. It backs up an existing installation to `/usr/local/lib/diun-radar/backup-<timestamp>/` first and starts a radar run if the timer is set up already. Units already in `/etc/systemd/system/` stay untouched; `install.sh` says when one differs from its template.
 
 Then open **“Image updates”** in Cockpit (switch on administrative access). If something is missing, the add-on shows the *Missing requirements* panel at the top with install buttons. Alternatively on the console:
 
@@ -314,6 +340,7 @@ sudo /usr/local/lib/diun-radar/diun-deps.sh check
 sudo /usr/local/lib/diun-radar/diun-deps.sh install skopeo
 sudo /usr/local/lib/diun-radar/diun-deps.sh install diun     # creates /opt/diun and starts the stack
 sudo /usr/local/lib/diun-radar/diun-deps.sh install radar    # diun-radar.service + .timer
+sudo /usr/local/lib/diun-radar/diun-deps.sh install cleanup  # diun-cleanup.service + .timer (optional)
 # dry run without changes: DIUN_DEPS_DRYRUN=1 … install diun
 ```
 
@@ -322,14 +349,15 @@ sudo /usr/local/lib/diun-radar/diun-deps.sh install radar    # diun-radar.servic
 **Uninstall**
 
 ```bash
-sudo systemctl disable --now diun-radar.timer
-sudo rm /etc/systemd/system/diun-radar.service /etc/systemd/system/diun-radar.timer
+sudo systemctl disable --now diun-radar.timer diun-cleanup.timer
+sudo rm -f /etc/systemd/system/diun-radar.service /etc/systemd/system/diun-radar.timer \
+           /etc/systemd/system/diun-cleanup.service /etc/systemd/system/diun-cleanup.timer
 sudo systemctl daemon-reload
 sudo rm -r /usr/share/cockpit/diun
 sudo rm -r /usr/local/lib/diun-radar        # also holds the install.sh backups
 sudo rm -r /var/lib/diun-radar
 # Optional - Diun stack:     cd /opt/diun && sudo docker compose down && sudo rm -r /opt/diun /var/lib/diun
-# Deliberately NOT automatic: /var/backups/image-updates (dumps) and rollback images
+# Deliberately NOT automatic: /var/backups/image-updates (dumps), /etc/image-updates.conf and rollback images
 #   docker image ls --format '{{.Repository}}:{{.Tag}}' | grep ':rollback-'
 ```
 
@@ -338,15 +366,17 @@ sudo rm -r /var/lib/diun-radar
 ## Operation and troubleshooting
 
 ```bash
-# Run the radar now and look at the result
-sudo systemctl start diun-radar.service
+# Run the radar now (same as the button) and look at the result
+sudo /usr/local/lib/diun-radar/diun-update.py radar
 journalctl -u diun-radar.service -n 20
 sudo python3 /usr/local/lib/diun-radar/diun-versions.py --table     # table, writes nothing
 
 # What does the plugin see?
 sudo /usr/local/lib/diun-radar/diun-inventory.py                    # one JSON line per container
 sudo /usr/local/lib/diun-radar/diun-update.py plan <container>      # plan, changes nothing
-sudo /usr/local/lib/diun-radar/diun-update.py backups               # dumps, rollback images, history
+sudo /usr/local/lib/diun-radar/diun-update.py backups               # dumps, rollback images, history, cleanup preview
+sudo /usr/local/lib/diun-radar/diun-update.py cleanup --dry-run     # what the cleanup rules would delete
+journalctl -u diun-cleanup.service -n 20                            # last daily cleanup
 sudo /usr/local/lib/diun-radar/diun-deps.sh check
 
 # Diun
@@ -357,7 +387,8 @@ tail -n 5 /var/lib/diun/events.jsonl
 | Symptom | Cause / remedy |
 |---|---|
 | “Container inventory unavailable” | Switch on administrative access in Cockpit, otherwise check Docker. |
-| Column *Installed* shows `?` after an update | Label/digest come from the radar (every 6 h). `systemctl start diun-radar.service` refreshes right away. |
+| Column *Installed* shows `?` after an update | Label/digest come from the radar, which starts after every update and takes a few minutes. *Run radar now* or `diun-update.py radar` runs it again. |
+| “Cleanup rules: … not understood” | Fix the line in `/etc/image-updates.conf` (only `KEEP_DUMPS` and `ROLLBACK_IMAGE_DAYS`, numbers) or make it root-only (`chown root:root`, `chmod 644`). Until then nothing is deleted. |
 | “Radar: no data yet” / “(outdated)” | Timer missing or not running: *Missing requirements* panel or `systemctl status diun-radar.timer`. |
 | “Registry error”, “(older data)” | Registry unreachable or rate limit; the last good result stays visible. |
 | Update stops with “dump … failed” | Nothing was changed. Check the database logs; if need be, untick “Create database dump first” (a deliberate decision). |
@@ -368,7 +399,8 @@ tail -n 5 /var/lib/diun/events.jsonl
 | Code | Meaning |
 |---|---|
 | 0 | ok |
-| 2 | not found / not possible |
+| 1 | a subcommand failed (e.g. the radar run) |
+| 2 | not found / not possible (also: cleanup rules not understood) |
 | 3 | refused, e.g. already rolled back or file exists |
 | 4 | containers do not run stably after update/rollback |
 | 5 | stopped before any change (dump, space) |
@@ -383,12 +415,14 @@ tail -n 5 /var/lib/diun/events.jsonl
 ```
 plugin/            Cockpit package (manifest, index.html, diun.js, diun.css, menu translation)
 lib/               root helpers (Python 3 / POSIX sh), installed to /usr/local/lib/diun-radar
+systemd/           unit templates (radar, cleanup), installed to /usr/local/lib/diun-radar/systemd
 install.sh         installer (DESTDIR, --dry-run, backup of the previous version)
 test/              offline tests (Python + jsdom) and the end-to-end test for a real Docker host
 tools/preview/     the plugin in a normal browser with test data + screenshots (Playwright)
 tools/probe-versions.py   diagnosis: which version sources a host offers (read-only)
 tools/check-version.sh    version in diun.js, index.html and CHANGELOG.md agree
 tools/release-notes.sh    release notes from CHANGELOG.md
+tools/check-units.sh      systemd-analyze verify for the unit templates
 docs/              INTERNALS.md (interfaces, formats), images
 ```
 
@@ -404,6 +438,7 @@ cd test && npm ci && ./run-all.sh
 pip install -r test/requirements.txt
 shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh
 ruff check .
+sh tools/check-units.sh      # unit templates (needs systemd)
 ```
 
 Covered by the tests, among other things:
@@ -411,10 +446,11 @@ Covered by the tests, among other things:
 - Docker Hub and registry matching (with fakes)
 - cache and registry outage
 - inventory
+- `diun-update.py` with fake Docker: database detection, plan reasons, exit codes, update, rollback, cleanup rules, radar
 - loading indicator and repeated loads
 - language EN/DE
 - requirements panel
-- update, rollback and delete dialogs
+- update, rollback, delete and cleanup dialogs, “Run radar now”
 - the version columns
 - version and changelog agree
 
@@ -425,7 +461,7 @@ python3 tools/preview/build.py      # -> tools/preview/out/diun/index.html?lang=
 python3 tools/preview/shoot.py      # screenshots to docs/img (needs playwright + chromium)
 ```
 
-**End-to-end on a real host** (creates a throw-away compose project `imgupd-test`, touches nothing else, cleans up afterwards):
+**End-to-end on a real host** (creates the throw-away compose projects `imgupd-test` and `imgupd-test-my`, touches nothing else, cleans up afterwards):
 
 ```bash
 sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e2e-server.sh
@@ -435,11 +471,14 @@ The test checks:
 - plan
 - update with dump that fails on purpose
 - rollback; a second rollback is refused
-- update without dump
+- update without dump, with versions in the result and the history
+- cleanup after the update, limited to the test project
 - “nothing newer”
 - lock
-- backup list
+- backup list with the cleanup preview, `cleanup --dry-run`
 - delete, also with a manipulated path
+- radar run
+- MariaDB (`mariadb:11`) and MySQL (`mysql:8`) dumps with test data; a wrong password stops before any change (`E2E_MYSQL=0` skips this part)
 
 The changes are in [CHANGELOG.md](CHANGELOG.md).
 
@@ -459,10 +498,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Docker with Compose v2 only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated.
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “Registry error”.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
-- **MariaDB/MySQL dump** is implemented, but tested end-to-end only against Postgres so far.
-- **No automatic cleanup** of old dumps and rollback images.
 - **Version jumps** via a different tag and **database majors** are manual (change the compose file).
-- After updates of images whose version can only be determined by label/digest, `?` shows until the next radar run.
+- After updates of images whose version can only be determined by label/digest, `?` shows for a few minutes until the radar run started by the update is done.
 
 ---
 
@@ -473,7 +510,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 | Stage | Content | State |
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
-| 1.1 | Polish: start the radar after an update, cleanup rules, “Check radar now”, versions in the history, MariaDB E2E | planned |
+| 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |

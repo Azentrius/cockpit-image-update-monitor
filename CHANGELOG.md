@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.7.0 – 2026-10-12
+
+Stage 1.1: cleanup rules, radar runs on demand, versions in the history.
+
+- **Cleanup rules.** Old dumps and unused rollback images are deleted by rules: keep the newest 3 dumps
+  per database container, remove unused rollback images after 14 days. `/etc/image-updates.conf`
+  (`KEEP_DUMPS`, `ROLLBACK_IMAGE_DAYS`, `0` = never) changes them; it must belong to root, and a line
+  that is not understood stops the cleanup instead of guessing.
+  - Never deleted: the dumps of each project's last update, rollback images a container uses, files
+    not named like the add-on's dumps.
+  - Runs after every successful update (for that project and image) and, once set up, daily via
+    `diun-cleanup.timer`.
+  - Backups tab: the rules, the timer (with a set-up button), what would be deleted now (marked in the
+    tables) and “Clean up now”. On the console: `diun-update.py cleanup [--dry-run]`.
+- **Version radar after updates.** After a successful update or rollback the radar starts in the
+  background, so the *Installed* column shows versions known only from labels or digests within
+  minutes.
+- **“Run radar now”** next to *Refresh*: runs the radar and stays busy until the run is over. A
+  second click joins the same run.
+- **Versions in the history.** `operations.jsonl` records `from_version` / `to_version`; the history
+  shows “16.14 → 16.15”, the update result names both. Older entries show “—”.
+- **Fixed:** an update that stopped at a failing dump kept the dumps of the other databases of the
+  project. It now removes them, so nothing is left behind.
+- **systemd units** are plain files in `systemd/`. `install.sh` installs them as templates to
+  `/usr/local/lib/diun-radar/systemd/`, `diun-deps.sh` copies them from there and never replaces
+  units already set up; `install.sh` reports when they differ.
+- **Tests:** offline tests for `diun-update.py` (fake Docker, compose and systemctl), the new plugin
+  parts, and `diun-deps.sh check`. The end-to-end test covers MariaDB and MySQL dumps, a wrong
+  password and the new flows.
+- **CI:** lint (shellcheck, ruff), the preview in a browser with screenshots, and
+  `systemd-analyze verify` for the unit templates (`tools/check-units.sh`) run on every push and pull
+  request.
 ## 0.6.2 – 2026-10-12
 
 Maintenance release: the add-on is unchanged, the release is verifiable.

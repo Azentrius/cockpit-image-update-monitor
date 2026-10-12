@@ -62,7 +62,7 @@
  "backups": {
   "dir": "/var/backups/image-updates",
   "free_bytes": 42949672960,
-  "dump_bytes": 3145728,
+  "dump_bytes": 6081740,
   "dumps": [
    {
     "path": "glitchtip/20261012-031500_glitchtip-postgres.sql.gz",
@@ -70,6 +70,13 @@
     "container": "glitchtip-postgres",
     "size": 3145728,
     "mtime": 1791768900
+   },
+   {
+    "path": "glitchtip/20260901-031500_glitchtip-postgres.sql.gz",
+    "project": "glitchtip",
+    "container": "glitchtip-postgres",
+    "size": 2936012,
+    "mtime": 1788232500
    }
   ],
   "images": [
@@ -78,6 +85,13 @@
     "id": "sha256:old",
     "size": "275MB",
     "created": "2026-10-12 03:15:00 +0200 CEST",
+    "in_use": false
+   },
+   {
+    "ref": "postgres:rollback-20260901-031500",
+    "id": "sha256:older",
+    "size": "274MB",
+    "created": "2026-09-01 03:15:00 +0200 CEST",
     "in_use": false
    },
    {
@@ -107,7 +121,9 @@
      "glitchtip/20261012-031500_glitchtip-postgres.sql.gz"
     ],
     "status": "ok",
-    "can_rollback": true
+    "can_rollback": true,
+    "from_version": "16.14",
+    "to_version": "16.15"
    },
    {
     "id": "20261011-120000-ollama",
@@ -127,7 +143,20 @@
     "status": "nochange",
     "can_rollback": false
    }
-  ]
+  ],
+  "cleanup": {
+   "keep_dumps": 1,
+   "image_days": 14,
+   "file": "/etc/image-updates.conf",
+   "error": null,
+   "dumps": [
+    "glitchtip/20260901-031500_glitchtip-postgres.sql.gz"
+   ],
+   "images": [
+    "postgres:rollback-20260901-031500"
+   ],
+   "bytes": 2936012
+  }
  },
  "log": [
   "Updating postgres:16-alpine in project glitchtip: services postgres\n",

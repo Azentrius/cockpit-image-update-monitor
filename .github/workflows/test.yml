@@ -22,10 +22,11 @@ jobs:
           python-version: "3.12"
       - name: Check tools (pinned in test/requirements.txt)
         run: pip install -r test/requirements.txt
-      - name: Lint (shellcheck, ruff)
+      - name: Lint (shellcheck, ruff, systemd units)
         run: |
           shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh
           ruff check .
+          sh tools/check-units.sh
       - name: Offline tests (Python helpers, plugin under jsdom, version and changelog)
         run: |
           cd test

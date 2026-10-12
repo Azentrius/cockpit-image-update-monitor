@@ -11,11 +11,18 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 3. docker compose pull + up -d --no-deps for every
                                    service of the project that uses the same image
                                 4. wait until the new containers run (healthy)
+                                5. clean up this project by the rules (see cleanup)
+                                6. start the version radar in the background
   rollback <op-id>              point the tag back at the rollback image and
                                 recreate the same services (data is NOT restored)
-  backups                       read-only: dumps, rollback images, history (JSON)
+  backups                       read-only: dumps, rollback images, history and
+                                what the cleanup rules would delete (JSON)
   delete-dump <project/file>    delete one dump file
   delete-image <repo:rollback-…> remove one rollback image tag
+  cleanup [--dry-run]           delete old dumps and unused rollback images by
+                                the rules in /etc/image-updates.conf (also run
+                                daily by diun-cleanup.timer)
+  radar                         run the version radar now and wait for it
 
 Same tag only ("stage 1"): the image reference in the compose file is never
 changed. Images built locally or pinned by digest are not updated.
@@ -24,7 +31,7 @@ Everything the addon writes lives in /var/backups/image-updates (root only):
   dumps/<project>/<stamp>_<container>.sql.gz
   operations.jsonl              one JSON line per update / rollback
 
-The machine-readable result of update/rollback is the last line:
+The machine-readable result of update/rollback/cleanup is the last line:
   @@RESULT {"op": "...", "status": "ok|nochange|failed", ...}
 
 Lives in /usr/local/lib/diun-radar (root-owned, not mounted into any
@@ -41,12 +48,18 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from diunlib import local_version  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
 OPS = os.path.join(BASE, "operations.jsonl")
 LOCK = "/run/lock/diun-update.lock"
+CONF = "/etc/image-updates.conf"
+VERSIONS = "/var/lib/diun-radar/versions.json"
+RADAR_UNIT = "diun-radar.service"
 
 L_PROJECT = "com.docker.compose.project"
 L_SERVICE = "com.docker.compose.service"
@@ -149,21 +162,76 @@ def human(n):
         n /= 1024
 
 
+_lock_fh = None     # held open until the process exits
+
+
 def lock():
+    """One update / rollback / cleanup at a time (exit 75 for the second)."""
+    global _lock_fh
     os.makedirs(os.path.dirname(LOCK), exist_ok=True)
     fh = open(LOCK, "w")
     try:
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
+        fh.close()
         raise Abort(75, "Es läuft bereits ein Update oder Rollback.",
                     "An update or rollback is already running.")
-    return fh
+    _lock_fh = fh
 
 
 def ensure_base():
     for d in (BASE, DUMPS):
         os.makedirs(d, mode=0o700, exist_ok=True)
         os.chmod(d, 0o700)
+
+
+def systemctl(*args, timeout=60):
+    return subprocess.run(["systemctl", *args], capture_output=True, text=True, timeout=timeout)
+
+
+def radar_installed():
+    try:
+        return systemctl("cat", RADAR_UNIT).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def start_radar():
+    """After an update or rollback: refresh versions.json in the background,
+    so versions only the radar can tell (label, digest) show up within
+    minutes instead of after the next 6-hour run."""
+    if not radar_installed():
+        return
+    try:
+        ok = systemctl("start", "--no-block", RADAR_UNIT).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    if ok:
+        say("Versions-Radar gestartet – die Spalte „Installiert“ ist in wenigen Minuten aktuell.",
+            "Version radar started – the Installed column is up to date within a few minutes.")
+
+
+def version_of(ref, image_id):
+    """Version of a local image for the history: the tag or the app's version
+    variable (diunlib), otherwise what the radar found for this image ID
+    (label, digest). None if unknown. Never fails - the history is only info."""
+    if not image_id:
+        return None
+    repo, tag = split_ref(ref)
+    try:
+        v = local_version(repo, tag, docker_json("image", "inspect", image_id)[0])[0]
+        if v:
+            return v
+    except Exception:
+        pass
+    try:
+        with open(VERSIONS) as f:
+            for r in json.load(f).get("images") or []:
+                if r.get("image") == repo and r.get("tag") == tag:
+                    return ((r.get("installed") or {}).get(image_id) or {}).get("version")
+    except Exception:
+        pass
+    return None
 
 
 PG_SERVER = {"postgres", "postmaster"}
@@ -444,7 +512,7 @@ def result(**kw):
 
 # ---------------------------------------------------------------- update ----
 def cmd_update(name, do_dump=True):
-    _lk = lock()  # noqa: F841 - keep the lock file open until we exit
+    lock()
     plan, ctx = make_plan(name)
     if not plan["updatable"]:
         raise Abort(2, f"Nicht aktualisierbar: {plan['reason']}", f"Not updatable: {plan['reason']}")
@@ -460,6 +528,7 @@ def cmd_update(name, do_dump=True):
           "project": project, "workdir": ctx["workdir"], "files": ctx["files"],
           "env_files": ctx["env_files"], "services": services,
           "containers": plan["containers"], "image": ref, "old_id": old_id,
+          "from_version": version_of(ref, old_id), "to_version": None,
           "rollback": None, "dumps": [], "status": "running"}
 
     say(f"Update {ref} in Projekt {project}: Services {', '.join(services)}",
@@ -475,8 +544,18 @@ def cmd_update(name, do_dump=True):
         if plan["free_bytes"] is not None and plan["free_bytes"] < need:
             raise Abort(5, f"Zu wenig Platz in {BASE}: {human(plan['free_bytes'])} frei, {human(need)} nötig.",
                         f"Not enough space in {BASE}: {human(plan['free_bytes'])} free, {human(need)} needed.")
-        for d in dumpable:
-            op["dumps"].append(dump_db(project, d, st))
+        try:
+            for d in dumpable:
+                op["dumps"].append(dump_db(project, d, st))
+        except Abort:
+            # An aborted update leaves nothing behind, not even the dumps
+            # of the other databases that worked.
+            for rel in op["dumps"]:
+                try:
+                    remove_dump(rel)
+                except (Abort, OSError):
+                    pass
+            raise
     elif do_dump:
         say("Kein unterstützter Datenbank-Container im Projekt – kein Dump.",
             "No supported database container in this project – no dump.")
@@ -501,12 +580,15 @@ def cmd_update(name, do_dump=True):
     new_id = image_id(ref)
     if new_id and all(v == new_id for v in old_ids.values()):
         run(["docker", "rmi", rb], check=False)
-        op.update(status="nochange", rollback=None, new_id=new_id)
+        op.update(status="nochange", rollback=None, new_id=new_id, to_version=op["from_version"])
         record(op)
         say("Kein neueres Image verfügbar – nichts geändert.", "No newer image available – nothing changed.")
-        result(op=op_id, status="nochange", dumps=op["dumps"])
+        result(op=op_id, status="nochange", dumps=op["dumps"],
+               from_version=op["from_version"], to_version=op["to_version"])
         return 0
     op["new_id"] = new_id
+    op["to_version"] = version_of(ref, new_id)
+    versions = {"from_version": op["from_version"], "to_version": op["to_version"]}
 
     # 4. Recreate only these services
     rc = stream(base + ["up", "-d", "--no-deps", "--pull", "never", *services])
@@ -516,19 +598,23 @@ def cmd_update(name, do_dump=True):
         op["status"] = "failed"
         record(op)
         say("Update fehlgeschlagen. Zurückrollen ist möglich.", "Update failed. A rollback is possible.")
-        result(op=op_id, status="failed", rollback=rb, dumps=op["dumps"])
+        result(op=op_id, status="failed", rollback=rb, dumps=op["dumps"], **versions)
         return 4
     op["status"] = "ok"
     record(op)
     say("Update erfolgreich.", "Update successful.")
-    result(op=op_id, status="ok", rollback=rb, dumps=op["dumps"])
+
+    # 5. + 6. Never let these turn a successful update into a failure.
+    cleanup_after_update(project, repo)
+    start_radar()
+    result(op=op_id, status="ok", rollback=rb, dumps=op["dumps"], **versions)
     return 0
 
 
 def cmd_rollback(op_id):
     if not OP_RE.match(op_id):
         raise Abort(64, f"Ungültige Vorgangs-ID: {op_id}", f"Invalid operation id: {op_id}")
-    _lk = lock()  # noqa: F841 - keep the lock file open until we exit
+    lock()
     op = load_ops().get(op_id)
     if not op or op.get("kind") != "update":
         raise Abort(2, f"Vorgang {op_id} nicht gefunden.", f"Operation {op_id} not found.")
@@ -554,14 +640,17 @@ def cmd_rollback(op_id):
         result(op=op_id, status="failed")
         return 4
     say("Rollback erfolgreich.", "Rollback successful.")
+    start_radar()
     result(op=op_id, status="ok")
     return 0
 
 
 # --------------------------------------------------------------- backups ----
-def cmd_backups():
-    ensure_base()
+def list_dumps():
+    """Dump files dumps/<project>/<stamp>_<container>.sql.gz, newest first per project."""
     dumps = []
+    if not os.path.isdir(DUMPS):
+        return dumps
     for project in sorted(os.listdir(DUMPS)):
         pdir = os.path.join(DUMPS, project)
         if not os.path.isdir(pdir):
@@ -574,7 +663,12 @@ def cmd_backups():
             dumps.append({"path": f"{project}/{f}", "project": project,
                           "container": rest[:-len(".sql.gz")], "size": os.path.getsize(p),
                           "mtime": int(os.path.getmtime(p))})
+    return dumps
 
+
+def rollback_images():
+    """Local <repo>:rollback-<stamp> tags, newest first. in_use = a container
+    (running or stopped) still uses the image."""
     in_use = set(run(["docker", "ps", "-a", "--format", "{{.ID}}"]).split())
     used_ids = set()
     if in_use:
@@ -590,23 +684,44 @@ def cmd_backups():
                            "size": i.get("Size", ""), "created": i.get("CreatedAt", ""),
                            "in_use": i["ID"] in used_ids})
     images.sort(key=lambda x: x["ref"].rsplit(":", 1)[1], reverse=True)
-    rb_refs = {i["ref"] for i in images}
+    return images
 
-    ops = sorted(load_ops().values(), key=lambda o: o.get("id", ""), reverse=True)[:30]
+
+def cmd_backups():
+    ensure_base()
+    dumps = list_dumps()
+    images = rollback_images()
+    rb_refs = {i["ref"] for i in images}
+    all_ops = load_ops()
+
+    ops = sorted((dict(o) for o in all_ops.values()), key=lambda o: o.get("id", ""), reverse=True)[:30]
     for o in ops:
         o["can_rollback"] = (o.get("kind") == "update" and o.get("status") in ("ok", "failed")
                              and not o.get("rolled_back") and norm_ref(o.get("rollback") or "") in rb_refs)
         for k in ("workdir", "files", "env_files", "old_id", "new_id"):
             o.pop(k, None)
 
+    # What the cleanup rules would delete right now (preview for the tab).
+    cleanup = {"keep_dumps": None, "image_days": None, "file": None, "error": None,
+               "dumps": [], "images": [], "bytes": 0}
+    try:
+        rules = load_rules()
+        del_dumps, del_images = cleanup_plan(rules, dumps, images, all_ops)
+        cleanup.update(keep_dumps=rules["keep_dumps"], image_days=rules["image_days"], file=rules["file"],
+                       dumps=[d["path"] for d in del_dumps], images=[i["ref"] for i in del_images],
+                       bytes=sum(d["size"] for d in del_dumps))
+    except Abort as e:
+        cleanup["error"] = str(e)
+
     du = shutil.disk_usage(BASE)
-    print(json.dumps({"dumps": dumps, "images": images, "ops": ops,
+    print(json.dumps({"dumps": dumps, "images": images, "ops": ops, "cleanup": cleanup,
                       "dump_bytes": sum(d["size"] for d in dumps),
                       "free_bytes": du.free, "dir": BASE}, ensure_ascii=False))
     return 0
 
 
-def cmd_delete_dump(rel):
+def remove_dump(rel):
+    """Delete one dump; rel must be <project>/<stamp>_<container>.sql.gz below DUMPS."""
     if not DUMP_RE.match(rel):
         raise Abort(64, f"Ungültiger Dump-Name: {rel}", f"Invalid dump name: {rel}")
     path = os.path.realpath(os.path.join(DUMPS, rel))
@@ -616,6 +731,10 @@ def cmd_delete_dump(rel):
     pdir = os.path.dirname(path)
     if not os.listdir(pdir):
         os.rmdir(pdir)
+
+
+def cmd_delete_dump(rel):
+    remove_dump(rel)
     say(f"Gelöscht: {rel}", f"Deleted: {rel}")
     return 0
 
@@ -628,6 +747,178 @@ def cmd_delete_image(ref):
         raise Abort(2, f"{ref} nicht gefunden.", f"{ref} not found.")
     # Without -f: Docker refuses if a container still uses the image.
     return stream(["docker", "rmi", ref])
+
+
+# --------------------------------------------------------------- cleanup ----
+# KEY in /etc/image-updates.conf -> (rule, default). 0 switches a rule off.
+RULES = {"KEEP_DUMPS": ("keep_dumps", 3), "ROLLBACK_IMAGE_DAYS": ("image_days", 14)}
+RULE_VALUE_RE = re.compile(r"^\d{1,4}$")
+
+
+def load_rules():
+    """Cleanup rules: the defaults, overridden by /etc/image-updates.conf
+    (KEY=VALUE lines, # comments). The file must belong to root and be
+    writable by root only. Anything not understood stops the cleanup instead
+    of guessing - a typo must never delete more than intended."""
+    rules = {name: default for name, default in RULES.values()}
+    rules["file"] = None
+    try:
+        st = os.stat(CONF)
+    except FileNotFoundError:
+        return rules
+    if st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
+        raise Abort(2, f"{CONF} muss root gehören und darf nur für root schreibbar sein – nichts gelöscht.",
+                    f"{CONF} must belong to root and be writable by root only – nothing deleted.")
+    with open(CONF) as f:
+        for n, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, sep, value = (x.strip() for x in line.partition("="))
+            value = value.strip("\"'")
+            if not sep or key not in RULES or not RULE_VALUE_RE.match(value):
+                raise Abort(2, f"{CONF}, Zeile {n} nicht verstanden: {line[:60]} – nichts gelöscht.",
+                            f"{CONF}, line {n} not understood: {line[:60]} – nothing deleted.")
+            rules[RULES[key][0]] = int(value)
+    rules["file"] = CONF
+    return rules
+
+
+def cleanup_plan(rules, dumps, images, ops, project=None, repo=None, now=None):
+    """What the rules delete: (dumps, images), entries of list_dumps() and
+    rollback_images(). Never selected:
+      - the newest keep_dumps dumps of every database container
+      - the dumps of each project's last update
+      - files not named like the add-on's dumps
+      - rollback images a container uses, or younger than image_days
+    project / repo narrow it down to one update's project and image."""
+    del_dumps, del_images = [], []
+    if rules["keep_dumps"] > 0:
+        last = {}
+        for o in ops.values():
+            p = o.get("project")
+            if o.get("kind") == "update" and p and o.get("id", "") > last.get(p, {}).get("id", ""):
+                last[p] = o
+        protected = {d for o in last.values() for d in o.get("dumps") or []}
+        groups = {}
+        for d in dumps:
+            if DUMP_RE.match(d["path"]) and project in (None, d["project"]):
+                groups.setdefault((d["project"], d["container"]), []).append(d)
+        for group in groups.values():
+            group.sort(key=lambda d: d["path"], reverse=True)
+            del_dumps += [d for d in group[rules["keep_dumps"]:] if d["path"] not in protected]
+    if rules["image_days"] > 0:
+        limit = (now or datetime.now()) - timedelta(days=rules["image_days"])
+        for i in images:
+            i_repo, tag = split_ref(i["ref"])
+            if i["in_use"] or (repo is not None and i_repo != norm_ref(repo)):
+                continue
+            try:
+                made = datetime.strptime(tag[len("rollback-"):], "%Y%m%d-%H%M%S")
+            except ValueError:
+                continue
+            if made < limit:
+                del_images.append(i)
+    return del_dumps, del_images
+
+
+def rules_text(rules):
+    """The rules in one line, as (de, en) for say()."""
+    keep, days, src = rules["keep_dumps"], rules["image_days"], rules["file"]
+    de = [f"die letzten {keep} Dumps je Datenbank-Container behalten" if keep else "Dumps nie löschen",
+          f"ungenutzte Rollback-Images nach {days} Tagen entfernen" if days else "Rollback-Images nie entfernen"]
+    en = [f"keep the last {keep} dumps per database container" if keep else "never delete dumps",
+          f"remove unused rollback images after {days} days" if days else "never remove rollback images"]
+    return (f"Regeln ({src or 'Standard'}): " + ", ".join(de) + ".",
+            f"Rules ({src or 'defaults'}): " + ", ".join(en) + ".")
+
+
+def apply_cleanup(dumps, images):
+    """Delete the selected dumps and rollback images; one line per item.
+    Returns (deleted dump paths, removed image refs, freed dump bytes, failures)."""
+    gone_dumps, gone_images, freed, failed = [], [], 0, []
+    for d in dumps:
+        try:
+            remove_dump(d["path"])
+        except (Abort, OSError) as e:
+            failed.append(d["path"])
+            say(f"Nicht gelöscht: {d['path']} ({e})", f"Not deleted: {d['path']} ({e})")
+            continue
+        gone_dumps.append(d["path"])
+        freed += d["size"]
+        say(f"Dump gelöscht: {d['path']} ({human(d['size'])})", f"Deleted dump {d['path']} ({human(d['size'])})")
+    for i in images:
+        # Without -f: Docker refuses if a container started using it meanwhile.
+        try:
+            run(["docker", "rmi", i["ref"]], timeout=120)
+        except subprocess.CalledProcessError as e:
+            failed.append(i["ref"])
+            err = (e.stderr or "").strip()[-200:]
+            say(f"Nicht entfernt: {i['ref']} ({err})", f"Not removed: {i['ref']} ({err})")
+            continue
+        gone_images.append(i["ref"])
+        say(f"Rollback-Image entfernt: {i['ref']}", f"Removed rollback image {i['ref']}")
+    return gone_dumps, gone_images, freed, failed
+
+
+def cmd_cleanup(dry=False):
+    rules = load_rules()
+    if not dry:
+        lock()
+    say(*rules_text(rules))
+    dumps, images = cleanup_plan(rules, list_dumps(), rollback_images(), load_ops())
+    if not dumps and not images:
+        say("Nichts aufzuräumen.", "Nothing to clean up.")
+        if not dry:
+            result(status="nochange", dumps=[], images=[], bytes=0, failed=[])
+        return 0
+    if dry:
+        for d in dumps:
+            say(f"Würde löschen: {d['path']} ({human(d['size'])})", f"Would delete {d['path']} ({human(d['size'])})")
+        for i in images:
+            say(f"Würde entfernen: {i['ref']}", f"Would remove {i['ref']}")
+        return 0
+    gone_dumps, gone_images, freed, failed = apply_cleanup(dumps, images)
+    say(f"Fertig: {len(gone_dumps)} Dumps ({human(freed)}), {len(gone_images)} Rollback-Images entfernt.",
+        f"Done: {len(gone_dumps)} dumps ({human(freed)}), {len(gone_images)} rollback images removed.")
+    result(status="ok", dumps=gone_dumps, images=gone_images, bytes=freed, failed=failed)
+    return 0
+
+
+def cleanup_after_update(project, repo):
+    """The same rules after a successful update, limited to its project's dumps
+    and its image's rollback copies. A problem here is reported, never fatal."""
+    try:
+        rules = load_rules()
+        dumps, images = cleanup_plan(rules, list_dumps(), rollback_images(), load_ops(),
+                                     project=project, repo=repo)
+        if dumps or images:
+            say("Aufräumen nach den Regeln …", "Cleaning up by the rules …")
+            apply_cleanup(dumps, images)
+    except Abort as e:
+        say(f"Aufräumen übersprungen: {e}", f"Cleanup skipped: {e}")
+    except Exception as e:  # never turn a successful update into a failure
+        say(f"Aufräumen übersprungen: {e}", f"Cleanup skipped: {e}")
+
+
+# ----------------------------------------------------------------- radar ----
+def cmd_radar():
+    """Run the version radar now and wait for it. systemd runs the oneshot
+    service once at a time: a second start joins the run in progress."""
+    if not radar_installed():
+        raise Abort(2, "Der Versions-Radar ist nicht eingerichtet.", "The version radar is not set up.")
+    say("Versions-Radar läuft …", "Version radar running …")
+    try:
+        p = systemctl("start", RADAR_UNIT, timeout=20 * 60)
+    except subprocess.TimeoutExpired:
+        raise Abort(1, "Der Versions-Radar antwortet nicht (journalctl -u diun-radar.service).",
+                    "The version radar does not finish (journalctl -u diun-radar.service).")
+    if p.returncode != 0:
+        print((p.stderr or "").strip(), flush=True)
+        raise Abort(1, "Der Radar-Lauf ist fehlgeschlagen (journalctl -u diun-radar.service).",
+                    "The radar run failed (journalctl -u diun-radar.service).")
+    say("Versions-Radar fertig.", "Version radar finished.")
+    return 0
 
 
 # ------------------------------------------------------------------ main ----
@@ -648,6 +939,10 @@ def main(argv):
         return cmd_delete_dump(argv[1])
     if len(argv) == 2 and argv[0] == "delete-image":
         return cmd_delete_image(argv[1])
+    if argv in (["cleanup"], ["cleanup", "--dry-run"]):
+        return cmd_cleanup(dry=len(argv) == 2)
+    if argv == ["radar"]:
+        return cmd_radar()
     raise Abort(64, "Unbekannter Befehl: " + " ".join(argv), "Unknown command: " + " ".join(argv))
 
 
