@@ -85,6 +85,17 @@ installed version was unknown and the jump invisible.
   and *Update* asks for a confirmation.
 - Pinning the tag to the running version comes with stage 2 (change the tag in the compose file).
 
+**What is updated together**
+- **Overview:** if other running containers of the same compose project use the same image, the row
+  says so under the container name, e.g. “together with glitchtip-web” (at most three names, then
+  “+n”). Visible text, not a tooltip, so it works on phones. The inventory knows project and image of
+  every container already; no new helper verb is needed.
+- **Dialog:** “Affected containers” splits into groups: recreated (same image), one-off jobs that run
+  first (e.g. `migrate`), databases that are dumped, and, with the dependencies below, the services
+  that are watched.
+- Rows stay one per container: the status belongs to each container, and a combined row would hide
+  the one that is not healthy.
+
 **Dependencies** (from `docker compose config`, which the plan reads already)
 - **Show them:** the plan lists what the services depend on (`depends_on`) and what depends on them.
   Today the update recreates only the services of the image (`up --no-deps`): a database or cache
@@ -100,8 +111,9 @@ installed version was unknown and the jump invisible.
   shown as a hint. Being on a network does not prove use, so this never blocks anything.
 
 **Done when …**
-- Offline tests cover the plan hint, the error line, the stored output, the remembered digest and the
-  dependency lists; fixtures for floating tags with and without a known version.
+- Offline tests cover the plan hint, the error line, the stored output, the remembered digest, the
+  “together with” hint, the groups in the dialog and the dependency lists; fixtures for floating tags
+  with and without a known version.
 - End to end: an image that exits at once fails within seconds and rolls back with one click; the output
   of the run is stored; a dependent service is watched after a database update.
 - On the reference host `latest` is resolved for every image whose registry the radar can read.
