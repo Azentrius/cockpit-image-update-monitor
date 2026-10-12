@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Versions-Radar for the Cockpit Image-Updates plugin.
 
 Diun only notices when the SAME tag is rebuilt (new digest). This script

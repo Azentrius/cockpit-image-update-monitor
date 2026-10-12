@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Offline tests for diunlib / diun-versions.py / diun-inventory.py
 (Docker, skopeo and the Docker Hub API are replaced by fakes built from the
 real values seen on a production host on 2026-10-12)."""

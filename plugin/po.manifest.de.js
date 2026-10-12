@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 cockpit.locale({
  "": {
   "plural-forms": (n) => n != 1,

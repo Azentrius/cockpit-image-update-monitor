@@ -2,6 +2,7 @@
 # shellcheck disable=SC2034
 # (The check expressions are strings that check() evaluates, so shellcheck cannot
 # see that they read PCHK, S1, B1 & co.)
+# SPDX-License-Identifier: Apache-2.0
 #
 # End-to-end test of diun-update.py on a real Docker host, inside a
 # throw-away compose project "imgupd-test". No other container, compose file

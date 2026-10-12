@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Builds a static preview of the plugin with the test fixtures.
 
     python3 tools/preview/build.py            -> tools/preview/out/diun/index.html

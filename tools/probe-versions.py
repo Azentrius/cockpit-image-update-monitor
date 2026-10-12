@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Read-only probe: which sources reveal the real version of each running image?"""
 import json
 import re

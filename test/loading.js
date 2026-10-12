@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Loading-indicator checks: runs the real diun.js in jsdom with a slow,
 // failing or throwing Cockpit stub and asserts the visible state over time.
 const fs = require("fs");

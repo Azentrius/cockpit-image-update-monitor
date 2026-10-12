@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Update flow (plan -> confirm -> live log -> result / rollback) and the
 // backups tab (history, dumps, rollback images, delete), against the real
 // diun.js in jsdom with a scripted Cockpit stub.

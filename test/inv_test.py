@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Offline test for lib/diun-inventory.py: Docker is replaced by a fake that
 returns two containers - a postgres whose tag already points to a newer local
 image ("pulled, not rolled out") and an ollama on `latest` whose image only

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Builds the v2 fixtures (inventory3.jsonl + versions2.json) from
 inventory2.jsonl and the values the new radar reported on a real host
 (2026-10-12, before the postgres roll-out)."""

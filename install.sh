@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Installs (or updates) the Cockpit "Image updates" plugin and its root helpers.
 #
 #   sudo ./install.sh              install / update
@@ -33,7 +34,7 @@ DRY=0
 case "${1:-}" in
     "") ;;
     --dry-run) DRY=1 ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help) sed -n '3,22p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1 (--dry-run, --help)" >&2; exit 64 ;;
 esac
 

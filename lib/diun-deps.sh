@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Dependency check / installer for the Cockpit Image-Updates plugin.
 #
 # Called by the plugin via cockpit.spawn with a FIXED set of arguments only:

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Stand-in for Cockpit's base1/cockpit.js so the plugin runs in a plain
 // browser (file://) with test data: no Cockpit, no Docker, no root.
 // build.py replaces __FIXTURES__ with test/fixtures/* and __NOW__ with a
