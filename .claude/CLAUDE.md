@@ -46,20 +46,24 @@ lib/      root helpers, installed to /usr/local/lib/diun-radar/
           diunlib.py          shared logic (tag scheme, version variables, reach)
           diun-inventory.py   inventory (on every load of the plugin)
           diun-versions.py    version radar (systemd timer every 6 h) -> /var/lib/diun-radar/versions.json
-          diun-update.py      plan / update / rollback / backups / delete-*
-          diun-deps.sh        check / install skopeo|diun|radar / start diun (also holds the systemd units and the Diun stack)
+          diun-update.py      plan / update / rollback / backups / delete-* / cleanup / radar
+          diun-deps.sh        check / install skopeo|diun|radar|cleanup / start diun (also holds the Diun stack)
+systemd/  unit templates (diun-radar, diun-cleanup), installed to /usr/local/lib/diun-radar/systemd/;
+          diun-deps.sh copies them to /etc/systemd/system/ and never replaces existing units
 install.sh                    installer (DESTDIR, --dry-run, backs up the previous version)
 test/                         offline tests + e2e-server.sh
 tools/preview/                the plugin in a browser with test data, screenshots
 tools/check-version.sh        version in diun.js = ?v= in index.html = section in CHANGELOG.md
 tools/release-notes.sh        notes for a release from CHANGELOG.md
-.github/workflows/            test (every push and PR), release (on request)
+tools/lint.sh                 shellcheck (warnings), pyflakes, systemd-analyze verify
+.github/workflows/            test (every push and PR, incl. lint), release (on request)
 ```
 
 ## Commands
 
 ```bash
 cd test && npm ci && ./run-all.sh              # all offline tests (Python + jsdom), must be green
+sh tools/lint.sh                               # lint, must be green (needs shellcheck, pyflakes, systemd)
 python3 tools/preview/build.py                 # preview: tools/preview/out/diun/index.html?lang=de
 python3 tools/preview/shoot.py /tmp/shots      # screenshots (playwright + chromium), checks JS errors + phone width
 DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging directory
@@ -135,6 +139,12 @@ DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging 
   `skopeo inspect` is.
 - **`diun-radar.service`** runs hardened (`ProtectSystem=strict`, `ProtectHome=yes`). It may write only
   to `/var/lib/diun-radar` and cannot see `/root` (no registry credentials).
+- **Cleanup** (`diun-update.py cleanup`, `/etc/image-updates.conf`): after an update it is limited to
+  that project and image, so the end-to-end test never deletes other data; the global run is only
+  tested with `--dry-run` there. Unknown keys stop it – a new key (e.g. a token for stage 3) has to be
+  added to `RULES` or the parser.
+- **pyflakes ignores `# noqa`**: an unused local (e.g. a lock handle) fails the lint; the update lock
+  therefore lives in a module global.
 - **Cockpit:**
   - `superuser: "try"` without admin rights gives errors with `problem: "access-denied"`, or exit 77
     from our helpers.
