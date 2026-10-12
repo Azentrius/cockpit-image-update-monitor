@@ -8,7 +8,7 @@ const { JSDOM } = require("jsdom");
 
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
-const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8").replace(/<script[^>]*><\/script>/g, "");
+const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const files = {
@@ -42,8 +42,10 @@ const BACKUPS = {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function boot(language, script) {
+    // outside-only: the page's own <script> tags never run; diun.js is evaluated below.
     const dom = new JSDOM(html, { runScripts: "outside-only" });
     const w = dom.window;
+    w.document.querySelectorAll("script").forEach((s) => s.remove());
     w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
     w.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
     w.Date.now = () => Date.parse("2026-10-12T02:50:00Z");
