@@ -21,6 +21,10 @@
             <h1><span data-i18n="app.title">Image updates</span> <span class="dm-accent">monitor</span></h1>
             <div class="dm-actions">
                 <span id="dm-meta" class="dm-meta"></span>
+                <!-- Runs the version radar now; hidden while the radar is not set up. -->
+                <button id="dm-radar" class="dm-btn dm-btn-ghost" hidden>
+                    <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label" data-i18n="btn.radar">Run radar now</span>
+                </button>
                 <!-- Starts busy: the first load begins as soon as diun.js runs. -->
                 <button id="dm-refresh" class="dm-btn is-busy" disabled>
                     <span class="dm-btn-spinner" aria-hidden="true"></span><span class="dm-btn-label" data-i18n="btn.loading">Loading …</span>
@@ -93,12 +97,24 @@
             <p id="dm-bk-summary" class="dm-bk-summary"></p>
             <p class="dm-bk-note" data-i18n="bk.note">Restoring a dump is deliberately a manual step. Dump files are readable by root only.</p>
 
+            <!-- Cleanup rules, the daily timer and what would be deleted now. -->
+            <section id="dm-cleanup" class="dm-cleanup" hidden aria-labelledby="dm-cleanup-title">
+                <h2 id="dm-cleanup-title" class="dm-h2" data-i18n="cl.title">Cleanup</h2>
+                <p id="dm-cleanup-rules"></p>
+                <p id="dm-cleanup-timer"></p>
+                <div class="dm-cleanup-now">
+                    <span id="dm-cleanup-preview"></span>
+                    <button id="dm-cleanup-btn" class="dm-btn dm-btn-ghost dm-btn-ghost-danger" hidden data-i18n="cl.button">Clean up now</button>
+                </div>
+            </section>
+
             <h2 class="dm-h2" data-i18n="bk.ops">Update history</h2>
             <div class="dm-table-wrap"><table class="dm-table" id="dm-ops-table">
                 <thead><tr>
                     <th data-i18n="col.when">When</th>
                     <th data-i18n="col.container">Container</th>
                     <th data-i18n="col.image">Image</th>
+                    <th data-i18n="col.version">Version</th>
                     <th data-i18n="col.result">Result</th>
                     <th data-i18n="col.dumps">Dumps</th>
                     <th></th>

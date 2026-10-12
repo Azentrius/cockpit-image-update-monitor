@@ -57,6 +57,11 @@
             "btn.update": "Update",
             "btn.rollout": "Roll out",
             "btn.delete": "Delete",
+            "btn.radar": "Run radar now",
+            "btn.radarRunning": "Radar running …",
+            "radar.tip": "Looks for newer versions in the registries right away instead of waiting for the next 6-hour run.",
+            "radar.failed": "The radar run failed – details: journalctl -u diun-radar.service",
+            "radar.notSetUp": "The version radar is not set up yet (see “Missing requirements”).",
             "loading.title": "Loading overview …",
             "loading.sub": "Inventorying containers and matching them against Diun and the version radar.",
             "col.container": "Container",
@@ -72,6 +77,7 @@
             "col.created": "Created",
             "col.file": "File",
             "col.size": "Size",
+            "col.version": "Version",
             "empty": "No running containers found.",
             "badge.update": "Update available",
             "badge.pulled": "Roll-out pending",
@@ -151,6 +157,8 @@
             "dlg.start.diun.desc": "Starts the existing stack in /opt/diun (docker compose up -d).",
             "dlg.install.radar.title": "Set up the version radar?",
             "dlg.install.radar.desc": "Sets up diun-radar.service and diun-radar.timer (runs every 6 hours) and starts a first run right away.",
+            "dlg.install.cleanup.title": "Set up the daily cleanup?",
+            "dlg.install.cleanup.desc": "Sets up diun-cleanup.service and diun-cleanup.timer (daily around 04:40). Each run deletes what the rules shown in this tab select; the first run happens at the next scheduled time.",
             "upd.title": "Update {name}?",
             "upd.titlePulled": "Roll out {name}?",
             "upd.desc": "Pulls the current image for {image} and recreates the affected containers. The image running now is kept as a rollback copy first.",
@@ -177,6 +185,7 @@
             "reason.built-locally": "the image is built locally (build:) – rebuild it in the project.",
             "reason.compose-config-error": "docker compose config fails: {detail}",
             "upd.ok": "Update successful. Rollback copy: {rb}",
+            "upd.okVersions": "Update successful: {from} → {to}. Rollback copy: {rb}",
             "upd.nochange": "No newer image available – nothing changed.",
             "upd.failed": "Update failed – the containers do not run stably. You can roll back to the previous version.",
             "upd.aborted": "Aborted before anything was changed – see output.",
@@ -198,6 +207,31 @@
             "bk.noImages": "No rollback images.",
             "bk.error": "Backups could not be loaded: {msg}",
             "bk.needAdmin": "The backup overview needs administrative access in Cockpit.",
+            "cl.title": "Cleanup",
+            "cl.keep": { one: "keeps the newest dump per database container", other: "keeps the newest {n} dumps per database container" },
+            "cl.keepOff": "never deletes dumps",
+            "cl.days": { one: "removes unused rollback images after {n} day", other: "removes unused rollback images after {n} days" },
+            "cl.daysOff": "never removes rollback images",
+            "cl.rules": "Rules: {keep}, {days}.",
+            "cl.srcFile": "Set in {file}.",
+            "cl.srcDefault": "Defaults – change them in /etc/image-updates.conf (KEEP_DUMPS, ROLLBACK_IMAGE_DAYS; 0 = never).",
+            "cl.protect": "The dumps of each project's last update and rollback images in use are never deleted.",
+            "cl.timerOn": "Runs after every successful update (for its project) and daily via diun-cleanup.timer.",
+            "cl.timerOff": "Runs after every successful update (for its project). The daily run is not set up.",
+            "cl.dumpsN": { one: "{n} dump", other: "{n} dumps" },
+            "cl.imagesN": { one: "{n} rollback image", other: "{n} rollback images" },
+            "cl.preview": "To be deleted now: {dumps}, {images} ({size}).",
+            "cl.nothing": "Nothing to clean up right now.",
+            "cl.error": "Cleanup rules: {msg}",
+            "cl.button": "Clean up now",
+            "cl.mark": "to be deleted",
+            "cl.markTip": "Selected by the cleanup rules (next run or “Clean up now”).",
+            "cl.dlgTitle": "Clean up now?",
+            "cl.dlgDesc": "Deletes the dumps and rollback images the rules select. They cannot be restored afterwards.",
+            "cl.confirm": "Clean up",
+            "cl.done": "Cleaned up: {dumps}, {images} ({size} freed).",
+            "cl.partial": "{n} could not be removed – see output.",
+            "cl.nochange": "Nothing to clean up.",
             "res.ok": "successful",
             "res.nochange": "no change",
             "res.failed": "failed",
@@ -232,6 +266,11 @@
             "btn.update": "Update",
             "btn.rollout": "Ausrollen",
             "btn.delete": "Löschen",
+            "btn.radar": "Radar jetzt starten",
+            "btn.radarRunning": "Radar läuft …",
+            "radar.tip": "Sucht sofort in den Registries nach neueren Versionen, statt auf den nächsten 6-Stunden-Lauf zu warten.",
+            "radar.failed": "Der Radar-Lauf ist fehlgeschlagen – Details: journalctl -u diun-radar.service",
+            "radar.notSetUp": "Der Versions-Radar ist noch nicht eingerichtet (siehe „Voraussetzungen unvollständig“).",
             "loading.title": "Übersicht wird geladen …",
             "loading.sub": "Container werden inventarisiert und mit Diun und dem Versions-Radar abgeglichen.",
             "col.container": "Container",
@@ -247,6 +286,7 @@
             "col.created": "Erstellt",
             "col.file": "Datei",
             "col.size": "Größe",
+            "col.version": "Version",
             "empty": "Keine laufenden Container gefunden.",
             "badge.update": "Update verfügbar",
             "badge.pulled": "Ausrollen ausstehend",
@@ -326,6 +366,8 @@
             "dlg.start.diun.desc": "Startet den vorhandenen Stack in /opt/diun (docker compose up -d).",
             "dlg.install.radar.title": "Versions-Radar einrichten?",
             "dlg.install.radar.desc": "Richtet diun-radar.service und diun-radar.timer ein (Lauf alle 6 Stunden) und startet sofort einen ersten Lauf.",
+            "dlg.install.cleanup.title": "Tägliches Aufräumen einrichten?",
+            "dlg.install.cleanup.desc": "Richtet diun-cleanup.service und diun-cleanup.timer ein (täglich gegen 04:40). Jeder Lauf löscht, was die in diesem Tab gezeigten Regeln auswählen; der erste Lauf folgt zum nächsten geplanten Zeitpunkt.",
             "upd.title": "{name} aktualisieren?",
             "upd.titlePulled": "{name} ausrollen?",
             "upd.desc": "Zieht das aktuelle Image für {image} und erstellt die betroffenen Container neu. Das jetzt laufende Image wird vorher als Rollback-Kopie gesichert.",
@@ -352,6 +394,7 @@
             "reason.built-locally": "Das Image wird lokal gebaut (build:) – bitte im Projekt neu bauen.",
             "reason.compose-config-error": "docker compose config schlägt fehl: {detail}",
             "upd.ok": "Update erfolgreich. Rollback-Kopie: {rb}",
+            "upd.okVersions": "Update erfolgreich: {from} → {to}. Rollback-Kopie: {rb}",
             "upd.nochange": "Kein neueres Image verfügbar – nichts geändert.",
             "upd.failed": "Update fehlgeschlagen – die Container laufen nicht stabil. Du kannst auf die vorherige Version zurückrollen.",
             "upd.aborted": "Abgebrochen, bevor etwas geändert wurde – siehe Ausgabe.",
@@ -373,6 +416,31 @@
             "bk.noImages": "Keine Rollback-Images.",
             "bk.error": "Backups konnten nicht geladen werden: {msg}",
             "bk.needAdmin": "Die Backup-Übersicht braucht administrativen Zugriff in Cockpit.",
+            "cl.title": "Aufräumen",
+            "cl.keep": { one: "behält den neuesten Dump je Datenbank-Container", other: "behält die neuesten {n} Dumps je Datenbank-Container" },
+            "cl.keepOff": "löscht nie Dumps",
+            "cl.days": { one: "entfernt ungenutzte Rollback-Images nach {n} Tag", other: "entfernt ungenutzte Rollback-Images nach {n} Tagen" },
+            "cl.daysOff": "entfernt nie Rollback-Images",
+            "cl.rules": "Regeln: {keep}, {days}.",
+            "cl.srcFile": "Festgelegt in {file}.",
+            "cl.srcDefault": "Standardwerte – änderbar in /etc/image-updates.conf (KEEP_DUMPS, ROLLBACK_IMAGE_DAYS; 0 = nie).",
+            "cl.protect": "Die Dumps des letzten Updates je Projekt und benutzte Rollback-Images werden nie gelöscht.",
+            "cl.timerOn": "Läuft nach jedem erfolgreichen Update (für dessen Projekt) und täglich über diun-cleanup.timer.",
+            "cl.timerOff": "Läuft nach jedem erfolgreichen Update (für dessen Projekt). Der tägliche Lauf ist nicht eingerichtet.",
+            "cl.dumpsN": { one: "{n} Dump", other: "{n} Dumps" },
+            "cl.imagesN": { one: "{n} Rollback-Image", other: "{n} Rollback-Images" },
+            "cl.preview": "Jetzt zu löschen: {dumps}, {images} ({size}).",
+            "cl.nothing": "Derzeit nichts aufzuräumen.",
+            "cl.error": "Aufräumregeln: {msg}",
+            "cl.button": "Jetzt aufräumen",
+            "cl.mark": "wird gelöscht",
+            "cl.markTip": "Von den Aufräumregeln ausgewählt (nächster Lauf oder „Jetzt aufräumen“).",
+            "cl.dlgTitle": "Jetzt aufräumen?",
+            "cl.dlgDesc": "Löscht die von den Regeln ausgewählten Dumps und Rollback-Images. Sie lassen sich danach nicht wiederherstellen.",
+            "cl.confirm": "Aufräumen",
+            "cl.done": "Aufgeräumt: {dumps}, {images} ({size} frei geworden).",
+            "cl.partial": "{n} ließen sich nicht entfernen – siehe Ausgabe.",
+            "cl.nochange": "Nichts aufzuräumen.",
             "res.ok": "erfolgreich",
             "res.nochange": "keine Änderung",
             "res.failed": "fehlgeschlagen",
@@ -791,6 +859,44 @@
         panel.hidden = false;
     }
 
+    // --- Run the radar now ---------------------------------------------------
+    // `diun-update.py radar` starts diun-radar.service and waits for the run;
+    // systemd never runs it twice at once (a second start joins the run). The
+    // finished run rewrites versions.json, and the watch reloads the table.
+    let lastDeps = null;
+    let radarRunning = false;
+
+    function renderRadarButton() {
+        const btn = $("dm-radar");
+        const ra = lastDeps && lastDeps.root ? (lastDeps.radar || {}) : null;
+        btn.hidden = !!(ra && ra.state === "missing");
+        const busy = radarRunning || !!(ra && ra.running);
+        btn.disabled = busy;
+        btn.classList.toggle("is-busy", busy);
+        btn.title = t("radar.tip");
+        btn.querySelector(".dm-btn-label").textContent = t(busy ? "btn.radarRunning" : "btn.radar");
+    }
+
+    function runRadar() {
+        if (radarRunning) return;
+        radarRunning = true;
+        renderRadarButton();
+        let failed = null;
+        spawnHelper([UPDATE_CMD, "radar"], "require")
+            .catch((ex) => {
+                ex = ex || {};
+                failed = isNoAdmin(ex) ? t("dialog.noAdmin")
+                    : ex.exit_status === 2 ? t("radar.notSetUp") : t("radar.failed");
+            })
+            .finally(() => {
+                radarRunning = false;
+                // The run is over, whatever the last check said.
+                if (lastDeps && lastDeps.radar) lastDeps.radar.running = false;
+                renderRadarButton();
+                if (failed) showStatus(failed, true); else safeLoad();
+            });
+    }
+
     // --- Action dialog (one for everything) --------------------------------
     // dlg.open({ title, desc, body, confirm: { label, danger, argv() },
     //            onDone(outcome) })  outcome = { ok, exit, result, error }
@@ -939,7 +1045,8 @@
     // --- Install requirement -------------------------------------------------
     function openInstallDialog(verb, target) {
         const base = "dlg." + verb + "." + target;
-        const label = { install: target === "radar" ? "action.setup" : "action.install", start: "action.start" }[verb];
+        const setup = target === "radar" || target === "cleanup";
+        const label = { install: setup ? "action.setup" : "action.install", start: "action.start" }[verb];
         confirmAndRun({
             title: t(base + ".title"),
             desc: t(base + ".desc"),
@@ -1019,7 +1126,12 @@
     function updateOutcome(o, name) {
         const r = o.result || {};
         if (o.ok && r.status === "nochange") { dlg.result(t("upd.nochange"), true); return true; }
-        if (o.ok) { dlg.result(t("upd.ok", { rb: r.rollback || "" }), true); return true; }
+        if (o.ok) {
+            const vers = r.from_version && r.to_version && r.from_version !== r.to_version;
+            dlg.result(t(vers ? "upd.okVersions" : "upd.ok",
+                         { rb: r.rollback || "", from: r.from_version, to: r.to_version }), true);
+            return true;
+        }
         if (o.exit === 4 && r.op) {
             dlg.result(t("upd.failed"), false);
             offerRollback(r.op, name);
@@ -1078,9 +1190,80 @@
         return `<span class="dm-badge dm-badge-${cls}">${esc(t(key))}</span>`;
     }
 
+    // "16.14 → 16.15"; older history entries have no versions.
+    function opVersions(o) {
+        const a = o.from_version, z = o.to_version;
+        if (!a && !z) return `<span class="dm-muted">—</span>`;
+        if (a === z) return `<span class="dm-ver">${esc(a)}</span>`;
+        return `<span class="dm-ver">${esc(a || "?")} <span class="dm-arrow">→</span> ${esc(z || "?")}</span>`;
+    }
+
+    function cleanupMark() {
+        return ` <span class="dm-badge dm-badge-warn" title="${esc(t("cl.markTip"))}">${esc(t("cl.mark"))}</span>`;
+    }
+
+    // Rules, daily timer and "what would be deleted now" (from `backups`),
+    // the timer state from `diun-deps.sh check`.
+    function renderCleanup() {
+        const c = backups && backups.cleanup;
+        $("dm-cleanup").hidden = !c;
+        if (!c) return;
+        const rules = $("dm-cleanup-rules");
+        if (c.error) {
+            rules.innerHTML = `<span class="dm-warn-text">${esc(t("cl.error", { msg: c.error }))}</span>`;
+        } else {
+            const keep = c.keep_dumps ? t("cl.keep", { n: c.keep_dumps }) : t("cl.keepOff");
+            const days = c.image_days ? t("cl.days", { n: c.image_days }) : t("cl.daysOff");
+            rules.textContent = [t("cl.rules", { keep, days }),
+                                 c.file ? t("cl.srcFile", { file: c.file }) : t("cl.srcDefault"),
+                                 t("cl.protect")].join(" ");
+        }
+        const timer = $("dm-cleanup-timer");
+        const cl = lastDeps && lastDeps.root ? lastDeps.cleanup : null;
+        timer.hidden = !cl;
+        timer.textContent = cl ? t(cl.state === "active" ? "cl.timerOn" : "cl.timerOff") : "";
+        if (cl && cl.state !== "active" && cl.can_install) {
+            const setup = document.createElement("button");
+            setup.className = "dm-btn dm-btn-ghost dm-btn-inline";
+            setup.textContent = t("action.setup");
+            setup.addEventListener("click", () => openInstallDialog("install", "cleanup"));
+            timer.append(" ", setup);
+        }
+        const nd = (c.dumps || []).length, ni = (c.images || []).length;
+        $("dm-cleanup-preview").textContent = c.error ? "" : (nd + ni)
+            ? t("cl.preview", { dumps: t("cl.dumpsN", { n: nd }), images: t("cl.imagesN", { n: ni }), size: human(c.bytes) })
+            : t("cl.nothing");
+        $("dm-cleanup-btn").hidden = !(nd + ni) || !!c.error;
+    }
+
+    function startCleanup() {
+        const c = backups && backups.cleanup;
+        if (!c) return;
+        const items = (c.dumps || []).concat(c.images || []);
+        confirmAndRun({
+            title: t("cl.dlgTitle"),
+            desc: t("cl.dlgDesc"),
+            body: `<ul class="dm-list">${items.map((x) => `<li><code>${esc(x)}</code></li>`).join("")}</ul>`,
+            confirm: { label: t("cl.confirm"), danger: true, argv: () => [UPDATE_CMD, "cleanup"] },
+            onDone: (o) => {
+                if (!o.ok) return false;
+                const r = o.result || {};
+                if (r.status === "nochange") { dlg.result(t("cl.nochange"), true); return true; }
+                const failed = (r.failed || []).length;
+                dlg.result(t("cl.done", { dumps: t("cl.dumpsN", { n: (r.dumps || []).length }),
+                                          images: t("cl.imagesN", { n: (r.images || []).length }),
+                                          size: human(r.bytes || 0) }) +
+                           (failed ? " " + t("cl.partial", { n: failed }) : ""), !failed);
+                return true;
+            },
+        });
+    }
+
     function renderBackups() {
         const b = backups || { dumps: [], images: [], ops: [] };
         const L = (key) => esc(t(key));
+        const doomed = new Set(b.cleanup ? (b.cleanup.dumps || []).concat(b.cleanup.images || []) : []);
+        renderCleanup();
         if (backups) {
             $("dm-bk-summary").textContent = t("bk.summary", {
                 dumps: t("bk.dumpsN", { n: b.dumps.length, size: human(b.dump_bytes) }),
@@ -1097,6 +1280,7 @@
             `<td data-label="${L("col.when")}"><span class="dm-cell">${esc(fmtDate(new Date(o.ts)))}</span></td>` +
             `<td data-label="${L("col.container")}"><span class="dm-cell">${esc(o.container || "")}</span></td>` +
             `<td data-label="${L("col.image")}"><span class="dm-cell dm-ver">${esc(o.image || "")}</span></td>` +
+            `<td data-label="${L("col.version")}"><span class="dm-cell">${opVersions(o)}</span></td>` +
             `<td data-label="${L("col.result")}"><span class="dm-cell">${opResult(o)}</span></td>` +
             `<td data-label="${L("col.dumps")}"><span class="dm-cell">${(o.dumps || []).length}</span></td>` +
             `<td class="dm-action" data-label=""><span class="dm-cell">` +
@@ -1114,7 +1298,8 @@
             `<td data-label="${L("col.created")}"><span class="dm-cell">${esc(fmtDate(new Date(d.mtime * 1000)))}</span></td>` +
             `<td data-label="${L("col.project")}"><span class="dm-cell">${esc(d.project)}</span></td>` +
             `<td data-label="${L("col.container")}"><span class="dm-cell">${esc(d.container)}</span></td>` +
-            `<td data-label="${L("col.file")}"><span class="dm-cell dm-digest">${esc(d.path.split("/").pop())}</span></td>` +
+            `<td data-label="${L("col.file")}"><span class="dm-cell"><span class="dm-digest">${esc(d.path.split("/").pop())}</span>` +
+              `${doomed.has(d.path) ? cleanupMark() : ""}</span></td>` +
             `<td data-label="${L("col.size")}"><span class="dm-cell">${esc(human(d.size))}</span></td>` +
             `<td class="dm-action" data-label=""><span class="dm-cell">` +
               `<button class="dm-btn dm-btn-ghost dm-btn-ghost-danger" data-dump="${i}">${L("btn.delete")}</button>` +
@@ -1139,7 +1324,7 @@
             `<td data-label="${L("col.size")}"><span class="dm-cell">${esc(im.size)}</span></td>` +
             `<td data-label="${L("col.status")}"><span class="dm-cell">` +
               (im.in_use ? `<span class="dm-badge dm-badge-new" title="${L("img.inUseTip")}">${L("img.inUse")}</span>`
-                         : `<span class="dm-muted">${L("img.free")}</span>`) +
+                         : `<span class="dm-muted">${L("img.free")}</span>${doomed.has(im.ref) ? cleanupMark() : ""}`) +
             `</span></td>` +
             `<td class="dm-action" data-label=""><span class="dm-cell">` +
               `<button class="dm-btn dm-btn-ghost dm-btn-ghost-danger" data-img="${i}"` +
@@ -1198,7 +1383,9 @@
             checkDeps(),
         ]).then(([invOut, eventsContent, dis, radarDoc, deps]) => {
             dismissed = dis || {};
+            lastDeps = deps;
             renderDeps(deps);
+            renderRadarButton();
             const eventsMap = parseEvents(eventsContent);
             if (invOut === null) {
                 // Inventory unavailable (no Docker access / no admin rights):
@@ -1275,6 +1462,8 @@
     // --- Init --------------------------------------------------------------
     applyStaticTexts();
     $("dm-refresh").addEventListener("click", () => safeLoad());
+    $("dm-radar").addEventListener("click", runRadar);
+    $("dm-cleanup-btn").addEventListener("click", startCleanup);
     document.querySelectorAll(".dm-tab").forEach((b) => {
         b.addEventListener("click", () => showTab(b.dataset.tab));
     });

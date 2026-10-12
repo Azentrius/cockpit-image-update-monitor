@@ -312,6 +312,23 @@ html, body {
 .dm-h2 { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; color: var(--az-text); }
 .dm-empty-small { color: var(--az-muted); font-size: 0.9rem; margin: 0.25rem 0 0; }
 
+/* Cleanup rules, daily timer, "to be deleted now". */
+.dm-cleanup {
+    margin: 0 0 1.25rem;
+    padding: 0.75rem 1rem;
+    background: var(--az-surface);
+    border: 1px solid var(--az-line);
+    border-radius: 8px;
+}
+.dm-cleanup[hidden], .dm-cleanup p[hidden] { display: none; }
+.dm-cleanup .dm-h2 { margin: 0 0 0.35rem; }
+.dm-cleanup p { margin: 0 0 0.35rem; color: var(--az-muted); font-size: 0.85rem; line-height: 1.45; }
+.dm-cleanup-now { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; font-size: 0.9rem; }
+.dm-cleanup-now .dm-btn[hidden] { display: none; }
+.dm-btn-inline { padding: 0.1rem 0.55rem; font-size: 0.85rem; }
+.dm-list { list-style: none; margin: 0 0 0.75rem; padding: 0; max-height: 14rem; overflow-y: auto; font-size: 0.85rem; }
+.dm-list li { padding: 0.15rem 0; overflow-wrap: anywhere; }
+
 /* ---------- Dialog body (plan details) ---------- */
 
 .dm-dialog-body[hidden] { display: none; }
@@ -359,8 +376,10 @@ html, body {
     .dm-wrap { padding: 1rem; }
     .dm-head { gap: 0.6rem; }
     .dm-head h1 { font-size: 1.25rem; }
-    .dm-actions { width: 100%; justify-content: space-between; }
+    .dm-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 0.6rem; }
+    .dm-meta { flex: 1 1 100%; }
     .dm-btn { padding: 0.6rem 1rem; min-height: 44px; }
+    .dm-cleanup-now .dm-btn { width: 100%; }
 
     /* Visually hide the header row (labels move into each cell). */
     .dm-table thead {
