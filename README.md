@@ -433,7 +433,7 @@ The test checks:
 - backup list
 - delete, also with a manipulated path
 
-Notes for working on the code with Claude Code are in [CLAUDE.md](CLAUDE.md), the changes in [CHANGELOG.md](CHANGELOG.md).
+The changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
