@@ -452,4 +452,8 @@ Ausführlich mit Zielen, Umfang und Abnahmekriterien in **[ROADMAP.md](ROADMAP.m
 
 ## Lizenz
 
-Noch nicht festgelegt. Bis dahin gilt: alle Rechte beim Rechteinhaber des Repositorys. Cockpit selbst steht unter LGPL-2.1+. Für Cockpit-Addons ist eine kompatible Lizenz (z. B. LGPL-2.1-or-later oder MIT) üblich.
+[Apache License 2.0](LICENSE).
+
+Das Addon enthält keinen Code aus Cockpit (LGPL-2.1+); es nutzt nur zur Laufzeit dessen API `cockpit.js`, die Cockpit selbst ausliefert.
+
+Sicherheitslücken bitte vertraulich melden, siehe [SECURITY.md](SECURITY.md).
