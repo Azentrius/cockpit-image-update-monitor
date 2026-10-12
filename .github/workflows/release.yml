@@ -1,6 +1,7 @@
 # Makes a release on request: Actions › release › Run workflow (on main).
 # Checks the version, runs the tests, packs the source and creates the tag
-# vVERSION with a GitHub release (tarball, SHA256SUMS, notes from CHANGELOG.md).
+# vVERSION with a GitHub release (tarball, SHA256SUMS, notes from CHANGELOG.md)
+# and a signed build provenance for the tarball.
 name: release
 
 on:
@@ -16,7 +17,9 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: write       # tag and release
+  id-token: write       # signing the build provenance
+  attestations: write   # storing the build provenance
 
 concurrency:
   group: release
@@ -32,9 +35,10 @@ jobs:
           echo "::error::Releases are made from main only (this run: $GITHUB_REF)."
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Check the version
         id: version
@@ -54,10 +58,10 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -74,6 +78,11 @@ jobs:
           name=cockpit-image-update-monitor-$VERSION
           git archive --format=tar.gz --prefix="$name/" -o "$name.tar.gz" HEAD
           sha256sum "$name.tar.gz" > SHA256SUMS
+
+      - name: Build provenance for the tarball
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: cockpit-image-update-monitor-${{ steps.version.outputs.version }}.tar.gz
 
       - name: Release notes
         env:
@@ -92,6 +101,12 @@ jobs:
             echo "tar -xzf $name.tar.gz && cd $name"
             echo "sudo ./install.sh --dry-run"
             echo "sudo ./install.sh"
+            echo '```'
+            echo
+            echo "Check that the tarball was built by this repository's release workflow:"
+            echo
+            echo '```sh'
+            echo "gh attestation verify $name.tar.gz --repo $GITHUB_REPOSITORY"
             echo '```'
           } >> notes.md
 
