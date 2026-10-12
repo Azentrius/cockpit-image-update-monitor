@@ -442,7 +442,7 @@ The changes are in [CHANGELOG.md](CHANGELOG.md).
 Versions follow [Semantic Versioning](https://semver.org/). The version lives in `const VERSION` in `plugin/diun.js`; `plugin/index.html` loads `diun.js` and `diun.css` with `?v=<version>`.
 
 1. Raise `VERSION` and the two `?v=`, add a section `## X.Y.Z – YYYY-MM-DD` to `CHANGELOG.md`, merge.
-2. Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, packs `cockpit-image-update-monitor-X.Y.Z.tar.gz` with `SHA256SUMS` and creates the tag `vX.Y.Z` with a release whose notes come from `CHANGELOG.md`.
+2. Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, packs `cockpit-image-update-monitor-X.Y.Z.tar.gz` with `SHA256SUMS` and creates the tag `vX.Y.Z` with a release whose notes come from `CHANGELOG.md`. It also signs a build provenance for the tarball; for releases after 0.6.1, `gh attestation verify cockpit-image-update-monitor-X.Y.Z.tar.gz --repo Azentrius/cockpit-image-update-monitor` shows that it was built by this workflow from this repository.
 
 ---
 
