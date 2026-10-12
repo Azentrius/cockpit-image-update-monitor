@@ -18,8 +18,8 @@ frame.
 - **Version radar after updates.** After a successful update or rollback the radar starts in the
   background, so the *Installed* column shows versions known only from labels or digests within
   minutes.
-- **“Run radar now”** next to *Refresh*: runs the radar and stays busy until the run is over. A
-  second click joins the same run.
+- **“Run radar now”** in the *Running containers* card: runs the radar and stays busy until the run is
+  over. A second click joins the same run.
 - **Versions in the history.** `operations.jsonl` records `from_version` / `to_version`; the history
   shows “16.14 → 16.15”, the update result names both. Older entries show “—”.
 - **Fixed:** an update that stopped at a failing dump kept the dumps of the other databases of the
@@ -36,7 +36,6 @@ frame.
     its icon (hint, good, unknown); gold is no longer a status. The version chips keep their meaning.
   - “Update”, “Roll out” and “Roll back” are outlined buttons with an icon, “Dismiss” and “Delete” icon
     buttons. In dialogs the main action is filled and “Cancel” a link; red only confirms deleting.
-    “Run radar now” moved from the header into the card it belongs to.
   - New signature in the foot: the word mark, “Image updates monitor 0.7.0” and the server's host
     name.
   - `azentrius.css`, `azentrius-theme.js`, `icons.js`, `DMSans.woff2`, `DMSerifDisplay-Regular.woff2`
@@ -55,6 +54,7 @@ frame.
 - **CI:** lint (shellcheck, ruff), the preview in a browser with screenshots, and
   `systemd-analyze verify` for the unit templates (`tools/check-units.sh`) run on every push and pull
   request.
+
 ## 0.6.2 – 2026-10-12
 
 Maintenance release: the add-on is unchanged, the release is verifiable.

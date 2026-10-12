@@ -114,7 +114,8 @@ DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging 
    - Locks with `flock` (exit 75).
 4. **Overwrite nothing** the user created (compose files, `/opt/diun`, units). If it cannot be avoided
    (stage 2): a byte-exact backup first, restored on rollback.
-5. **Browser without network.** No CDNs, web fonts or external images; Cockpit's strict CSP stays.
+5. **Browser without network.** No CDNs, external fonts or external images (the fonts ship with the
+   add-on); Cockpit's strict CSP stays.
    Registry and GitHub access only on the server (radar).
 6. **Two languages.** Every new text goes into `I18N.en` **and** `I18N.de` in `plugin/diun.js`; helper
    messages through `say(de, en)` / `msg de en`. The tests check that the English UI contains no German.
@@ -133,13 +134,14 @@ DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging 
 
 ## Releases and the repository
 
-- The version lives in `const VERSION` in `plugin/diun.js`. `plugin/index.html` loads `diun.js` and
-  `diun.css` with `?v=<version>` so browsers fetch the new files; `tools/check-version.sh` (part of
-  `run-all.sh`) checks that both agree and that `CHANGELOG.md` has a section for the version.
-- Release: raise `VERSION` and the two `?v=`, add a section to `CHANGELOG.md`, merge, then
-  Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, packs
-  the source as `cockpit-image-update-monitor-<version>.tar.gz` with `SHA256SUMS` and creates tag and
-  release.
+- The version lives in `const VERSION` in `plugin/diun.js`. `plugin/index.html` loads every script
+  and stylesheet of the add-on (the shared design files too) with `?v=<version>` so browsers fetch the
+  new files; `tools/check-version.sh` (part of `run-all.sh`) checks that they all agree and that
+  `CHANGELOG.md` has a section for the version.
+- Release: raise `VERSION` and every `?v=` in `plugin/index.html`, add a section to `CHANGELOG.md`,
+  merge, then Actions › release › Run workflow on `main`. The workflow checks the version, runs the
+  tests, packs the source as `cockpit-image-update-monitor-<version>.tar.gz` with `SHA256SUMS` and
+  creates tag and release.
 - Before SemVer the versions were numbered v1–v6; they are 0.1.0–0.6.0 in `CHANGELOG.md`.
 - From Claude sessions the GitHub API cannot create tags or releases, delete branches or change
   settings; starting the release workflow works.
