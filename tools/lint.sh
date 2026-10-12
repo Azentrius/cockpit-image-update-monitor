@@ -6,7 +6,7 @@
 # Needs shellcheck, pyflakes (python3 -m pip install pyflakes) and systemd.
 # SPDX-License-Identifier: Apache-2.0
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 fail=0
 
 echo "== shellcheck"

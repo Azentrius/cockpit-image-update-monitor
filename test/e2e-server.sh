@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2034
 # End-to-end test of diun-update.py on a real Docker host, inside a
 # throw-away compose project "imgupd-test". No other container, compose file
 # or volume is touched; everything created here is removed on exit.
@@ -12,6 +13,9 @@
 # registry access during the test.
 #
 #   sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e2e-server.sh
+#
+# (SC2034 is off for the whole file: the check '…' strings run through eval,
+# so shellcheck cannot see that the variables they read are used.)
 set -u
 H=/usr/local/lib/diun-radar/diun-update.py
 INV=/usr/local/lib/diun-radar/diun-inventory.py
