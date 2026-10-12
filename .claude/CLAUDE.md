@@ -1,4 +1,4 @@
-# CLAUDE.md – notes for working on this repository
+# Notes for working on this repository
 
 ## What this is
 
