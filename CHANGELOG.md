@@ -9,7 +9,7 @@ Semantic Versioning, English repository, CI and releases.
   `diun.css` with `?v=<version>`.
 - **Messages** of `install.sh`, the radar's log line, the tests and the preview tools are English. The
   end-to-end test runs the helpers with `DIUN_LANG=en`.
-- **Docs** (README, ROADMAP, CLAUDE.md, docs/INTERNALS.md) are English.
+- **Docs** (README, ROADMAP, docs/INTERNALS.md) are English.
 - **CI:** the `test` workflow runs the offline tests and the installer into a staging directory on
   every push and pull request; the `release` workflow makes a release on request (tarball,
   `SHA256SUMS`, notes from this file).
