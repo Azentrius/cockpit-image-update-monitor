@@ -34,7 +34,7 @@ Done (see [CHANGELOG](CHANGELOG.md)):
 | 4 | **Versions in the history** | `operations.jsonl` gets `from_version` / `to_version` (via `diunlib.local_version` or the radar cache). The history shows “16.14 → 16.15”. | old entries without the fields are still shown |
 | 5 | **MariaDB/MySQL end-to-end** | Extend `test/e2e-server.sh` with a throw-away project using `mariadb:11` (and `mysql:8`): the dump contains test data, abort on a wrong password. | E2E green for Postgres, MariaDB, MySQL |
 | 6 | **Offline tests for `diun-update.py`** | Fake `docker`/`compose` like `test/inv_test.py`: plan reasons, database detection (`kind_of`), exit codes, path checks. | `run-all.sh` covers `diun-update.py` without Docker |
-| 7 | **CI** | The `test` workflow runs `test/run-all.sh` and the installer on every push and PR (done). Still missing: `shellcheck lib/*.sh install.sh test/*.sh tools/*.sh`, `python -m pyflakes lib`. | green check on every push/PR, including lint |
+| 7 | **CI** ✅ | The `test` workflow runs lint (`shellcheck`, `ruff`), `test/run-all.sh`, the installer and the browser preview on every push and PR. | done |
 | 8 | **systemd units as files** | `diun-radar.service/.timer` live as a heredoc in `diun-deps.sh` today. Move them to `systemd/`; `install.sh` and `diun-deps.sh` use the same source. | one source of truth; `diun-deps.sh install radar` works unchanged |
 
 ---
@@ -158,7 +158,6 @@ and tested.
 | `plugin/diun.js` has ~1,300 lines in one file | split into ES modules (`<script type="module">` works under Cockpit's CSP without a build step): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
 | Package name `diun` (URL `/cockpit/@host/diun`) no longer fits the scope | rename to `image-updates`, `install.sh` removes the old directory; bookmarks change |
 | Units as a heredoc in `diun-deps.sh` | see 1.1 #8 |
-| No type/lint check | `pyflakes`/`ruff`, `shellcheck` in CI (1.1 #7) |
 | `diun-update.py` only tested by E2E | offline tests (1.1 #6) |
 | Radar run fixed at `:17` every 6 h | `RandomizedDelaySec=` against registry peaks |
 | Documentation of the JSON formats | update `docs/INTERNALS.md` and the fixtures in `test/fixtures/` with every format change |

@@ -1,0 +1,3 @@
+# Python checks in CI (ruff check). The root helpers must run on Python 3.8,
+# so newer syntax is reported as an error.
+target-version = "py38"

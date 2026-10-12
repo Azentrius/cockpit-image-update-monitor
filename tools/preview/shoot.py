@@ -35,7 +35,7 @@ def main():
             pg.wait_for_timeout(500)
             return pg
 
-        pg = page(1440, 900, "de")
+        pg = page(1440, 900, "en")
         pg.screenshot(path=os.path.join(OUT, "updates.png"))
         pg.click('button[data-update="glitchtip-postgres"]')
         pg.wait_for_timeout(400)
@@ -44,15 +44,12 @@ def main():
         pg.wait_for_timeout(1200)
         pg.screenshot(path=os.path.join(OUT, "update-done.png"))
 
-        pg = page(1440, 900, "de")
+        pg = page(1440, 900, "en")
         pg.click("#dm-tab-btn-backups")
         pg.wait_for_timeout(500)
         pg.screenshot(path=os.path.join(OUT, "backups.png"))
 
-        pg = page(1440, 900, "en")
-        pg.screenshot(path=os.path.join(OUT, "updates-en.png"))
-
-        pg = page(390, 1400, "de")
+        pg = page(390, 1400, "en")
         pg.screenshot(path=os.path.join(OUT, "mobile.png"))
         widths = pg.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]")
         browser.close()
