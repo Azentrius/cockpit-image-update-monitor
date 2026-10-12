@@ -15,17 +15,17 @@
  *
  * The radar file is written every 6h by diun-radar.timer
  * (/usr/local/lib/diun-radar/diun-versions.py). Everything Cockpit executes
- * as root lives in /usr/local/lib/diun-radar — never in /var/lib/diun, which
+ * as root lives in /usr/local/lib/diun-radar, never in /var/lib/diun, which
  * is writable from inside the Diun container (2026-10-12).
  *
- * Updates ("stage 1"): same tag only — pull + recreate the compose services
+ * Updates ("stage 1"): same tag only: pull + recreate the compose services
  * that use the image, after a database dump and with a rollback copy of the
  * old image. Dumps and rollback copies are listed on the "Backups" tab.
  *
  * Language: Cockpit's session language (cockpit.language, set by
  * ../base1/po.js). German -> DE, anything else -> EN.
  *
- * No build step, no framework, no external requests — same model as cronctl.
+ * No build step, no framework, no external requests; same model as cronctl.
  */
 
 (function () {
@@ -125,7 +125,7 @@
             "ago.min": "{n} min ago",
             "ago.h": "{n} h ago",
             "ago.d": { one: "{n} day ago", other: "{n} days ago" },
-            "status.noInventory": "Container inventory unavailable (Docker unreachable or no administrative access) — showing reported Diun updates only.",
+            "status.noInventory": "Container inventory unavailable (Docker unreachable or no administrative access). Showing reported Diun updates only.",
             "status.loadError": "Loading failed: {msg}",
             "status.saveError": "Could not save status: {msg}",
             "deps.title": "Missing requirements",
@@ -337,7 +337,7 @@
             "ago.min": "vor {n} min",
             "ago.h": "vor {n} h",
             "ago.d": { one: "vor {n} Tag", other: "vor {n} Tagen" },
-            "status.noInventory": "Container-Inventar nicht verfügbar (Docker nicht erreichbar oder kein administrativer Zugriff) — zeige nur gemeldete Diun-Updates.",
+            "status.noInventory": "Container-Inventar nicht verfügbar (Docker nicht erreichbar oder kein administrativer Zugriff). Es werden nur gemeldete Diun-Updates gezeigt.",
             "status.loadError": "Fehler beim Laden: {msg}",
             "status.saveError": "Konnte Status nicht speichern: {msg}",
             "deps.title": "Voraussetzungen unvollständig",
