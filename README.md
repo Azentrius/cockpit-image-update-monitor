@@ -130,8 +130,8 @@ v2.1.4             -> "v"  3 ""
 - **Database images** (postgres, mariadb, mysql, redis, valkey, clickhouse, mongo …) are marked. Their majors appear as grey info.
 - If a registry fails, the last good result stays and is marked “(older data)”.
 - **When:** every 6 hours (`diun-radar.timer`), in the background after every successful update or
-  rollback, and on **“Run radar now”** next to *Refresh*. The button stays busy until the run is over;
-  systemd never runs the radar twice at once.
+  rollback, and on **“Run radar now”** in the *Running containers* card. The button stays busy until
+  the run is over; systemd never runs the radar twice at once.
 
 ---
 
@@ -300,7 +300,7 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 - **Cockpit rights.** Reading runs with `superuser: "try"`, actions with `superuser: "require"`. Without administrative access in Cockpit there is a clear message instead of an error.
 - **Diun without the Docker socket.** Only the `docker-socket-proxy` sees `/var/run/docker.sock` (read-only). It exposes a filtered, read-only API (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) and publishes no port.
 - **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords are read only inside the database container from its environment, never stored or logged.
-- **No network from the browser.** No CDNs, no web fonts; Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries.
+- **No network from the browser.** No CDNs and no external fonts (the fonts ship with the add-on); Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries.
 - **Concurrency.** `flock` for inventory and update (exit 75 for “already running”). The plugin never starts two loads in parallel.
 - **Overwrite nothing.** `diun-deps.sh` stops if target files or a Diun container exist already. `install.sh` backs up the previous version before replacing it.
 
@@ -340,7 +340,7 @@ sudo ./install.sh
 
 `install.sh` copies `plugin/` to `/usr/share/cockpit/diun/`, `lib/` to `/usr/local/lib/diun-radar/` and the unit templates from `systemd/` to `/usr/local/lib/diun-radar/systemd/`, owned by root. It backs up an existing installation to `/usr/local/lib/diun-radar/backup-<timestamp>/` first and starts a radar run if the timer is set up already. Units already in `/etc/systemd/system/` stay untouched; `install.sh` says when one differs from its template.
 
-Then open **“Image updates”** in Cockpit (switch on administrative access). If something is missing, the add-on shows the *Missing requirements* panel at the top with install buttons. Alternatively on the console:
+Then open **“Image updates”** in Cockpit (switch on administrative access). If something is missing, the add-on shows the *Missing requirements* panel right under the tabs, with install buttons. Alternatively on the console:
 
 ```bash
 sudo /usr/local/lib/diun-radar/diun-deps.sh check
@@ -420,7 +420,8 @@ tail -n 5 /var/lib/diun/events.jsonl
 ## Development
 
 ```
-plugin/            Cockpit package (manifest, index.html, diun.js, diun.css, menu translation)
+plugin/            Cockpit package (manifest, index.html, diun.js, diun.css, menu translation) and
+                   the shared design files (azentrius.css, azentrius-theme.js, icons.js, fonts)
 lib/               root helpers (Python 3 / POSIX sh), installed to /usr/local/lib/diun-radar
 systemd/           unit templates (radar, cleanup), installed to /usr/local/lib/diun-radar/systemd
 install.sh         installer (DESTDIR, --dry-run, backup of the previous version)
@@ -430,6 +431,7 @@ tools/probe-versions.py   diagnosis: which version sources a host offers (read-o
 tools/check-version.sh    version in diun.js, index.html and CHANGELOG.md agree
 tools/release-notes.sh    release notes from CHANGELOG.md
 tools/check-units.sh      systemd-analyze verify for the unit templates
+tools/check-design-files.sh  the shared design files match tools/design-files.sha256
 docs/              INTERNALS.md (interfaces, formats), images
 ```
 
@@ -496,9 +498,9 @@ The changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Releasing
 
-Versions follow [Semantic Versioning](https://semver.org/). The version lives in `const VERSION` in `plugin/diun.js`; `plugin/index.html` loads `diun.js` and `diun.css` with `?v=<version>`.
+Versions follow [Semantic Versioning](https://semver.org/). The version lives in `const VERSION` in `plugin/diun.js`; `plugin/index.html` loads every script and stylesheet of the add-on (the shared design files too) with `?v=<version>`, so browsers fetch the new files after an update.
 
-1. Raise `VERSION` and the two `?v=`, add a section `## X.Y.Z – YYYY-MM-DD` to `CHANGELOG.md`, merge.
+1. Raise `VERSION` and every `?v=` in `plugin/index.html` (`tools/check-version.sh` finds any it misses), add a section `## X.Y.Z – YYYY-MM-DD` to `CHANGELOG.md`, merge.
 2. Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, packs `cockpit-image-update-monitor-X.Y.Z.tar.gz` with `SHA256SUMS` and creates the tag `vX.Y.Z` with a release whose notes come from `CHANGELOG.md`. It also signs a build provenance for the tarball; for releases after 0.6.1, `gh attestation verify cockpit-image-update-monitor-X.Y.Z.tar.gz --repo Azentrius/cockpit-image-update-monitor` shows that it was built by this workflow from this repository.
 
 ---

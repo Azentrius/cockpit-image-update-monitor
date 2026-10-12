@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-12. Each stage is cut so that it is useful on its own and brings its own tests. The order
+As of 2026-10-13. Each stage is cut so that it is useful on its own and brings its own tests. The order
 is the recommendation.
 
 **Guardrails for every stage** (they keep applying unchanged):
@@ -27,22 +27,23 @@ Done (see [CHANGELOG](CHANGELOG.md)):
 ## Stage 1.1 – Polish ✅
 
 Done in 0.7.0 (see [CHANGELOG](CHANGELOG.md)):
-- Radar starts after every successful update/rollback; “Run radar now” next to *Refresh*
-  (`diun-update.py radar`, waits for the run, a second click joins it).
+- Radar starts after every successful update/rollback; “Run radar now” in the *Running containers*
+  card (`diun-update.py radar`, waits for the run, a second click joins it).
 - Cleanup rules (`/etc/image-updates.conf`: `KEEP_DUMPS=3`, `ROLLBACK_IMAGE_DAYS=14`) after every
   update for that project, daily via `diun-cleanup.timer` (set up on request), preview and “Clean up
   now” in the backups tab.
 - `from_version` / `to_version` in the history.
 - End-to-end test for MariaDB and MySQL; offline tests for `diun-update.py`; lint (shellcheck, ruff), the browser
   preview and `systemd-analyze verify` in CI; systemd units as files in `systemd/`.
+- The end-to-end test passed on the reference host (Postgres, MariaDB, MySQL).
+- In the same release, though not part of the stage: the shared Azentrius page frame (header, tabs,
+  cards, status labels, signature) with the design files of the Cron Jobs add-on.
 
 Decided on the way:
 - The cleanup after an update stays inside that project and image; only the timer and “Clean up now”
   work on everything.
 - The daily timer is optional and set up from the backups tab, not from the requirements panel.
 - Rules that are not understood stop the cleanup; there is no fallback to the defaults.
-
-Still open: the end-to-end test has to run once on the reference host.
 
 ---
 
@@ -162,10 +163,9 @@ and tested.
 
 | Topic | Proposal |
 |---|---|
-| `plugin/diun.js` has ~1,300 lines in one file | split into ES modules (`<script type="module">` works under Cockpit's CSP without a build step): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
+| `plugin/diun.js` has ~1,550 lines in one file | split into ES modules (`<script type="module">` works under Cockpit's CSP without a build step): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
 | Package name `diun` (URL `/cockpit/@host/diun`) no longer fits the scope | rename to `image-updates`, `install.sh` removes the old directory; bookmarks change; the units (`diun-radar`, `diun-cleanup`) and `/usr/local/lib/diun-radar` would follow |
 | Changed unit templates do not reach existing installations | `install.sh` only reports the difference; an opt-in `diun-deps.sh update units` with a backup |
-| Radar run fixed at `:17` every 6 h | `RandomizedDelaySec=` against registry peaks |
 | Documentation of the JSON formats | update `docs/INTERNALS.md` and the fixtures in `test/fixtures/` with every format change |
 
 ---
