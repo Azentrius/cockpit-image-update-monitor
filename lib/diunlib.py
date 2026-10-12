@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Shared helpers of the Image-Updates monitor (inventory + version radar).
 
 Lives in /usr/local/lib/diun-radar next to the scripts that import it

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Runs every offline test: no Docker, no registry, no root needed.
 #   cd test && npm ci && ./run-all.sh
 # The end-to-end test against a real Docker host is separate: e2e-server.sh

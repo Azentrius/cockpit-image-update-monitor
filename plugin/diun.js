@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Image-Updates monitor for Cockpit
  * Lists running containers (their installed version + current digest) and
  * annotates each with independent signals:

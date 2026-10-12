@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // "Run radar now", the cleanup box of the backups tab (rules, timer, what is
 // to be deleted, "Clean up now"), versions in the history and in the update
 // result - against the real diun.js in jsdom with a scripted Cockpit stub.

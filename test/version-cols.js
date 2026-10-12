@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Columns "Configured / Installed / Newest version" (2026-10-12):
 // installed version from inventory (tag / env) or radar (label / digest),
 // pulled-but-not-rolled-out arrow, reachable vs. outlined chips, unknown.

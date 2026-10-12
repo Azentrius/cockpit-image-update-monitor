@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /* Azentrius palette. Fonts are intentionally a system stack so the admin
  * UI makes zero external requests (DSGVO-clean, strict CSP). To match the
  * brand exactly, drop DM Sans / DM Serif Display woff2 files next to this

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Language selection and requirements panel / install dialog, against the
 // real diun.js in jsdom with a scripted Cockpit stub.
 const fs = require("fs");
