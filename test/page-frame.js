@@ -192,7 +192,11 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert(inUse && inUse.title.startsWith("Ein Container nutzt"), "image in use: delete locked, reason as tooltip");
     const res = [...b.d.querySelectorAll("#dm-ops .az-label")].map((l) => `${l.className}:${iconOf(l)}:${l.textContent}`);
     console.log("history results:", res.join(" | "));
-    assert.deepStrictEqual(res, ["az-label az-label--success:check-circle:erfolgreich", "az-label:null:keine Änderung"]);
+    assert.deepStrictEqual(res, ["az-label:history:zurückgerollt", "az-label az-label--success:check-circle:erfolgreich",
+                                 "az-label:null:keine Änderung"]);
+    const cause = b.d.querySelector("#dm-ops .dm-op-reason");
+    assert(cause && cause.textContent.startsWith("formbricks-app: Error: Invalid environment variables"),
+           "failed update: its cause under the result");
     const clean = b.d.getElementById("dm-cleanup-btn");
     assert.deepStrictEqual([clean.className, iconOf(clean)], ["az-btn az-btn--secondary az-btn--sm", "trash"]);
     // text buttons on the page always carry an icon

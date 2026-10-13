@@ -158,6 +158,8 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
     overflow-wrap: anywhere;
 }
 .dm-dialog-result:empty { display: none; }
+/* Most likely cause of a failed update (az-alert--danger), above the log */
+.dm-reason-line { font-family: var(--az-font-code); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .dm-dialog-result.is-ok { color: var(--status-success); }
 .dm-dialog-result.is-error { color: var(--danger-text); }
 
@@ -186,6 +188,18 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
     line-height: 1.5;
 }
 .dm-callout-warn { border-inline-start-color: var(--status-warning); color: var(--text); }
+/* History: the cause under the result, two lines at most (full text as title) */
+.dm-op-reason {
+    display: -webkit-box;
+    max-inline-size: 32rem;
+    margin-block-start: 2px;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    color: var(--text-subtle);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
 .dm-list { list-style: none; margin: 0; padding: 0; max-block-size: 14rem; overflow-y: auto; font-size: 13px; }
 .dm-list li { padding: 2px 0; overflow-wrap: anywhere; }
 

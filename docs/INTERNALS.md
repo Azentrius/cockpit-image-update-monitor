@@ -139,7 +139,8 @@ newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+
  "containers": ["glitchtip-migrate", "glitchtip-web", "glitchtip-worker"],
  "dbs": [{"name": "glitchtip-postgres", "kind": "postgres", "running": true, "size": 162529280},
          {"name": "glitchtip-redis", "kind": "unsupported", "running": true, "size": null}],
- "free_bytes": 84654432256, "config_changed": false, "pulled": false, "old_image": "sha256:…"}
+ "free_bytes": 84654432256, "config_changed": false, "pulled": false, "old_image": "sha256:…",
+ "installed_version": "6.1.8", "tag_digits": 0, "jump_unknown": false}
 ```
 
 - `reason` when not updatable: `not-compose`, `compose-file-missing` (+`missing`), `digest-pinned`,
@@ -151,6 +152,12 @@ newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+
   - `size`: Postgres only, sum of `pg_database_size`.
 - `config_changed`: `docker compose config --hash` differs from the label
   `com.docker.compose.config-hash`. The change is rolled out as well.
+- `installed_version` (since 0.8.0): the version of the running image, as in the history
+  (`from_version`, see below); `null` if unknown.
+- `tag_digits`: how many version blocks the configured tag fixes (`diunlib.tag_digits`): `latest` 0,
+  `16-alpine` 1, `3.12-slim` 2, `v2.1.4` 3.
+- `jump_unknown`: `installed_version` is `null` **and** `tag_digits` is 0. Nobody can tell how big the
+  jump is; the plugin warns first and enables *Update* only after a tick box.
 
 ### `@@RESULT` (last line of `update` / `rollback` / `cleanup`)
 
@@ -158,13 +165,32 @@ newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+
 update:   @@RESULT {"op": "20261012-015025-imgupd-test-db", "status": "ok|nochange|failed",
                     "rollback": "repo:rollback-20261012-015025", "dumps": ["project/…sql.gz"],
                     "from_version": "16.14", "to_version": "16.15"}
-rollback: @@RESULT {"op": "…", "status": "ok|failed"}
+          (on failed also "reason": {…}, see below)
+rollback: @@RESULT {"op": "…", "status": "ok|failed"}            (on failed also "reason")
 cleanup:  @@RESULT {"status": "ok|nochange", "dumps": ["project/…sql.gz"],
                     "images": ["repo:rollback-…"], "bytes": 3145728, "failed": ["…"]}
 ```
 
 The plugin hides this line in the log and evaluates it. On `failed` (exit 4) it offers the rollback
 with `op`. The versions can be `null` (unknown).
+
+`reason` (since 0.8.0), the most likely cause of a failed update or rollback:
+
+```json
+{"container": "formbricks-app", "state": "restarting", "exit_code": 1, "oom": false, "source": "log",
+ "line": "Error: Invalid environment variables: - AUTHZED_ENABLED: Formbricks v6 requires …"}
+```
+
+- `container`: the first failed container with a telling line, otherwise the first failed one;
+  `null` when `docker compose up` itself failed (`source: "compose"`, `exit_code` = its exit code).
+- `state`: the container state, or the health state `unhealthy` / `starting`.
+- `source`: `log` (the last 80 log lines), `health` (last output of the health check, for an
+  unhealthy container), `compose` (the last 50 lines `docker compose up` printed) or `null`.
+- `line` (`reason_line`): the last line that names an error (`Error:`, `TypeError:`,
+  `…Exception`, `error:`, `panic:`, `FATAL`, `PANIC`, `CRITICAL`), plus the next line when it ends in
+  `:`; otherwise the last line that mentions a problem (`error`, `failed`, `refused`, `not found` …).
+  Stack frames never count, colour codes are removed, at most 300 characters. `null` when nothing fits;
+  the plugin then names the state (out of memory, exit code, not ready in time).
 
 ### Cleanup rules (`/etc/image-updates.conf`)
 
@@ -204,6 +230,9 @@ rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_sta
 - `from_version` / `to_version` (since 0.7.0): the tag or the app's version variable of the old and
   the new image (`diunlib.local_version`), otherwise what the radar found for that image ID
   (label / digest), otherwise `null`. Older entries do not have them; the plugin shows “—”.
+- `reason` (since 0.8.0): on a failed update, the same object as in `@@RESULT`. A failed rollback adds
+  `rollback_reason` with the line that marks it rolled back. The backups tab shows the cause under the
+  result (the rollback's if it failed, otherwise the update's).
 
 `backups` returns the last 30 operations, with `can_rollback` added and without paths and image IDs.
 On top come `dumps[]` (`path`, `project`, `container`, `size`, `mtime`), `images[]` (`ref`, `id`,
@@ -276,6 +305,10 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 - **Dialog:** one `<dialog>` for everything (install, update, rollback, delete). Flow: `dlg.open` →
   `confirmAndRun` → `dlg.run` → `onDone`.
   - A plan that arrives after the dialog was closed is dropped (`planSeq`).
+  - `jump_unknown` in the plan: the warning comes first in the body, the confirm button stays
+    disabled until `#dm-jump-check` is ticked.
+  - A `reason` in the result fills `#dm-dialog-reason` (`az-alert--danger`) above the log; every new
+    run hides it again.
 - **Sorting:** update available → roll-out pending → new version → unknown → up to date.
 - **Run radar now:** spawns `diun-update.py radar` (`superuser: "require"`, no dialog) and keeps the
   button busy until it returns; `radar.running` from the check shows runs started elsewhere. The new
@@ -290,11 +323,11 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, hub/registry match with fakes, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), rollback, cleanup rules, `backups`, `radar`, waiting for health |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), rollback, cleanup rules, `backups`, `radar`, waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
-| `test/update-backups.js` | update buttons, plan dialog, dump tick box, rollback offer, backups tab, delete |
+| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, delete |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |

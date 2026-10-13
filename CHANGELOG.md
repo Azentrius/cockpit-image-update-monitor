@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.8.0 – 2026-10-13
+
+Stage 1.2, first part: the update says when nobody can tell how big the jump is, and a failed update
+names its most likely cause.
+
+- **Unknown jump size.** If the installed version is unknown and the tag fixes no version number
+  (`latest`, `stable` …), the update dialog says so first: the update may bring a new major version
+  that needs other settings or additional services. *Update* stays disabled until a tick box confirms
+  it. The plan also shows the installed version.
+- **Most likely cause of a failure.** When the containers do not come up after an update or a
+  rollback, a box above the log names the container and the most telling line of its log, e.g.
+  “Error: Invalid environment variables: …”. For an unhealthy container it is the last output of the
+  health check, for a failed `docker compose up` its own output. Without such a line the box says what
+  the state tells (out of memory, exit code, not ready in time). The rollback button stays next to it.
+  - The line is the last one in the log that names an error (an exception, `Error:`, `FATAL:`,
+    `panic:`); stack frames never count.
+  - It is part of `@@RESULT` and of the history (`reason`, `rollback_reason` for a failed rollback),
+    and the backups tab shows it under the result.
+- **Smaller things:**
+  - The `ban` icon comes from the shared `icons.js`; the copy in `diun.js` is gone.
+  - Texts and comments use plain punctuation instead of long dashes, also in the shared
+    `azentrius-theme.js`. The German message for a failed update addresses the user formally.
+- **Tests:** offline tests for the plan fields and for the cause (logs of Node, Python, Postgres and
+  Go, health check, out of memory, `docker compose`), the dialog (warning, tick box, cause above the
+  log) and the history. The end-to-end test checks the cause of its failing update and the plan fields.
+
 ## 0.7.0 – 2026-10-12
 
 Stage 1.1: cleanup rules, radar runs on demand, versions in the history; the shared Azentrius page

@@ -35,7 +35,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.7.0";
+    const VERSION = "0.8.0";
     const LIB = "/usr/local/lib/diun-radar/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -183,6 +183,10 @@
             "upd.configChanged": "The compose file changed since these containers were created – those changes will be rolled out too.",
             "upd.dataWarn": "A rollback restores the image, not the data. If the new version migrates its database, only the dump helps.",
             "upd.downtime": "The containers are briefly unavailable while they are recreated.",
+            "upd.installed": "Installed version",
+            "upd.versionUnknown": "unknown",
+            "upd.jumpUnknown": "The installed version is unknown and the tag {tag} follows every new release, so nobody can tell how big the jump is. It may be a new major version that needs other settings or additional services. Check the release notes first.",
+            "upd.jumpConfirm": "I know that this update may bring a new major version.",
             "upd.notPossible": "Not possible from the add-on: {reason}",
             "reason.not-compose": "the container was not started with docker compose, so it cannot be recreated safely.",
             "reason.compose-file-missing": "the compose file no longer exists ({files}).",
@@ -195,6 +199,13 @@
             "upd.failed": "Update failed – the containers do not run stably. You can roll back to the previous version.",
             "upd.aborted": "Aborted before anything was changed – see output.",
             "upd.busy": "Another update or rollback is already running.",
+            "upd.reasonTitle": "Most likely cause ({name})",
+            "upd.reasonComposeTitle": "Most likely cause (docker compose)",
+            "upd.reasonHealth": "Health check: {line}",
+            "upd.reasonOom": "Stopped because it ran out of memory.",
+            "upd.reasonExit": "Stopped with exit code {code}; the log shows no error line.",
+            "upd.reasonTimeout": "Not ready within the waiting time; the log shows no error line.",
+            "upd.reasonNone": "The log shows no error line; see the output.",
             "rb.button": "Roll back",
             "rb.title": "Roll back {name}?",
             "rb.desc": "Points {image} back to {rb} and recreates {services}. Databases are not reset – if migrations cause trouble, restore the dump.",
@@ -395,6 +406,10 @@
             "upd.configChanged": "Die Compose-Datei wurde seit dem Start dieser Container geändert – diese Änderungen werden mit ausgerollt.",
             "upd.dataWarn": "Ein Rollback stellt das Image wieder her, nicht die Daten. Migriert die neue Version ihre Datenbank, hilft nur der Dump.",
             "upd.downtime": "Die Container sind beim Neuerstellen kurz nicht erreichbar.",
+            "upd.installed": "Installierte Version",
+            "upd.versionUnknown": "unbekannt",
+            "upd.jumpUnknown": "Die installierte Version ist unbekannt, und der Tag {tag} folgt jeder neuen Version. Wie groß der Sprung ist, lässt sich deshalb nicht sagen. Es kann eine neue Hauptversion sein, die andere Einstellungen oder zusätzliche Dienste braucht. Prüfen Sie vorher die Release-Notes.",
+            "upd.jumpConfirm": "Mir ist bewusst, dass dieses Update eine neue Hauptversion bringen kann.",
             "upd.notPossible": "Über das Addon nicht möglich: {reason}",
             "reason.not-compose": "Der Container wurde nicht mit docker compose gestartet und lässt sich daher nicht sicher neu erstellen.",
             "reason.compose-file-missing": "Die Compose-Datei existiert nicht mehr ({files}).",
@@ -404,9 +419,16 @@
             "upd.ok": "Update erfolgreich. Rollback-Kopie: {rb}",
             "upd.okVersions": "Update erfolgreich: {from} → {to}. Rollback-Kopie: {rb}",
             "upd.nochange": "Kein neueres Image verfügbar – nichts geändert.",
-            "upd.failed": "Update fehlgeschlagen – die Container laufen nicht stabil. Du kannst auf die vorherige Version zurückrollen.",
+            "upd.failed": "Update fehlgeschlagen – die Container laufen nicht stabil. Sie können auf die vorherige Version zurückrollen.",
             "upd.aborted": "Abgebrochen, bevor etwas geändert wurde – siehe Ausgabe.",
             "upd.busy": "Es läuft bereits ein Update oder Rollback.",
+            "upd.reasonTitle": "Vermutliche Ursache ({name})",
+            "upd.reasonComposeTitle": "Vermutliche Ursache (docker compose)",
+            "upd.reasonHealth": "Health-Check: {line}",
+            "upd.reasonOom": "Wegen Speichermangels beendet.",
+            "upd.reasonExit": "Mit Exit-Code {code} beendet; im Log steht keine Fehlerzeile.",
+            "upd.reasonTimeout": "In der Wartezeit nicht bereit geworden; im Log steht keine Fehlerzeile.",
+            "upd.reasonNone": "Im Log steht keine Fehlerzeile; siehe Ausgabe.",
             "rb.button": "Zurückrollen",
             "rb.title": "{name} zurückrollen?",
             "rb.desc": "Setzt {image} wieder auf {rb} und erstellt {services} neu. Datenbanken werden nicht zurückgesetzt – bei Migrationsproblemen den Dump einspielen.",
@@ -974,6 +996,7 @@
             const log = $("dm-dialog-log");
             log.textContent = "";
             log.hidden = true;
+            this.reason(null);
             this.result("", null);
             this.btn("dm-dialog-extra", "", { visible: false });
             if (spec.confirm) {
@@ -1002,6 +1025,22 @@
             res.className = "dm-dialog-result" + (ok === true ? " is-ok" : ok === false ? " is-error" : "");
         },
 
+        // Most likely cause of a failed update or rollback (@@RESULT reason),
+        // above the log; null hides it.
+        reason(r) {
+            const el = $("dm-dialog-reason");
+            if (!r) {
+                el.hidden = true;
+                el.innerHTML = "";
+                return;
+            }
+            const title = r.container ? t("upd.reasonTitle", { name: r.container }) : t("upd.reasonComposeTitle");
+            el.innerHTML = `<span class="az-alert__icon">${icon("exclamation-circle")}</span>` +
+                           `<p class="az-alert__title">${esc(title)}</p>` +
+                           `<p class="az-alert__body dm-reason-line">${esc(reasonText(r))}</p>`;
+            el.hidden = false;
+        },
+
         close() {
             if (this.running) return;
             const el = $("dm-dialog");
@@ -1017,6 +1056,7 @@
             this.btn("dm-dialog-confirm", t("dialog.running"), { visible: true, busy: true });
             this.btn("dm-dialog-extra", "", { visible: false });
             $("dm-dialog-cancel").disabled = true;
+            this.reason(null);
             if (runningLabel) this.result(runningLabel, null);
             let result = null;
             let pendingLine = "";
@@ -1115,9 +1155,19 @@
                               : t("upd.dbLineNoSize", { name: d.name }));
         });
         const dumpable = dbs.some((d) => d.kind === "postgres" || d.kind === "mysql");
-        let html = `<ul class="dm-kv">` +
+        let html = "";
+        // Unknown version + a tag that follows every release: say so first,
+        // the confirm button waits for the tick box (see startUpdate).
+        if (plan.jump_unknown) {
+            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.jumpUnknown", { tag: tagSplit(plan.image).tag }))}</p>` +
+                    `<label class="dm-check"><input type="checkbox" id="dm-jump-check"> ${esc(t("upd.jumpConfirm"))}</label>`;
+        }
+        html += `<ul class="dm-kv">` +
             li(t("upd.containers"), (plan.containers || []).map(code).join(" ")) +
             li(t("upd.project"), `${code(plan.project)} <span class="dm-muted">${esc(plan.workdir || "")}</span>`) +
+            ("installed_version" in plan
+                ? li(t("upd.installed"), plan.installed_version ? code(plan.installed_version) : esc(t("upd.versionUnknown")))
+                : "") +
             li(t("upd.rollback"), code(repo + ":rollback-…")) +
             li(t("upd.dbs"), dbLines.length ? dbLines.join("<br>") : esc(t("upd.noDb"))) +
             (dumpable && plan.free_bytes != null ? li("", `<span class="dm-muted">${esc(t("upd.free", { free: human(plan.free_bytes) }))}</span>`) : "") +
@@ -1150,10 +1200,12 @@
                     return;
                 }
                 const desc = t(kind === "pulled" || plan.pulled ? "upd.descPulled" : "upd.desc", { image: plan.image });
+                const label = t(kind === "pulled" ? "btn.rollout" : "btn.update");
                 confirmAndRun({
                     title, desc, body: planBody(plan),
                     confirm: {
-                        label: t(kind === "pulled" ? "btn.rollout" : "btn.update"),
+                        label,
+                        disabled: !!plan.jump_unknown,
                         argv: () => {
                             const box = $("dm-dump-check");
                             const dump = box && box.checked && !box.disabled;
@@ -1162,6 +1214,11 @@
                     },
                     onDone: (o) => updateOutcome(o, name),
                 });
+                const jump = $("dm-jump-check");
+                if (jump) {
+                    jump.addEventListener("change", () =>
+                        dlg.btn("dm-dialog-confirm", label, { visible: true, disabled: !jump.checked }));
+                }
             })
             .catch((ex) => {
                 if (stale()) return;
@@ -1180,6 +1237,7 @@
             return true;
         }
         if (o.exit === 4 && r.op) {
+            dlg.reason(r.reason);
             dlg.result(t("upd.failed"), false);
             offerRollback(r.op, name);
             return true;
@@ -1188,10 +1246,21 @@
         return false;
     }
 
+    // Text of a failure reason (@@RESULT / history): the log line, otherwise
+    // what the container's state tells.
+    function reasonText(r) {
+        if (r.line) return r.source === "health" ? t("upd.reasonHealth", { line: r.line }) : r.line;
+        if (r.oom) return t("upd.reasonOom");
+        if (r.state === "running" || r.state === "starting") return t("upd.reasonTimeout");
+        if (r.exit_code) return t("upd.reasonExit", { code: r.exit_code });
+        return t("upd.reasonNone");
+    }
+
     function offerRollback(op, name) {
         dlg.btn("dm-dialog-extra", t("rb.button"), { visible: true });
         dlg.onExtra = () => {
             dlg.run([UPDATE_CMD, "rollback", op]).then((o) => {
+                if (!o.ok) dlg.reason((o.result || {}).reason);
                 dlg.result(o.ok ? t("rb.ok") : (o.noAdmin ? t("dialog.noAdmin") : t("rb.failed")), !!o.ok);
                 safeLoad();
             });
@@ -1205,7 +1274,11 @@
             confirm: { label: t("rb.button"), argv: () => [UPDATE_CMD, "rollback", op.id] },
             onDone: (o) => {
                 if (o.ok) { dlg.result(t("rb.ok"), true); return true; }
-                if (o.exit === 4) { dlg.result(t("rb.failed"), false); return true; }
+                if (o.exit === 4) {
+                    dlg.reason((o.result || {}).reason);
+                    dlg.result(t("rb.failed"), false);
+                    return true;
+                }
                 return false;
             },
         });
@@ -1238,6 +1311,15 @@
                       running: ["warning", "exclamation-triangle", "res.running"] };
         const [cls, ic, key] = map[o.status] || map.running;
         return label(cls, ic, t(key));
+    }
+
+    // Under the result: why the rollback or, otherwise, the update failed.
+    function opReason(o) {
+        const r = (o.rolled_back && o.rollback_status === "failed" && o.rollback_reason) ||
+                  (o.status === "failed" && o.reason) || null;
+        if (!r) return "";
+        const text = (r.container ? r.container + ": " : "") + reasonText(r);
+        return `<span class="dm-op-reason" title="${esc(text)}">${esc(text)}</span>`;
     }
 
     // "16.14 → 16.15"; older history entries have no versions.
@@ -1330,7 +1412,7 @@
             `<td class="az-nowrap" data-label="${L("col.container")}"><span class="dm-cell">${esc(o.container || "")}</span></td>` +
             `<td data-label="${L("col.image")}"><span class="dm-cell az-mono">${esc(o.image || "")}</span></td>` +
             `<td data-label="${L("col.version")}"><span class="dm-cell">${opVersions(o)}</span></td>` +
-            `<td data-label="${L("col.result")}"><span class="dm-cell">${opResult(o)}</span></td>` +
+            `<td data-label="${L("col.result")}"><span class="dm-cell">${opResult(o)}${opReason(o)}</span></td>` +
             `<td data-label="${L("col.dumps")}"><span class="dm-cell">${(o.dumps || []).length}</span></td>` +
             `<td class="az-cell-actions"><span class="dm-cell">` +
               (o.can_rollback ? textButton("history", t("rb.button"), `data-op="${i}"`) : "") +

@@ -53,13 +53,16 @@ Decided on the way:
 containers do not come up, the reason is visible at once. A failed build is not offered the same way
 again.
 
+Done in 0.8.0 (see [CHANGELOG](CHANGELOG.md)): the unknown jump size and the most likely cause of a
+failure (“reason first”), both marked ✅ below.
+
 **Seen on the reference host:** `latest` of an app moved to a new major version that needs an extra
 service; the app did not start. Dump, rollback copy and rollback worked, and the data stayed untouched.
 But the add-on could not warn beforehand: the image has no version label and no version variable, so the
 installed version was unknown and the jump invisible.
 
 **Before switching**
-- **Unknown jump size:** if the installed version is unknown and the tag fixes no version number
+- ✅ **Unknown jump size:** if the installed version is unknown and the tag fixes no version number
   (`latest`, `stable`; reach 0 in the README's terms), the plan says “the size of the jump is unknown; a
   new major version is possible” and asks for an extra confirmation.
 - **Resolve floating tags:** the radar finds the version tag with the same digest as the configured tag
@@ -70,8 +73,9 @@ installed version was unknown and the jump invisible.
   the row shows “Roll-out pending” with the version that came), roll out second.
 
 **While switching**
-- **Reason first:** when containers do not come up, the result names the first meaningful error line
-  (e.g. “Invalid environment variables: …”) above the log lines, next to the rollback button.
+- ✅ **Reason first:** when containers do not come up, the result names the most telling error line
+  (e.g. “Invalid environment variables: …”) above the log lines, next to the rollback button. It is
+  also kept in the history.
 - **Keep the output:** the live output of every update and rollback is stored with the history
   (`/var/backups/image-updates/logs/<op-id>.log`, root only) and can be opened from the history. Today it
   exists only in the browser while the dialog is open.

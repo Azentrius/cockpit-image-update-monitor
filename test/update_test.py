@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Offline tests for lib/diun-update.py: Docker, docker compose and systemctl
 are replaced by fakes, /var/backups/image-updates and the other paths by a
-temporary directory. Covers database detection, plan reasons, argument checks
-and exit codes, the update flow (dump, rollback tag, versions in the history,
-cleanup, radar start), rollback, the cleanup rules and the radar verb.
+temporary directory. Covers database detection, plan reasons and the unknown jump
+size, argument checks and exit codes, the update flow (dump, rollback tag,
+versions in the history, cleanup, radar start), the most likely cause of a
+failure, rollback, the cleanup rules and the radar verb.
 No Docker, no root, no network."""
 import contextlib
 import gzip
@@ -33,6 +34,9 @@ U.CONF = os.path.join(TMP, "image-updates.conf")
 U.VERSIONS = os.path.join(TMP, "versions.json")
 U.show_logs = lambda names: None
 REAL_WAIT = U.wait_healthy
+REAL_STREAM = U.stream
+LOGS = {}                            # container -> log lines for the failure reason
+U.container_logs = lambda name, n=80: LOGS.get(name, [])
 
 # One operation per second at most in real life; here every update gets its
 # own stamp, one second apart, starting an hour ago.
@@ -147,6 +151,7 @@ class Docker:
         self.rmi_refuse = set()
         self.pull_to = None          # (ref, image id) the next pull moves the tag to
         self.up_rc = 0
+        self.up_out = []             # what a failing `compose up` prints
 
     def add(self, c):
         self.containers[c["Name"].lstrip("/")] = c
@@ -212,6 +217,7 @@ class Docker:
             self.tags[U.norm_ref(ref)] = iid
         if "up" in cmd:
             if self.up_rc:
+                U.STREAM_TAIL[:] = self.up_out
                 return self.up_rc
             for c in self.containers.values():
                 iid = self.tags.get(U.norm_ref(c["Config"]["Image"]))
@@ -329,6 +335,128 @@ check("plan: services with the same image", (p["services"], p["containers"]),
 check("plan: databases of the project", sorted((d["name"], d["kind"], d["size"]) for d in p["dbs"]),
       [("glitchtip-postgres", "postgres", 52428800), ("glitchtip-redis", "unsupported", None)])
 check("plan: compose changed + pulled", (p["config_changed"], p["pulled"]), (True, True))
+check("plan: version from the variable, the tag fixes one block -> size of the jump known",
+      (p["installed_version"], p["tag_digits"], p["jump_unknown"]), ("16.14", 1, False))
+D.images["sha256:fb"] = {"Id": "sha256:fb", "Config": {"Env": ["NODE_VERSION=24.21.0"]}}
+D.add(ctn("formbricks-app", "ghcr.io/formbricks/formbricks:latest", "sha256:fb", project="glitchtip",
+          service="formbricks"))
+p = plan("formbricks-app")
+check("plan: latest + unknown version -> size of the jump unknown",
+      (p["installed_version"], p["tag_digits"], p["jump_unknown"]), (None, 0, True))
+with open(U.VERSIONS, "w") as f:
+    json.dump({"images": [{"image": "ghcr.io/formbricks/formbricks", "tag": "latest",
+                           "installed": {"sha256:fb": {"version": "5.0.2", "src": "digest"}}}]}, f)
+p = plan("formbricks-app")
+check("plan: latest, version known to the radar -> no warning", (p["installed_version"], p["jump_unknown"]),
+      ("5.0.2", False))
+os.unlink(U.VERSIONS)
+del D.containers["formbricks-app"]
+
+# -------------------------------------------------- most likely cause
+NODE_LOG = [
+    "    {",
+    "      path: 'AUTHZED_CONSISTENCY',",
+    "      message: 'Formbricks v6 requires AUTHZED_CONSISTENCY=fully_consistent'",
+    "    }",
+    "  ]",
+    "}",
+    "file:///home/nextjs/validate-env.mjs:4307",
+    "  throw new Error(message);",
+    "        ^",
+    "",
+    "Error: Invalid environment variables:",
+    "  - AUTHZED_ENABLED: Formbricks v6 requires AUTHZED_ENABLED=true; configure SpiceDB first.",
+    "  - AUTHZED_TOKEN: AUTHZED_TOKEN is required when AuthZed is enabled",
+    "    at throwEnvValidationError (file:///home/nextjs/validate-env.mjs:4307:9)",
+    "    at file:///home/nextjs/validate-env.mjs:4878:3",
+    "",
+    "Node.js v24.21.0",
+]
+PY_LOG = [
+    "Traceback (most recent call last):",
+    '  File "/code/apps/issue_events/tasks.py", line 12, in cleanup_old_issues',
+    "    Issue.objects.filter(index__isnull=False).delete()",
+    'RuntimeError: [42P01] relation "issue_events_issueindex" does not exist',
+    "",
+    "The above exception was the direct cause of the following exception:",
+    "",
+    "Traceback (most recent call last):",
+    '  File "/code/manage.py", line 3, in <module>',
+    "    raise dj_exc_value.with_traceback(traceback) from exc_value",
+    'django.db.utils.ProgrammingError: [42P01] relation "issue_events_issueindex" does not exist',
+    'SQL: SELECT "issue_events_issue"."id" FROM "issue_events_issue"',
+]
+PG_LOG = ["2026-10-12 23:13:56.303 UTC [1] LOG:  starting PostgreSQL 17.2",
+          "2026-10-12 23:13:56.310 UTC [1] FATAL:  database files are incompatible with server",
+          "2026-10-12 23:13:56.310 UTC [1] DETAIL:  The data directory was initialized by PostgreSQL version 16."]
+GO_LOG = ["panic: runtime error: invalid memory address or nil pointer dereference",
+          "[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x4a3b2c]", "",
+          "goroutine 1 [running]:", "main.main()", "\t/src/main.go:12 +0x1d"]
+r = U.reason_line
+check("cause: Node error with its first detail",
+      r(NODE_LOG), "Error: Invalid environment variables: - AUTHZED_ENABLED: Formbricks v6 requires "
+                   "AUTHZED_ENABLED=true; configure SpiceDB first.")
+check("cause: last Python exception", r(PY_LOG),
+      'django.db.utils.ProgrammingError: [42P01] relation "issue_events_issueindex" does not exist')
+check("cause: Postgres FATAL", r(PG_LOG),
+      "2026-10-12 23:13:56.310 UTC [1] FATAL:  database files are incompatible with server")
+check("cause: Go panic, not the goroutine dump", r(GO_LOG),
+      "panic: runtime error: invalid memory address or nil pointer dereference")
+check("cause: a log line that only mentions a problem",
+      r(["starting", 'level=error msg="dial tcp 10.0.0.3:6379: connect: connection refused"', "exiting"]),
+      'level=error msg="dial tcp 10.0.0.3:6379: connect: connection refused"')
+check("cause: colour codes removed", r(["\x1b[31mERROR\x1b[0m: boom"]), "ERROR: boom")
+check("cause: stack frames alone are no cause", r(["    at main (app.js:1:1)", "", "  ^"]), None)
+check("cause: nothing telling", r(["listening on :3000", "ready"]), None)
+check("cause: long lines are cut", len(r(["Error: " + "x" * 1000])), U.REASON_MAX)
+
+fresh_docker()
+
+
+def failing(name, state, health=None):
+    c = ctn(name, "app:1", "sha256:a", project="p", service=name)
+    c["State"] = dict(state)
+    if health:
+        c["State"]["Health"] = health
+    D.add(c)
+
+
+failing("fb", {"Status": "restarting", "ExitCode": 1, "RestartCount": 3})
+failing("web", {"Status": "running"}, {"Status": "unhealthy", "Log": [
+    {"ExitCode": 7, "Output": "curl: (7) Failed to connect to localhost port 8000\n"}]})
+failing("oom", {"Status": "exited", "ExitCode": 137, "OOMKilled": True})
+failing("slow", {"Status": "running"}, {"Status": "starting", "Log": []})
+LOGS.update(fb=NODE_LOG, oom=["Killed"], slow=["migrating ..."])
+fr = U.failure_reason
+check("cause of a restart loop, from the log", fr(["fb"]),
+      {"container": "fb", "state": "restarting", "exit_code": 1, "oom": False, "source": "log",
+       "line": r(NODE_LOG)})
+check("cause of an unhealthy container, from the health check",
+      (fr(["web"])["source"], fr(["web"])["state"], fr(["web"])["line"]),
+      ("health", "unhealthy", "curl: (7) Failed to connect to localhost port 8000"))
+check("out of memory without a log line", (fr(["oom"])["oom"], fr(["oom"])["line"], fr(["oom"])["exit_code"]),
+      (True, None, 137))
+check("still starting at the timeout", (fr(["slow"])["state"], fr(["slow"])["line"]), ("starting", None))
+check("the first container with a telling line wins", fr(["oom", "fb"])["container"], "fb")
+check("unknown containers are skipped", fr(["nope"]), None)
+U.STREAM_TAIL[:] = ["Container x Recreate",
+                    "Error response from daemon: Bind for 0.0.0.0:8080 failed: port is already allocated"]
+check("cause of a failed compose up", fr(["fb"], compose_rc=1),
+      {"container": None, "state": None, "exit_code": 1, "oom": False, "source": "compose",
+       "line": "Error response from daemon: Bind for 0.0.0.0:8080 failed: port is already allocated"})
+LOGS.clear()
+fresh_docker()
+D.images = {"sha256:old": {"Id": "sha256:old", "Config": {"Env": PG_ENV}},
+            "sha256:new": {"Id": "sha256:new", "Config": {"Env": ["PG_MAJOR=16", "PG_VERSION=16.15"]}},
+            "sha256:web": {"Id": "sha256:web", "Config": {"Env": ["GLITCHTIP_VERSION=6.1.8"]}}}
+D.tags = {"postgres:16-alpine": "sha256:new", "glitchtip/glitchtip:latest": "sha256:web"}
+D.add(ctn("glitchtip-postgres", "postgres:16-alpine", "sha256:old", project="glitchtip", service="postgres",
+          cmd=["postgres"], env=PG_ENV))
+D.add(ctn("glitchtip-migrate", "postgres:16-alpine", "sha256:old", project="glitchtip", service="migrate",
+          entrypoint=["sh", "-c"], cmd=["psql -f /m.sql"], env=PG_ENV, running=False))
+D.add(ctn("glitchtip-redis", "redis:7-alpine", "sha256:r", project="glitchtip", service="redis", cmd=["redis-server"]))
+D.add(ctn("glitchtip-web", "glitchtip/glitchtip:latest", "sha256:web", project="glitchtip", service="web"))
+D.hashes = {"migrate": "h-changed"}
 
 # ----------------------------------------------------- arguments, exit codes
 
@@ -459,12 +587,19 @@ check("version: broken radar file is no error", U.version_of("ollama/ollama:late
 D.pull_to = ("postgres:16-alpine", "sha256:newer")
 D.images["sha256:newer"] = {"Id": "sha256:newer", "Config": {"Env": ["PG_VERSION=16.16"]}}
 U.wait_healthy = lambda project, services: (False, ["glitchtip-migrate"], {})
+LOGS["glitchtip-migrate"] = ["running migrations", 'FATAL:  role "glitchtip" does not exist']
 touch_dump("glitchtip/20251231-030000_glitchtip-postgres.sql.gz")
 radar.calls.clear()
 rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
 release_lock()
 res = json.loads(out.strip().splitlines()[-1][9:])
 check("failed update -> exit 4", (rc, res["status"]), (4, "failed"))
+check("failed update: cause in the result and the history",
+      (res["reason"]["container"], res["reason"]["line"], ops()[res["op"]]["reason"]["line"]),
+      ("glitchtip-migrate", 'FATAL:  role "glitchtip" does not exist', 'FATAL:  role "glitchtip" does not exist'))
+check("failed update: cause in the output",
+      'Most likely cause (glitchtip-migrate): FATAL:  role "glitchtip" does not exist' in out, True)
+LOGS.clear()
 check("failed update: no cleanup", "20251231-030000_glitchtip-postgres.sql.gz" in dumps_of("glitchtip"), True)
 check("failed update: radar not started", radar.calls, [])
 U.wait_healthy = lambda project, services: (True, [], {})
@@ -476,6 +611,32 @@ check("rollback: marked in the history", (ops()[res["op"]]["rolled_back"], ops()
 check("rollback: radar started", ["start", "--no-block", U.RADAR_UNIT] in radar.calls, True)
 check("second rollback -> 3", quiet(U.cmd_rollback, res["op"])[0], 3)
 release_lock()
+
+# compose up fails -> cause from its output; the rollback fails too -> its cause
+D.pull_to = ("postgres:16-alpine", "sha256:newest")
+D.images["sha256:newest"] = {"Id": "sha256:newest", "Config": {"Env": ["PG_VERSION=16.17"]}}
+D.up_rc, D.up_out = 1, ["Container glitchtip-postgres Recreate",
+                        "Error response from daemon: Bind for 0.0.0.0:5432 failed: port is already allocated"]
+rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
+release_lock()
+res = json.loads(out.strip().splitlines()[-1][9:])
+check("compose up fails -> exit 4, cause from compose",
+      (rc, res["reason"]["source"], res["reason"]["line"]),
+      (4, "compose", "Error response from daemon: Bind for 0.0.0.0:5432 failed: port is already allocated"))
+D.up_rc, D.up_out = 0, []
+U.wait_healthy = lambda project, services: (False, ["glitchtip-postgres"], {})
+LOGS["glitchtip-postgres"] = ["FATAL:  database files are incompatible with server"]
+rc, out = quiet(U.cmd_rollback, res["op"])
+release_lock()
+rres = json.loads(out.strip().splitlines()[-1][9:])
+check("failed rollback -> exit 4 with its cause",
+      (rc, rres["status"], rres["reason"]["line"]), (4, "failed", "FATAL:  database files are incompatible with server"))
+check("failed rollback: cause in the history",
+      (ops()[res["op"]]["rollback_status"], ops()[res["op"]]["rollback_reason"]["container"],
+       ops()[res["op"]]["reason"]["source"]),
+      ("failed", "glitchtip-postgres", "compose"))
+LOGS.clear()
+U.wait_healthy = lambda project, services: (True, [], {})
 
 # ------------------------------------------------------------ cleanup rules
 reset_fs()
@@ -588,6 +749,12 @@ check("backups: cleanup preview", (bk["cleanup"]["keep_dumps"], bk["cleanup"]["i
 check("backups: rollback image in use is not offered", [x["in_use"] for x in bk["images"]], [True])
 check("backups: history with versions, without paths",
       [(o["from_version"], o["to_version"], "workdir" in o, "new_id" in o) for o in bk["ops"]], [("16.3", "16.4", False, False)])
+U.record({"id": "20261006-030000-a-db", "ts": "x", "kind": "update", "container": "a-db", "project": "a",
+          "image": "postgres:16", "rollback": None, "dumps": [], "status": "failed",
+          "reason": {"container": "a-db", "state": "exited", "exit_code": 1, "oom": False, "source": "log",
+                     "line": "FATAL: x"}})
+bk = json.loads(quiet(U.cmd_backups)[1])
+check("backups: the cause of a failed update is in the history", bk["ops"][0]["reason"]["line"], "FATAL: x")
 with open(U.CONF, "w") as f:
     f.write("NONSENSE\n")
 os.chmod(U.CONF, 0o600)
@@ -632,6 +799,16 @@ check("health: one-shot job finished with 0", state("exited", policy="no"), (Tru
 check("health: exited with an error", state("exited", exit_code=1, policy="no"), (False, ["x"]))
 check("health: restart loop", state("restarting", restarts=3), (False, ["x"]))
 check("health: still starting -> timeout", state("running", "starting"), (False, ["x"]))
+
+# ------------------------------------------------- stream (real subprocess)
+U.subprocess = subprocess
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    rc = REAL_STREAM([sys.executable, "-u", "-c",
+                      "import sys; print('step 1'); print('Error: boom', file=sys.stderr); sys.exit(3)"])
+check("stream: exit code, output passed through, last lines kept",
+      (rc, "step 1\n" in out.getvalue(), "Error: boom\n" in out.getvalue(), U.STREAM_TAIL[-2:]),
+      (3, True, True, ["step 1", "Error: boom"]))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")

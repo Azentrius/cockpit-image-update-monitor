@@ -4,14 +4,16 @@
 
 Called by the plugin via cockpit.spawn with a FIXED set of commands only:
 
-  plan <container>              read-only: what an update would touch (JSON)
+  plan <container>              read-only: what an update would touch (JSON),
+                                including whether the size of the jump is unknown
   update <container> [--no-dump]
                                 1. dump every supported database container of
                                    the compose project (pg_dumpall / mariadb-dump)
                                 2. tag the running image as <repo>:rollback-<stamp>
                                 3. docker compose pull + up -d --no-deps for every
                                    service of the project that uses the same image
-                                4. wait until the new containers run (healthy)
+                                4. wait until the new containers run (healthy);
+                                   if they do not, name the most likely cause
                                 5. clean up this project by the rules (see cleanup)
                                 6. start the version radar in the background
   rollback <op-id>              point the tag back at the rollback image and
@@ -49,10 +51,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from diunlib import local_version  # noqa: E402
+from diunlib import local_version, tag_digits  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
@@ -105,11 +108,22 @@ def run(cmd, check=True, capture=True, timeout=600):
     return p.stdout if capture else ""
 
 
+STREAM_TAIL = []          # last lines of the last stream() call, for the failure reason
+
+
 def stream(cmd):
-    """Run a command, pass its output straight through to our stdout."""
+    """Run a command, pass its output through to our stdout line by line and
+    keep the last lines in STREAM_TAIL."""
     print("+ " + " ".join(cmd), flush=True)
-    p = subprocess.run(cmd, stdout=sys.stdout, stderr=subprocess.STDOUT)
-    return p.returncode
+    tail = deque(maxlen=50)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    for line in p.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        tail.append(line.rstrip("\n"))
+    rc = p.wait()
+    STREAM_TAIL[:] = list(tail)
+    return rc
 
 
 def docker_json(*args):
@@ -313,7 +327,8 @@ def make_plan(name):
     plan = {"container": name, "image": ref, "updatable": False, "reason": None,
             "project": None, "workdir": None, "services": [], "containers": [],
             "dbs": [], "free_bytes": None, "config_changed": False,
-            "pulled": False, "old_image": c["Image"]}
+            "pulled": False, "old_image": c["Image"],
+            "installed_version": None, "tag_digits": None, "jump_unknown": False}
 
     ctx = compose_ctx(c)
     if not ctx:
@@ -360,6 +375,13 @@ def make_plan(name):
 
     tagid = image_id(ref)
     plan["pulled"] = bool(tagid) and tagid != c["Image"]
+
+    # A tag that fixes no version number (latest, stable …) follows every
+    # release. If the running version is unknown too, nobody can tell how big
+    # the jump is: the plugin warns and asks for an extra confirmation.
+    plan["installed_version"] = version_of(ref, c["Image"])
+    plan["tag_digits"] = tag_digits(split_ref(ref)[1])
+    plan["jump_unknown"] = plan["installed_version"] is None and plan["tag_digits"] == 0
 
     for m in members:
         k = kind_of(m)
@@ -482,6 +504,87 @@ def show_logs(names):
         sys.stdout.flush()
 
 
+# ------------------------------------------------------ why it failed ----
+LOG_TAIL = 80            # log lines searched for the cause
+REASON_MAX = 300
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+# Stack frames and similar lines that never explain a failure by themselves.
+FRAME_RE = re.compile(r"^\s*(?:at\s|File \"|Traceback \(most recent call last\)|raise\s|During handling of the above"
+                      r"|The above exception|goroutine \d+|[\^~\[\]{}(),;\s]*$)")
+# A line that names an error: "Error: …", "TypeError: …",
+# "django.db.utils.ProgrammingError: …", "error: …", "panic: …", "FATAL:  …".
+HEAD_RE = re.compile(r"^\s*(?:[\w.]+\.)?[A-Za-z]*(?:Error|Exception)\b|^\s*(?:error(?:\[\w+\])?|panic|fatal error|fatal):"
+                     r"|\b(?:FATAL|PANIC|CRITICAL)\b")
+# Otherwise any line that mentions a problem.
+ANY_RE = re.compile(r"(?i)\b(?:error|fatal|failed|failure|exception|panic|denied|refused|cannot|could not"
+                    r"|unable to|not found|no such)\b")
+
+
+def reason_line(lines):
+    """The most telling line of a failed container's log: the last line that
+    names an error, with the next line when it ends in ":" ("Error: Invalid
+    environment variables:" + the first variable); otherwise the last line
+    that mentions a problem. Stack frames never count. None if nothing fits."""
+    clean = [ln for ln in (ANSI_RE.sub("", x).rstrip() for x in lines) if ln.strip()]
+    for pat in (HEAD_RE, ANY_RE):
+        for i in range(len(clean) - 1, -1, -1):
+            if FRAME_RE.match(clean[i]) or not pat.search(clean[i]):
+                continue
+            text = clean[i].strip()
+            if text.endswith(":") and i + 1 < len(clean) and not FRAME_RE.match(clean[i + 1]):
+                text += " " + clean[i + 1].strip()
+            return text[:REASON_MAX]
+    return None
+
+
+def container_logs(name, n=LOG_TAIL):
+    p = subprocess.run(["docker", "logs", "--tail", str(n), name], stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True, errors="replace", timeout=30)
+    return p.stdout.splitlines()
+
+
+def failure_reason(names, compose_rc=0):
+    """Most likely cause of a failed update or rollback, for @@RESULT and the
+    history: {"container", "state", "exit_code", "oom", "source", "line"}.
+    source is "log", "health" (last output of the health check) or "compose"
+    (a failed `docker compose up`, from its output); line is None when nothing
+    telling was found. None if there is no container to ask."""
+    if compose_rc:
+        return {"container": None, "state": None, "exit_code": compose_rc, "oom": False,
+                "source": "compose", "line": reason_line(STREAM_TAIL)}
+    first = None
+    for n in names:
+        try:
+            st = docker_json("inspect", "--type", "container", n)[0].get("State") or {}
+        except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
+            continue
+        health = st.get("Health") or {}
+        hs = health.get("Status")
+        r = {"container": n, "state": hs if hs in ("unhealthy", "starting") else st.get("Status"),
+             "exit_code": st.get("ExitCode"), "oom": bool(st.get("OOMKilled")), "source": None, "line": None}
+        probe = [ln.strip() for ln in (((health.get("Log") or [{}])[-1] or {}).get("Output") or "").splitlines()
+                 if ln.strip()]
+        if hs == "unhealthy" and probe:
+            r.update(source="health", line=probe[-1][:REASON_MAX])
+        else:
+            try:
+                line = reason_line(container_logs(n))
+            except (OSError, subprocess.SubprocessError):
+                line = None
+            if line:
+                r.update(source="log", line=line)
+        if r["line"]:
+            return r
+        first = first or r
+    return first
+
+
+def say_reason(reason):
+    if reason and reason.get("line"):
+        who = reason.get("container") or "docker compose"
+        say(f"Vermutliche Ursache ({who}): {reason['line']}", f"Most likely cause ({who}): {reason['line']}")
+
+
 # ------------------------------------------------------------ operations ----
 def record(entry):
     ensure_base()
@@ -596,10 +699,12 @@ def cmd_update(name, do_dump=True):
     ok, failed, _states = (False, [], {}) if rc != 0 else wait_healthy(project, services)
     if rc != 0 or not ok:
         show_logs(failed or plan["containers"])
+        op["reason"] = failure_reason(failed or plan["containers"], compose_rc=rc)
         op["status"] = "failed"
         record(op)
+        say_reason(op["reason"])
         say("Update fehlgeschlagen. Zurückrollen ist möglich.", "Update failed. A rollback is possible.")
-        result(op=op_id, status="failed", rollback=rb, dumps=op["dumps"], **versions)
+        result(op=op_id, status="failed", rollback=rb, dumps=op["dumps"], reason=op["reason"], **versions)
         return 4
     op["status"] = "ok"
     record(op)
@@ -634,11 +739,15 @@ def cmd_rollback(op_id):
     rc = stream(compose_cmd(ctx) + ["up", "-d", "--no-deps", "--pull", "never", *op["services"]])
     ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["services"])
     status = "ok" if ok else "failed"
-    record({"id": op_id, "rolled_back": True, "rollback_ts": now_iso(), "rollback_status": status})
+    entry = {"id": op_id, "rolled_back": True, "rollback_ts": now_iso(), "rollback_status": status}
     if not ok:
         show_logs(failed or op["containers"])
+        entry["rollback_reason"] = failure_reason(failed or op["containers"], compose_rc=rc)
+    record(entry)
+    if not ok:
+        say_reason(entry["rollback_reason"])
         say("Rollback fehlgeschlagen.", "Rollback failed.")
-        result(op=op_id, status="failed")
+        result(op=op_id, status="failed", reason=entry["rollback_reason"])
         return 4
     say("Rollback erfolgreich.", "Rollback successful.")
     start_radar()

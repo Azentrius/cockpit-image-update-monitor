@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Update flow (plan -> confirm -> live log -> result / rollback) and the
-// backups tab (history, dumps, rollback images, delete), against the real
-// diun.js in jsdom with a scripted Cockpit stub.
+// Update flow (plan -> confirm -> live log -> result / rollback), the
+// warning for an unknown jump size, the most likely cause of a failure and
+// the backups tab (history, dumps, rollback images, delete), against the
+// real diun.js in jsdom with a scripted Cockpit stub.
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
@@ -26,6 +27,9 @@ const PLAN_GLITCH = { container: "glitchtip-postgres", image: "postgres:16-alpin
     workdir: "/opt/glitchtip", services: ["postgres"], containers: ["glitchtip-postgres"], pulled: true, config_changed: false,
     dbs: [{ name: "glitchtip-postgres", kind: "postgres", running: true, size: 1.2e8 },
           { name: "glitchtip-redis", kind: "unsupported", running: true, size: null }], free_bytes: 40 * 2 ** 30 };
+const PLAN_JUMP = { ...PLAN_OLLAMA, config_changed: false, installed_version: null, tag_digits: 0, jump_unknown: true };
+const REASON = { container: "formbricks-app", state: "restarting", exit_code: 1, oom: false, source: "log",
+    line: "Error: Invalid environment variables: - AUTHZED_ENABLED: Formbricks v6 requires AUTHZED_ENABLED=true" };
 const BACKUPS = {
     dir: "/var/backups/image-updates", free_bytes: 40 * 2 ** 30, dump_bytes: 3 * 2 ** 20,
     dumps: [{ path: "glitchtip/20261012-031500_glitchtip-postgres.sql.gz", project: "glitchtip",
@@ -36,9 +40,21 @@ const BACKUPS = {
             image: "postgres:16-alpine", services: ["postgres"], rollback: "postgres:rollback-20261012-031500",
             dumps: ["glitchtip/20261012-031500_glitchtip-postgres.sql.gz"], status: "ok", can_rollback: true },
           { id: "20261011-120000-ollama", ts: "2026-10-11T10:00:00Z", kind: "update", container: "ollama",
-            image: "ollama/ollama:latest", services: ["ollama"], rollback: null, dumps: [], status: "nochange", can_rollback: false }],
+            image: "ollama/ollama:latest", services: ["ollama"], rollback: null, dumps: [], status: "nochange", can_rollback: false },
+          { id: "20261012-232502-formbricks-app", ts: "2026-10-10T23:25:02Z", kind: "update", container: "formbricks-app",
+            image: "ghcr.io/formbricks/formbricks:latest", services: ["formbricks"], rollback: "x", dumps: [], status: "failed",
+            can_rollback: false, rolled_back: true, rollback_status: "ok", reason: REASON },
+          { id: "20261009-120000-x", ts: "2026-10-09T10:00:00Z", kind: "update", container: "x", image: "x:latest",
+            services: ["x"], rollback: "x", dumps: [], status: "failed", can_rollback: false,
+            reason: { container: "x", state: "exited", exit_code: 137, oom: true, source: null, line: null } },
+          { id: "20261008-120000-y", ts: "2026-10-08T10:00:00Z", kind: "update", container: "y", image: "y:latest",
+            services: ["y"], rollback: "y", dumps: [], status: "ok", can_rollback: false, rolled_back: true,
+            rollback_status: "failed",
+            rollback_reason: { container: "y", state: "unhealthy", exit_code: 0, oom: false, source: "health",
+                               line: "curl: (7) Failed to connect to localhost port 8000" } }],
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const kvRows = (el) => [...el.querySelectorAll(".dm-kv li")].map((li) => [...li.children].map((x) => x.textContent).join(": "));
 
 function boot(language, script) {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
@@ -101,6 +117,8 @@ const BASE_SCRIPT = {
     console.log("body  :", body);
     assert(b.d.getElementById("dm-dump-check").checked);
     assert(body.includes("Compose-Datei wurde seit dem Start"));
+    assert(!b.d.getElementById("dm-jump-check") && !body.includes("Installierte Version"),
+           "an older plan without version fields: no warning, no row");
     b.d.getElementById("dm-dialog-confirm").click();
     await sleep(60);
     const up = b.last("update");
@@ -183,9 +201,85 @@ const BASE_SCRIPT = {
     await sleep(60);
     assert.strictEqual(JSON.stringify(g.last("rollback").cmd.slice(1)), JSON.stringify(["rollback", "20261012-031500-glitchtip-postgres"]));
     console.log("result:", g.d.getElementById("dm-dialog-result").textContent);
+    const causes = [...g.d.querySelectorAll("#dm-ops .dm-op-reason")].map((x) => x.textContent);
+    console.log("causes:", causes);
+    assert.deepStrictEqual(causes, ["formbricks-app: " + REASON.line, "x: Wegen Speichermangels beendet.",
+                                    "y: Health-Check: curl: (7) Failed to connect to localhost port 8000"]);
+    assert.strictEqual(g.d.querySelector("#dm-ops .dm-op-reason").title, "formbricks-app: " + REASON.line);
+
+    // 7. Unknown jump size: the warning comes first, Update waits for the tick box
+    const j = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_JUMP) },
+                                           "diun-update.py update": runOk });
+    await sleep(80);
+    j.d.querySelector('button[data-update="ollama"]').click();
+    await sleep(40);
+    const jbody = j.d.getElementById("dm-dialog-body");
+    console.log("\njump  :", jbody.textContent.replace(/\s+/g, " ").slice(0, 150), "…");
+    assert(jbody.firstElementChild.classList.contains("dm-callout-warn"), "warning first");
+    assert(jbody.firstElementChild.textContent.startsWith("Die installierte Version ist unbekannt, und der Tag latest folgt"));
+    assert(kvRows(jbody).includes("Installierte Version: unbekannt"));
+    const jc = j.d.getElementById("dm-dialog-confirm");
+    const tick = j.d.getElementById("dm-jump-check");
+    const toggle = (on) => { tick.checked = on; tick.dispatchEvent(new j.w.Event("change")); };
+    assert(jc.disabled && !tick.checked, "Update waits for the tick box");
+    toggle(true);
+    assert(!jc.disabled && jc.textContent.trim() === "Update");
+    toggle(false);
+    assert(jc.disabled, "untick: disabled again");
+    toggle(true);
+    jc.click();
+    await sleep(60);
+    assert.strictEqual(j.last("update").cmd[2], "ollama");
+    console.log("jump  : confirmed after the tick box ->", JSON.stringify(j.last("update").cmd.slice(1)));
+    const kn = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
+        { ...PLAN_OLLAMA, installed_version: "0.30.11", tag_digits: 0, jump_unknown: false }) } });
+    await sleep(80);
+    kn.d.querySelector('button[data-update="ollama"]').click();
+    await sleep(40);
+    assert(!kn.d.getElementById("dm-jump-check") && !kn.d.getElementById("dm-dialog-confirm").disabled);
+    assert(kvRows(kn.d.getElementById("dm-dialog-body")).includes("Installierte Version: 0.30.11"));
+
+    // 8. Failed update: the most likely cause above the log, the rollback next to it
+    const k = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_GLITCH) },
+        "diun-update.py update": { chunks: ["…\n", "@@RESULT " + JSON.stringify(
+            { op: "20261012-232502-formbricks-app", status: "failed", reason: REASON }) + "\n"], fail: { exit_status: 4 } },
+        "diun-update.py rollback": { chunks: ["Rollback …\n", '@@RESULT {"op":"20261012-232502-formbricks-app","status":"ok"}\n'] } });
+    await sleep(80);
+    k.d.querySelector('button[data-update="glitchtip-postgres"]').click();
+    await sleep(40);
+    const box = k.d.getElementById("dm-dialog-reason");
+    assert(box.hidden, "no cause before the run");
+    k.d.getElementById("dm-dialog-confirm").click();
+    await sleep(60);
+    console.log("\ncause :", box.textContent.replace(/\s+/g, " ").trim());
+    assert(!box.hidden && box.classList.contains("az-alert--danger"));
+    assert.strictEqual(box.querySelector(".az-alert__title").textContent, "Vermutliche Ursache (formbricks-app)");
+    assert.strictEqual(box.querySelector(".dm-reason-line").textContent, REASON.line);
+    assert(box.compareDocumentPosition(k.d.getElementById("dm-dialog-log")) & k.w.Node.DOCUMENT_POSITION_FOLLOWING,
+           "the cause stands above the log");
+    assert(!k.d.getElementById("dm-dialog-extra").hidden, "rollback offered");
+    k.d.getElementById("dm-dialog-extra").click();
+    await sleep(60);
+    assert(box.hidden, "a new run hides the old cause");
+    assert.strictEqual(k.d.getElementById("dm-dialog-result").textContent, "Rollback erfolgreich.");
+    // a failed rollback names its own cause; without a log line the state speaks
+    const m = boot("de", { ...BASE_SCRIPT,
+        "diun-update.py rollback": { chunks: ["…\n", "@@RESULT " + JSON.stringify({ op: "x", status: "failed",
+            reason: { container: "glitchtip-postgres", state: "starting", exit_code: 0, oom: false, source: null, line: null } }) + "\n"],
+            fail: { exit_status: 4 } } });
+    await sleep(80);
+    m.d.getElementById("dm-tab-btn-backups").click();
+    await sleep(40);
+    m.d.querySelector('#dm-ops button[data-op="0"]').click();
+    m.d.getElementById("dm-dialog-confirm").click();
+    await sleep(60);
+    console.log("rollback cause:", m.d.getElementById("dm-dialog-reason").textContent.replace(/\s+/g, " ").trim());
+    assert.strictEqual(m.d.querySelector("#dm-dialog-reason .dm-reason-line").textContent,
+                       "In der Wartezeit nicht bereit geworden; im Log steht keine Fehlerzeile.");
 
     // 6. English: no German left in rows, dialog or backups tab
-    const h = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_GLITCH) } });
+    const h = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
+        { ...PLAN_GLITCH, installed_version: null, tag_digits: 0, jump_unknown: true }) } });
     await sleep(80);
     h.d.querySelector('button[data-update="glitchtip-postgres"]').click();
     await sleep(40);
@@ -194,7 +288,9 @@ const BASE_SCRIPT = {
     const all = h.d.documentElement.outerHTML;
     const german = ["Aktualisieren", "Lädt", "Übersicht", "Installierte", "Ausrollen", "ausstehend", "Erledigt", "Zurückrollen",
                     "Löschen", "Datenbank", "Betroffene", "Rollback-Kopie", "Erstellt", "Größe", "Zeitpunkt", "Ergebnis",
-                    "erfolgreich", "keine Änderung", "in Benutzung", "Projekt", "Datei", "nur manuell", "Abbrechen"];
+                    "erfolgreich", "keine Änderung", "in Benutzung", "Projekt", "Datei", "nur manuell", "Abbrechen",
+                    "unbekannt", "Hauptversion", "Vermutliche", "Ursache", "Speichermangel", "Wartezeit"];
+    assert(all.includes("The installed version is unknown and the tag 16-alpine follows every new release"));
     const found = german.filter((w) => all.includes(w));
     console.log("\nEN German leftovers:", found.length ? found : "none");
     assert.deepStrictEqual(found, []);
