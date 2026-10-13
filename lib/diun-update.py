@@ -567,6 +567,7 @@ def wait_healthy(project, services):
     say(f"Warte auf {', '.join(names)} (max. {HEALTH_TIMEOUT} s) …",
         f"Waiting for {', '.join(names)} (max {HEALTH_TIMEOUT} s) …")
     last_report = 0
+    restarting = set()      # containers seen in the state "restarting" before
     while True:
         states, bad, pending = {}, [], []
         for n in names:
@@ -578,8 +579,15 @@ def wait_healthy(project, services):
             policy = ((info.get("HostConfig") or {}).get("RestartPolicy") or {}).get("Name") or "no"
             if status == "exited" and st.get("ExitCode") == 0 and policy in ("no", "on-failure"):
                 continue        # one-shot job (e.g. migrations) finished cleanly
+            # "restarting": the container exited and waits for its next start.
+            # Docker counts the restart only when it happens, so RestartCount
+            # can still be 0: seen restarting a second time, it is a restart
+            # loop. A single crash that recovers does not count.
+            again = status == "restarting" and n in restarting
+            if status == "restarting":
+                restarting.add(n)
             if status in ("exited", "dead") or health == "unhealthy" or (
-                    status == "restarting" and st.get("RestartCount", 0) > 0):
+                    status == "restarting" and (st.get("RestartCount", 0) > 0 or again)):
                 bad.append(n)
             elif health:
                 if health != "healthy":
