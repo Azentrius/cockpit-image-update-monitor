@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.0 – 2026-10-13
+## 0.10.0 – 2026-10-14
 
 Stage 1.2, third part: floating tags resolved. The page says which version `latest` points to, and the
 update says what it brings.
@@ -17,9 +17,14 @@ update says what it brings.
   what the tag points to now. The dialog shows it (“Brings 6.0.2 Major”). A new major version gets a
   warning, and *Update* waits for a tick box (“I have checked the release notes for 6.0.2”). With an
   unknown installed version the existing warning names the target as well.
+- **Only versions that count alike are compared.** The column and the plan use what the tag points to
+  only when the radar found the installed version among the image's tags. `pgvector/pgvector:pg17`
+  runs PostgreSQL 17.10, but its tags count pgvector releases (`pg17` = `0.8.7-pg17-bookworm`): no
+  “pg17 = 0.8.7” and no false “17.10 → 0.8.7 Major” warning.
 - **Tests:** the radar with Docker Hub and registry fakes (tag digest, version of the tag, reuse,
-  deeper first lookup, lookup errors), the plan (target from the pulled image or `tag_now`, jump
-  sizes), the *Configured* column and the dialog (target row, major warning and tick box).
+  deeper first lookup, lookup errors), the plan (target from the pulled image or `tag_now`, a tag in
+  another numbering, jump sizes), the *Configured* column and the dialog (target row, major warning
+  and tick box).
 
 ## 0.9.0 – 2026-10-13
 

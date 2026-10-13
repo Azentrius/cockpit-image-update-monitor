@@ -369,14 +369,36 @@ check("plan: no tag_now in the radar -> target unknown", (p["target_version"], p
 with open(U.VERSIONS, "w") as f:
     json.dump({"images": [{"image": "ghcr.io/formbricks/formbricks", "tag": "latest",
                            "installed": {"sha256:fb": {"version": "5.0.2", "src": "digest"}},
+                           "versions": {"5.0.2": {"major": "6.0.2", "status": "major"}},
                            "tag_now": {"digest": "sha256:t602", "version": "6.0.2", "tag": "6.0.2"}}]}, f)
 p = plan("formbricks-app")
 check("plan: latest points to 6.0.2 now -> a major jump", (p["target_version"], p["jump"]), ("6.0.2", "major"))
 D.images["sha256:fb"]["RepoDigests"] = ["ghcr.io/formbricks/formbricks@sha256:t602"]
 p = plan("formbricks-app")
 check("plan: latest still points to the running build -> same", (p["target_version"], p["jump"]), ("5.0.2", "same"))
-os.unlink(U.VERSIONS)
 del D.containers["formbricks-app"]
+# pgvector:pg17 runs PostgreSQL 17.10 (PG_VERSION) while its tags count
+# pgvector releases: pg17 = 0.8.7-pg17-bookworm is no jump from 17.10.
+PGV_ENV = ["PG_MAJOR=17", "PG_VERSION=17.10"]
+D.images["sha256:pgv"] = {"Id": "sha256:pgv", "Config": {"Env": PGV_ENV}}
+D.add(ctn("formbricks-db", "pgvector/pgvector:pg17", "sha256:pgv", project="glitchtip", service="db",
+          cmd=["postgres"], env=PGV_ENV))
+with open(U.VERSIONS, "w") as f:
+    json.dump({"images": [{"image": "pgvector/pgvector", "tag": "pg17",
+                           "installed": {"sha256:pgv": {"version": "17.10", "src": "env:PG_VERSION"}},
+                           "versions": {"17.10": {"status": "unknown"}},
+                           "tag_now": {"digest": "sha256:t087", "version": "0.8.7", "tag": "0.8.7-pg17-bookworm"}}]}, f)
+p = plan("formbricks-db")
+check("plan: the tag points to a version in another numbering -> no target, no jump",
+      (p["installed_version"], p["target_version"], p["jump"], p["jump_unknown"]), ("17.10", None, None, False))
+check("same series: only a version the radar found among the tags",
+      [U.same_series(r, "5.0.2") for r in ({"versions": {"5.0.2": {"status": "minor"}}},
+                                            {"versions": {"5.0.2": {"status": "current"}}},
+                                            {"versions": {"5.0.2": {"status": "unknown"}}},
+                                            {"versions": {}}, {}, None)],
+      [True, True, False, False, False, False])
+os.unlink(U.VERSIONS)
+del D.containers["formbricks-db"]
 
 # ------------------------------------------- what else an update touches
 fresh_docker()
