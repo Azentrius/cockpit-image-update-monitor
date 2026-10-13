@@ -57,7 +57,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -75,6 +74,10 @@ HUB = "https://hub.docker.com/v2/repositories/"
 HUB_PAGES = 10             # x 100 tags, newest first
 REGISTRY_CANDIDATES = 20   # manifests checked per image outside Docker Hub
 REGISTRY_CANDIDATES_DEEP = 100   # the first lookup of an installed image goes further back
+# Docker's reference grammar: path components and tag names. Anything else
+# never ends up in a Docker Hub URL.
+HUB_PATH_RE = re.compile(r"^[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?:/[a-z0-9]+(?:[._-]+[a-z0-9]+)*)+$")
+TAG_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 RETRY_MISS = timedelta(days=7)
 LEVELS = ("patch", "minor", "major")
 ORDER = {"major": 0, "minor": 1, "patch": 2, "current": 3, "unknown": 4, "error": 5}
@@ -198,23 +201,32 @@ def registry_match(qref, digest, tags, limit=REGISTRY_CANDIDATES):
     return None
 
 
+def hub_path(repo):
+    """Repository path on Docker Hub ('library/postgres', 'ollama/ollama'),
+    or None for other registries and names that do not follow Docker's
+    reference grammar. The registry host is compared as a whole."""
+    host, _, path = qualify(repo).partition("/")
+    return path if host == "docker.io" and HUB_PATH_RE.match(path) else None
+
+
 def match_digest(repo, digest, created, tags, limit=REGISTRY_CANDIDATES):
-    q = qualify(repo)
-    if q.startswith("docker.io/"):
-        return hub_match(q[len("docker.io/"):], digest, created)
-    return registry_match(q, digest, tags, limit)
+    path = hub_path(repo)
+    if path:
+        return hub_match(path, digest, created)
+    return registry_match(qualify(repo), digest, tags, limit)
 
 
 def tag_digest(repo, tag):
     """Registry digest a tag points to right now, without a pull: the Docker
     Hub API (no pull quota) or the manifest (skopeo inspect --raw)."""
-    q = qualify(repo)
-    if q.startswith("docker.io/"):
-        url = f"{HUB}{q[len('docker.io/'):]}/tags/{urllib.parse.quote(tag)}"
-        req = urllib.request.Request(url, headers={"User-Agent": "diun-radar"})
+    if not TAG_NAME_RE.match(tag):
+        raise ValueError(f"not a tag name: {tag!r}")
+    path = hub_path(repo)
+    if path:
+        req = urllib.request.Request(f"{HUB}{path}/tags/{tag}", headers={"User-Agent": "diun-radar"})
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.load(r).get("digest") or ""
-    raw = run(["skopeo", "inspect", "--raw", f"docker://{q}:{tag}"], binary=True)
+    raw = run(["skopeo", "inspect", "--raw", f"docker://{qualify(repo)}:{tag}"], binary=True)
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 

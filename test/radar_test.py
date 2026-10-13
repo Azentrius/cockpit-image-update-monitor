@@ -159,6 +159,16 @@ check("tag digest on Docker Hub: the API, no manifest",
 check("official images live under library/", (R.tag_digest("postgres", "16-alpine"), hub_urls[-1]),
       (D_OLLAMA, R.HUB + "library/postgres/tags/16-alpine"))
 R.urllib.request.urlopen = real_urlopen
+check("hub path: host compared as a whole, names checked",
+      [R.hub_path(x) for x in ("postgres", "ollama/ollama", "docker.io/sakowicz/actual-ai", "ghcr.io/a/b",
+                               "evil.example/docker.io/x", "docker.io/../x", "docker.io/a/b?c")],
+      ["library/postgres", "ollama/ollama", "sakowicz/actual-ai", None, None, None, None])
+try:
+    R.tag_digest("ollama/ollama", "latest/../../x")
+    bad_tag = "accepted"
+except ValueError:
+    bad_tag = "refused"
+check("a tag outside Docker's grammar never reaches a URL", bad_tag, "refused")
 
 # ---------------------------------------------------------------- analyse
 TAGS = {
