@@ -14,7 +14,7 @@ together.
 | `/var/lib/diun-radar/versions.json` | result of the version radar | root, 644 (StateDirectory) |
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
-| `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl` | root, 700 / 600 |
+| `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log` | root, 700 / 600 |
 | `/etc/image-updates.conf` | cleanup rules (optional, see below) | root, not writable by others |
 | `/opt/diun/` | Diun stack (`docker-compose.yml`, `diun.yml`), from `diun-deps.sh install diun` | root |
 | `/etc/systemd/system/diun-radar.{service,timer}` | radar every 6 h (`*-*-* 00/6:17:00`) | root |
@@ -36,6 +36,7 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `update <container> [--no-dump]` | action | text + last line `@@RESULT {…}` |
 | | `rollback <op-id>` | action | text + `@@RESULT {…}` |
 | | `backups` | read | one JSON object |
+| | `log <op-id>` | read | text: the kept output of the update, then `--- Rollback ---` and that of its rollback; exit 2 if none |
 | | `delete-dump <project>/<file>.sql.gz` | action | text |
 | | `delete-image <repo>:rollback-YYYYMMDD-HHMMSS` | action | text (`docker rmi`, without `-f`) |
 | | `cleanup` | action (also `diun-cleanup.service`) | text + `@@RESULT {…}` |
@@ -233,8 +234,15 @@ rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_sta
 - `reason` (since 0.8.0): on a failed update, the same object as in `@@RESULT`. A failed rollback adds
   `rollback_reason` with the line that marks it rolled back. The backups tab shows the cause under the
   result (the rollback's if it failed, otherwise the update's).
+- `new_digests` (since 0.9.0): the registry digests of the new image (`RepoDigests`, `sha256:…`), the
+  values Diun reports as `digest`. `[]` for images built or tagged locally.
+- **Output:** `update` and `rollback`, called through `main`, keep what they print in
+  `logs/<op-id>.log` and `logs/<op-id>.rollback.log` (600, written atomically, at most 512 KiB, without
+  `@@RESULT`). Only runs that reach the history keep output; an update stopped before any change does
+  not. The files stay with their history entry; nothing deletes them.
 
-`backups` returns the last 30 operations, with `can_rollback` added and without paths and image IDs.
+`backups` returns the last 30 operations, with `can_rollback`, `log` and `rollback_log` (whether output
+is kept) added and without paths and image IDs.
 On top come `dumps[]` (`path`, `project`, `container`, `size`, `mtime`), `images[]` (`ref`, `id`,
 `size`, `created`, `in_use`), `dump_bytes`, `free_bytes`, `dir` and `cleanup`:
 
@@ -305,10 +313,16 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 - **Dialog:** one `<dialog>` for everything (install, update, rollback, delete). Flow: `dlg.open` →
   `confirmAndRun` → `dlg.run` → `onDone`.
   - A plan that arrives after the dialog was closed is dropped (`planSeq`).
-  - `jump_unknown` in the plan: the warning comes first in the body, the confirm button stays
-    disabled until `#dm-jump-check` is ticked.
+  - `jump_unknown` in the plan: the warning comes first in the body. A build that failed before (see
+    below) adds its own warning with the cause. The confirm button stays disabled until every tick box
+    (`.dm-gate`: `#dm-jump-check`, `#dm-retry-check`) is set.
   - A `reason` in the result fills `#dm-dialog-reason` (`az-alert--danger`) above the log; every new
     run hides it again.
+- **Failed builds:** from the history, the newest update of each image counts; if it failed, its
+  `new_digests` mark the build. A row with Diun's `digest` among them gets a note under the status. The
+  history loads after the table, so the rows are drawn again when the marks change.
+- **History:** *Show output* (`angle-right`, “opens an entry”) on entries with `log` or `rollback_log`
+  runs `diun-update.py log` (`superuser: "try"`) and shows the text in the dialog's log box.
 - **Sorting:** update available → roll-out pending → new version → unknown → up to date.
 - **Run radar now:** spawns `diun-update.py radar` (`superuser: "require"`, no dialog) and keeps the
   button busy until it returns; `radar.running` from the check shows runs started elsewhere. The new
@@ -323,11 +337,11 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, hub/registry match with fakes, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), rollback, cleanup rules, `backups`, `radar`, waiting for health, `stream` |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, rollback, cleanup rules, `backups`, `radar`, waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
-| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, delete |
+| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, output button, a build that failed before (row note, second tick box), delete |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |

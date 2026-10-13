@@ -18,6 +18,8 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 6. start the version radar in the background
   rollback <op-id>              point the tag back at the rollback image and
                                 recreate the same services (data is NOT restored)
+  log <op-id>                   read-only: the kept output of that update (and
+                                of its rollback)
   backups                       read-only: dumps, rollback images, history and
                                 what the cleanup rules would delete (JSON)
   delete-dump <project/file>    delete one dump file
@@ -33,6 +35,7 @@ changed. Images built locally or pinned by digest are not updated.
 Everything the addon writes lives in /var/backups/image-updates (root only):
   dumps/<project>/<stamp>_<container>.sql.gz
   operations.jsonl              one JSON line per update / rollback
+  logs/<op-id>.log              output of the update (.rollback.log: of its rollback)
 
 The machine-readable result of update/rollback/cleanup is the last line:
   @@RESULT {"op": "...", "status": "ok|nochange|failed", ...}
@@ -60,6 +63,8 @@ from diunlib import local_version, tag_digits  # noqa: E402
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
 OPS = os.path.join(BASE, "operations.jsonl")
+LOGS = os.path.join(BASE, "logs")
+LOG_MAX = 512 * 1024      # characters kept of one operation's output
 LOCK = "/run/lock/diun-update.lock"
 CONF = "/etc/image-updates.conf"
 VERSIONS = "/var/lib/diun-radar/versions.json"
@@ -195,7 +200,7 @@ def lock():
 
 
 def ensure_base():
-    for d in (BASE, DUMPS):
+    for d in (BASE, DUMPS, LOGS):
         os.makedirs(d, mode=0o700, exist_ok=True)
         os.chmod(d, 0o700)
 
@@ -500,7 +505,12 @@ def wait_healthy(project, services):
 def show_logs(names):
     for n in names:
         say(f"--- letzte Log-Zeilen von {n} ---", f"--- last log lines of {n} ---")
-        subprocess.run(["docker", "logs", "--tail", "30", n], stdout=sys.stdout, stderr=subprocess.STDOUT)
+        try:
+            lines = container_logs(n, 30)
+        except (OSError, subprocess.SubprocessError):
+            lines = []
+        for ln in lines:
+            print(ln)
         sys.stdout.flush()
 
 
@@ -586,11 +596,103 @@ def say_reason(reason):
 
 
 # ------------------------------------------------------------ operations ----
-def record(entry):
+_log_name = None         # logs/<name> to keep once the operation is recorded
+
+
+def record(entry, log=None):
+    """Append to operations.jsonl. log: the name under logs/ that keeps the
+    output of this run (see keep_output)."""
+    global _log_name
     ensure_base()
     fd = os.open(OPS, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    if log:
+        _log_name = log
+
+
+class Tee:
+    """sys.stdout during update and rollback: everything goes through to the
+    caller as before, and a copy (up to LOG_MAX characters) is kept."""
+    def __init__(self, real):
+        self.real, self.parts, self.size = real, [], 0
+
+    def write(self, s):
+        self.real.write(s)
+        if self.size < LOG_MAX:
+            self.parts.append(s)
+            self.size += len(s)
+        return len(s)
+
+    def flush(self):
+        self.real.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+
+def save_log(name, text):
+    """logs/<name>, root only, written atomically, without the @@RESULT line."""
+    ensure_base()
+    path = os.path.join(LOGS, name)
+    lines = [ln for ln in text.splitlines(True) if not ln.startswith("@@RESULT ")]
+    fd = os.open(path + ".part", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.writelines(lines)
+    os.replace(path + ".part", path)
+
+
+def keep_output(fn, *args, **kw):
+    """Run update or rollback and keep its output with the history:
+    logs/<op-id>.log and logs/<op-id>.rollback.log. An update that stops
+    before any change records nothing, so no output is kept either."""
+    global _log_name
+    tee = Tee(sys.stdout)
+    sys.stdout, _log_name = tee, None
+    try:
+        return fn(*args, **kw)
+    finally:
+        sys.stdout = tee.real
+        if _log_name:
+            text = "".join(tee.parts)
+            if tee.size >= LOG_MAX:
+                text += "\n[output cut at %d KiB]\n" % (LOG_MAX // 1024)
+            try:
+                save_log(_log_name, text)
+            except OSError:
+                pass
+            _log_name = None
+
+
+def cmd_log(op_id):
+    """The kept output of an operation: the update, then its rollback."""
+    if not OP_RE.match(op_id):
+        raise Abort(64, f"Ungültige Vorgangs-ID: {op_id}", f"Invalid operation id: {op_id}")
+    parts = []
+    for name, head in ((op_id + ".log", None),
+                       (op_id + ".rollback.log", "--- Rollback ---")):
+        try:
+            with open(os.path.join(LOGS, name), errors="replace") as f:
+                text = f.read()
+        except FileNotFoundError:
+            continue
+        if head:
+            parts.append(head + "\n")
+        parts.append(text if text.endswith("\n") else text + "\n")
+    if not parts:
+        raise Abort(2, "Für diesen Vorgang ist keine Ausgabe gespeichert.", "No output is kept for this operation.")
+    sys.stdout.write("".join(parts))
+    return 0
+
+
+def repo_digests(image_id):
+    """Registry digests of a local image (RepoDigests), the same values Diun
+    reports for a new build. [] for images built or tagged locally."""
+    try:
+        img = docker_json("image", "inspect", image_id)[0]
+    except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
+        return []
+    return sorted({d.split("@", 1)[1] for d in img.get("RepoDigests") or [] if "@" in d})
 
 
 def load_ops():
@@ -685,12 +787,13 @@ def cmd_update(name, do_dump=True):
     if new_id and all(v == new_id for v in old_ids.values()):
         run(["docker", "rmi", rb], check=False)
         op.update(status="nochange", rollback=None, new_id=new_id, to_version=op["from_version"])
-        record(op)
+        record(op, log=op_id + ".log")
         say("Kein neueres Image verfügbar – nichts geändert.", "No newer image available – nothing changed.")
         result(op=op_id, status="nochange", dumps=op["dumps"],
                from_version=op["from_version"], to_version=op["to_version"])
         return 0
     op["new_id"] = new_id
+    op["new_digests"] = repo_digests(new_id)
     op["to_version"] = version_of(ref, new_id)
     versions = {"from_version": op["from_version"], "to_version": op["to_version"]}
 
@@ -701,13 +804,13 @@ def cmd_update(name, do_dump=True):
         show_logs(failed or plan["containers"])
         op["reason"] = failure_reason(failed or plan["containers"], compose_rc=rc)
         op["status"] = "failed"
-        record(op)
+        record(op, log=op_id + ".log")
         say_reason(op["reason"])
         say("Update fehlgeschlagen. Zurückrollen ist möglich.", "Update failed. A rollback is possible.")
         result(op=op_id, status="failed", rollback=rb, dumps=op["dumps"], reason=op["reason"], **versions)
         return 4
     op["status"] = "ok"
-    record(op)
+    record(op, log=op_id + ".log")
     say("Update erfolgreich.", "Update successful.")
 
     # 5. + 6. Never let these turn a successful update into a failure.
@@ -743,7 +846,7 @@ def cmd_rollback(op_id):
     if not ok:
         show_logs(failed or op["containers"])
         entry["rollback_reason"] = failure_reason(failed or op["containers"], compose_rc=rc)
-    record(entry)
+    record(entry, log=op_id + ".rollback.log")
     if not ok:
         say_reason(entry["rollback_reason"])
         say("Rollback fehlgeschlagen.", "Rollback failed.")
@@ -810,6 +913,8 @@ def cmd_backups():
                              and not o.get("rolled_back") and norm_ref(o.get("rollback") or "") in rb_refs)
         for k in ("workdir", "files", "env_files", "old_id", "new_id"):
             o.pop(k, None)
+        o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))
+        o["rollback_log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".rollback.log"))
 
     # What the cleanup rules would delete right now (preview for the tab).
     cleanup = {"keep_dumps": None, "image_days": None, "file": None, "error": None,
@@ -1040,9 +1145,11 @@ def main(argv):
         print(json.dumps(plan, ensure_ascii=False))
         return 0
     if len(argv) in (2, 3) and argv[0] == "update" and (len(argv) == 2 or argv[2] == "--no-dump"):
-        return cmd_update(argv[1], do_dump=len(argv) == 2)
+        return keep_output(cmd_update, argv[1], do_dump=len(argv) == 2)
     if len(argv) == 2 and argv[0] == "rollback":
-        return cmd_rollback(argv[1])
+        return keep_output(cmd_rollback, argv[1])
+    if len(argv) == 2 and argv[0] == "log":
+        return cmd_log(argv[1])
     if argv == ["backups"]:
         return cmd_backups()
     if len(argv) == 2 and argv[0] == "delete-dump":

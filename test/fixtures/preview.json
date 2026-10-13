@@ -140,7 +140,9 @@
      "oom": false,
      "source": "log",
      "line": "Error: Invalid environment variables: - AUTHZED_ENABLED: Formbricks v6 requires AUTHZED_ENABLED=true; configure SpiceDB before starting the server."
-    }
+    },
+    "log": true,
+    "rollback_log": true
    },
    {
     "id": "20261012-031500-glitchtip-postgres",
@@ -162,7 +164,9 @@
     "status": "ok",
     "can_rollback": true,
     "from_version": "16.14",
-    "to_version": "16.15"
+    "to_version": "16.15",
+    "log": true,
+    "rollback_log": false
    },
    {
     "id": "20261011-120000-ollama",
@@ -180,7 +184,9 @@
     "rollback": null,
     "dumps": [],
     "status": "nochange",
-    "can_rollback": false
+    "can_rollback": false,
+    "log": false,
+    "rollback_log": false
    }
   ],
   "cleanup": {

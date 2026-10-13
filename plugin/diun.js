@@ -35,7 +35,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.8.0";
+    const VERSION = "0.9.0";
     const LIB = "/usr/local/lib/diun-radar/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -206,6 +206,14 @@
             "upd.reasonExit": "Stopped with exit code {code}; the log shows no error line.",
             "upd.reasonTimeout": "Not ready within the waiting time; the log shows no error line.",
             "upd.reasonNone": "The log shows no error line; see the output.",
+            "upd.failedBuild": "The update to exactly this build failed on {date}. Try again only if the cause is fixed, for example a setting in the compose file.",
+            "upd.retryConfirm": "Try this build again anyway.",
+            "row.failedBuild": "The update to this build failed on {date}.",
+            "btn.showLog": "Show output",
+            "log.title": "Output: {name}",
+            "log.desc": "{when} · {image}",
+            "log.loading": "Loading the output …",
+            "log.none": "No output is kept for this operation (updates before 0.9.0 kept none).",
             "rb.button": "Roll back",
             "rb.title": "Roll back {name}?",
             "rb.desc": "Points {image} back to {rb} and recreates {services}. Databases are not reset – if migrations cause trouble, restore the dump.",
@@ -429,6 +437,14 @@
             "upd.reasonExit": "Mit Exit-Code {code} beendet; im Log steht keine Fehlerzeile.",
             "upd.reasonTimeout": "In der Wartezeit nicht bereit geworden; im Log steht keine Fehlerzeile.",
             "upd.reasonNone": "Im Log steht keine Fehlerzeile; siehe Ausgabe.",
+            "upd.failedBuild": "Das Update auf genau diesen Build ist am {date} gescheitert. Versuchen Sie es nur erneut, wenn die Ursache behoben ist, etwa eine Einstellung in der Compose-Datei.",
+            "upd.retryConfirm": "Diesen Build trotzdem erneut versuchen.",
+            "row.failedBuild": "Das Update auf diesen Build ist am {date} gescheitert.",
+            "btn.showLog": "Ausgabe anzeigen",
+            "log.title": "Ausgabe: {name}",
+            "log.desc": "{when} · {image}",
+            "log.loading": "Lädt die Ausgabe …",
+            "log.none": "Für diesen Vorgang ist keine Ausgabe gespeichert (Updates vor 0.9.0 speicherten keine).",
             "rb.button": "Zurückrollen",
             "rb.title": "{name} zurückrollen?",
             "rb.desc": "Setzt {image} wieder auf {rb} und erstellt {services} neu. Datenbanken werden nicht zurückgesetzt – bei Migrationsproblemen den Dump einspielen.",
@@ -747,6 +763,42 @@
         return { html: `<span class="dm-chips">${chips.join("")}</span>${stale}`, news };
     }
 
+    // Failed builds from the history: image ref -> the newest update of that
+    // image, kept only if it failed. Its digests mark the same build when
+    // Diun reports it again (see sameFailedBuild).
+    let failedBuilds = new Map();
+    const rowFailed = new Map();        // container name -> failed update op
+    let lastRender = null;
+
+    function failedBuildsOf(ops) {
+        const map = new Map();
+        const seen = new Set();
+        (ops || []).forEach((o) => {     // newest first
+            if (o.kind !== "update" || !o.image || o.status === "running") return;
+            const tg = tagSplit(o.image);
+            const k = verKey(tg.repo, tg.tag);
+            if (seen.has(k)) return;
+            seen.add(k);
+            if (o.status === "failed") map.set(k, o);
+        });
+        return map;
+    }
+
+    function sameFailedBuild(ctn, ev) {
+        const fb = failedBuilds.get(verKey(ctn.image, ctn.tag));
+        return fb && ev && ev.digest && (fb.new_digests || []).indexOf(ev.digest) > -1 ? fb : null;
+    }
+
+    // The history arrives after the table; draw the rows again if it changes
+    // which builds failed.
+    function refreshFailedBuilds() {
+        const next = failedBuildsOf(backups && backups.ops);
+        const sig = (m) => JSON.stringify([...m.entries()].map(([k, o]) => [k, o.id]));
+        if (sig(next) === sig(failedBuilds)) return;
+        failedBuilds = next;
+        if (lastRender) render(...lastRender);
+    }
+
     function rowFor(ctn, eventsMap, versionsMap, radarOk) {
         const ev = eventsMap.get(repoKey(ctn.image));
         const acknowledged = ev && dismissed[evKey(ev)];
@@ -766,6 +818,10 @@
         if ((kind === "ok" || kind === "unknown") && ver.news) kind = "newver";
         // Without a known installed version "up to date" would be a guess.
         if (kind === "ok" && radarOk && rec && !inst.v) kind = "unknown";
+        const failedBuild = kind === "update" ? sameFailedBuild(ctn, ev) : null;
+        rowFailed.set(ctn.name, failedBuild);
+        const note = failedBuild
+            ? `<span class="dm-row-note">${esc(t("row.failedBuild", { date: fmtDate(new Date(failedBuild.ts)) }))}</span>` : "";
 
         const imgCell = ev && ev.hub_link
             ? `<a href="${esc(ev.hub_link)}" target="_blank" rel="noopener">${esc(ctn.image)}</a>`
@@ -791,7 +847,7 @@
             `<td data-label="${L("col.configured")}"><span class="dm-cell dm-ver dm-cfg" title="${L("cfg.tip")}">${esc(ctn.tag)}</span></td>` +
             `<td class="az-nowrap" data-label="${L("col.installed")}"><span class="dm-cell">${installedCell(ctn, rec, inst)}</span></td>` +
             `<td data-label="${L("col.new")}"><span class="dm-cell">${ver.html}</span></td>` +
-            `<td data-label="${L("col.status")}"><span class="dm-cell">${badge(kind)}</span></td>` +
+            `<td data-label="${L("col.status")}"><span class="dm-cell">${badge(kind)}${note}</span></td>` +
             `<td class="az-cell-actions"><span class="dm-cell">${actions.join("")}</span></td>`
         };
     }
@@ -806,6 +862,8 @@
     }
 
     function render(containers, eventsMap, radarDoc) {
+        lastRender = [containers, eventsMap, radarDoc];
+        rowFailed.clear();
         const rows = $("dm-rows");
         rows.innerHTML = "";
 
@@ -1142,7 +1200,7 @@
     }
 
     // --- Update ------------------------------------------------------------
-    function planBody(plan) {
+    function planBody(plan, failed) {
         const li = (label, value) =>
             `<li><span class="dm-kv-k">${esc(label)}</span><span class="dm-kv-v">${value}</span></li>`;
         const code = (s) => `<code>${esc(s)}</code>`;
@@ -1156,11 +1214,18 @@
         });
         const dumpable = dbs.some((d) => d.kind === "postgres" || d.kind === "mysql");
         let html = "";
-        // Unknown version + a tag that follows every release: say so first,
-        // the confirm button waits for the tick box (see startUpdate).
+        // Unknown version + a tag that follows every release: say so first;
+        // the confirm button waits for every tick box (.dm-gate, see startUpdate).
         if (plan.jump_unknown) {
             html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.jumpUnknown", { tag: tagSplit(plan.image).tag }))}</p>` +
-                    `<label class="dm-check"><input type="checkbox" id="dm-jump-check"> ${esc(t("upd.jumpConfirm"))}</label>`;
+                    `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-jump-check"> ${esc(t("upd.jumpConfirm"))}</label>`;
+        }
+        // The registry offers exactly the build whose update failed before.
+        if (failed) {
+            const cause = failed.reason ? reasonText(failed.reason) : "";
+            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.failedBuild", { date: fmtDate(new Date(failed.ts)) }))}` +
+                    (cause ? `<span class="dm-reason-line dm-callout-line">${esc(cause)}</span>` : "") + `</p>` +
+                    `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-retry-check"> ${esc(t("upd.retryConfirm"))}</label>`;
         }
         html += `<ul class="dm-kv">` +
             li(t("upd.containers"), (plan.containers || []).map(code).join(" ")) +
@@ -1201,11 +1266,12 @@
                 }
                 const desc = t(kind === "pulled" || plan.pulled ? "upd.descPulled" : "upd.desc", { image: plan.image });
                 const label = t(kind === "pulled" ? "btn.rollout" : "btn.update");
+                const failed = rowFailed.get(name) || null;
                 confirmAndRun({
-                    title, desc, body: planBody(plan),
+                    title, desc, body: planBody(plan, failed),
                     confirm: {
                         label,
-                        disabled: !!plan.jump_unknown,
+                        disabled: !!plan.jump_unknown || !!failed,
                         argv: () => {
                             const box = $("dm-dump-check");
                             const dump = box && box.checked && !box.disabled;
@@ -1214,11 +1280,9 @@
                     },
                     onDone: (o) => updateOutcome(o, name),
                 });
-                const jump = $("dm-jump-check");
-                if (jump) {
-                    jump.addEventListener("change", () =>
-                        dlg.btn("dm-dialog-confirm", label, { visible: true, disabled: !jump.checked }));
-                }
+                const gates = [...$("dm-dialog-body").querySelectorAll(".dm-gate")];
+                gates.forEach((g) => g.addEventListener("change", () =>
+                    dlg.btn("dm-dialog-confirm", label, { visible: true, disabled: !gates.every((x) => x.checked) })));
             })
             .catch((ex) => {
                 if (stale()) return;
@@ -1291,7 +1355,7 @@
 
     function loadBackups() {
         return Promise.resolve().then(() => spawnHelper([UPDATE_CMD, "backups"], "try"))
-            .then((out) => { backups = JSON.parse(out); backupsError = ""; renderBackups(); })
+            .then((out) => { backups = JSON.parse(out); backupsError = ""; renderBackups(); refreshFailedBuilds(); })
             .catch((ex) => {
                 backups = null;
                 backupsError = isNoAdmin(ex) ? t("bk.needAdmin")
@@ -1311,6 +1375,29 @@
                       running: ["warning", "exclamation-triangle", "res.running"] };
         const [cls, ic, key] = map[o.status] || map.running;
         return label(cls, ic, t(key));
+    }
+
+    // The kept output of an update and its rollback (diun-update.py log).
+    function showLog(op) {
+        const ticket = ++planSeq;
+        const stale = () => ticket !== planSeq || !$("dm-dialog").hasAttribute("open");
+        dlg.open({ title: t("log.title", { name: op.container || "" }),
+                   desc: t("log.desc", { when: fmtDate(new Date(op.ts)), image: op.image || "" }) });
+        dlg.result(t("log.loading"), null);
+        Promise.resolve().then(() => spawnHelper([UPDATE_CMD, "log", op.id], "try"))
+            .then((out) => {
+                if (stale()) return;
+                const log = $("dm-dialog-log");
+                log.textContent = out;
+                log.hidden = false;
+                dlg.result("", null);
+            })
+            .catch((ex) => {
+                if (stale()) return;
+                ex = ex || {};
+                dlg.result(isNoAdmin(ex) ? t("dialog.noAdmin") : ex.exit_status === 2 ? t("log.none")
+                    : t("dialog.error", { msg: ex.message || ex.problem || ex }), false);
+            });
     }
 
     // Under the result: why the rollback or, otherwise, the update failed.
@@ -1416,11 +1503,15 @@
             `<td data-label="${L("col.dumps")}"><span class="dm-cell">${(o.dumps || []).length}</span></td>` +
             `<td class="az-cell-actions"><span class="dm-cell">` +
               (o.can_rollback ? textButton("history", t("rb.button"), `data-op="${i}"`) : "") +
+              (o.log || o.rollback_log ? iconButton("angle-right", t("btn.showLog"), `data-log="${i}"`) : "") +
             `</span></td></tr>`).join("");
         $("dm-ops-empty").hidden = b.ops.length > 0;
         $("dm-ops-table").hidden = b.ops.length === 0;
         ops.querySelectorAll("button[data-op]").forEach((btn) => {
             btn.addEventListener("click", () => startRollback(b.ops[Number(btn.dataset.op)]));
+        });
+        ops.querySelectorAll("button[data-log]").forEach((btn) => {
+            btn.addEventListener("click", () => showLog(b.ops[Number(btn.dataset.log)]));
         });
 
         const dumps = $("dm-dumps");

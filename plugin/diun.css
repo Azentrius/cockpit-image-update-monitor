@@ -160,6 +160,9 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
 .dm-dialog-result:empty { display: none; }
 /* Most likely cause of a failed update (az-alert--danger), above the log */
 .dm-reason-line { font-family: var(--az-font-code); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.dm-callout-line { display: block; margin-block-start: var(--space-xs); }
+/* Overview: the update to this very build failed before */
+.dm-row-note { display: block; max-inline-size: 16rem; margin-block-start: 2px; color: var(--text-subtle); font-size: 12px; }
 .dm-dialog-result.is-ok { color: var(--status-success); }
 .dm-dialog-result.is-error { color: var(--danger-text); }
 

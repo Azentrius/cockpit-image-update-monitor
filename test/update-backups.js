@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Update flow (plan -> confirm -> live log -> result / rollback), the
-// warning for an unknown jump size, the most likely cause of a failure and
-// the backups tab (history, dumps, rollback images, delete), against the
-// real diun.js in jsdom with a scripted Cockpit stub.
+// warning for an unknown jump size, the most likely cause of a failure, a
+// build that failed before, the kept output and the backups tab (history,
+// dumps, rollback images, delete), against the real diun.js in jsdom with a
+// scripted Cockpit stub.
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
@@ -277,6 +278,70 @@ const BASE_SCRIPT = {
     assert.strictEqual(m.d.querySelector("#dm-dialog-reason .dm-reason-line").textContent,
                        "In der Wartezeit nicht bereit geworden; im Log steht keine Fehlerzeile.");
 
+    // 9. The kept output: a button per history entry, the dialog shows it
+    const withLog = { ...BACKUPS, ops: BACKUPS.ops.map((o, i) => ({ ...o, log: i === 0, rollback_log: false })) };
+    const lg = boot("de", { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify(withLog) },
+        "diun-update.py log": (cmd) => cmd[2] === withLog.ops[0].id
+            ? { out: "Updating postgres:16-alpine …\n--- Rollback ---\nRolling …\n" } : { fail: { exit_status: 2 } } });
+    await sleep(80);
+    lg.d.getElementById("dm-tab-btn-backups").click();
+    await sleep(40);
+    const logBtns = [...lg.d.querySelectorAll("#dm-ops button[data-log]")];
+    assert.strictEqual(logBtns.length, 1, "a button only where output is kept");
+    assert.strictEqual(logBtns[0].getAttribute("aria-label"), "Ausgabe anzeigen");
+    logBtns[0].click();
+    await sleep(40);
+    console.log("\nlog   :", lg.d.getElementById("dm-dialog-title").textContent, "|",
+                JSON.stringify(lg.d.getElementById("dm-dialog-log").textContent));
+    assert.strictEqual(JSON.stringify(lg.last("log").cmd.slice(1)), JSON.stringify(["log", withLog.ops[0].id]));
+    assert.strictEqual(lg.last("log").opts.superuser, "try");
+    assert.strictEqual(lg.d.getElementById("dm-dialog-title").textContent, "Ausgabe: glitchtip-postgres");
+    assert(!lg.d.getElementById("dm-dialog-log").hidden &&
+           lg.d.getElementById("dm-dialog-log").textContent.includes("--- Rollback ---"));
+    assert(lg.d.getElementById("dm-dialog-confirm").hidden, "nothing to confirm");
+
+    // 10. The registry offers again exactly the build whose update failed
+    const OLLAMA_DIGEST = "sha256:adca95a12c2b386a8f9a995e7fa0600e187e3323b5e5522f5a6c3b1ec73eff99";
+    const failedOp = (digest, extra) => ({ id: "20261012-040000-ollama", ts: "2026-10-12T02:00:00Z", kind: "update",
+        container: "ollama", image: "ollama/ollama:latest", services: ["ollama"], rollback: "x", dumps: [],
+        status: "failed", can_rollback: false, rolled_back: true, rollback_status: "ok", new_digests: [digest],
+        reason: REASON, ...extra });
+    const withFailed = (ops) => ({ ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops }) },
+                                   "diun-update.py plan": { out: JSON.stringify(PLAN_JUMP) } });
+    // the plugin formats dates in the browser's time zone, the test does the same
+    const FB_DATE = new Date("2026-10-12T02:00:00Z").toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
+    const noteOf = (d) => { const n = rowOf(d, "ollama").querySelector(".dm-row-note"); return n && n.textContent; };
+    const fb = boot("de", withFailed([failedOp(OLLAMA_DIGEST), ...BACKUPS.ops]));
+    await sleep(120);
+    console.log("\nfailed build row:", describe(rowOf(fb.d, "ollama")));
+    assert.strictEqual(noteOf(fb.d), `Das Update auf diesen Build ist am ${FB_DATE} gescheitert.`);
+    fb.d.querySelector('button[data-update="ollama"]').click();
+    await sleep(40);
+    const fbBody = fb.d.getElementById("dm-dialog-body");
+    const warns = [...fbBody.querySelectorAll(".dm-callout-warn")].map((x) => x.textContent);
+    console.log("failed build dialog:", warns[1]);
+    assert(warns[1].startsWith(`Das Update auf genau diesen Build ist am ${FB_DATE} gescheitert.`) && warns[1].includes(REASON.line));
+    const fc = fb.d.getElementById("dm-dialog-confirm");
+    const tickBox = (id, on) => { const x = fb.d.getElementById(id); x.checked = on; x.dispatchEvent(new fb.w.Event("change")); };
+    assert(fc.disabled);
+    tickBox("dm-retry-check", true);
+    assert(fc.disabled, "the jump tick box is still open");
+    tickBox("dm-jump-check", true);
+    assert(!fc.disabled, "both tick boxes set");
+    tickBox("dm-retry-check", false);
+    assert(fc.disabled);
+    // a different build, or a later successful update, clears it
+    const nb = boot("de", withFailed([failedOp("sha256:another-build"), ...BACKUPS.ops]));
+    await sleep(120);
+    assert.strictEqual(noteOf(nb.d), null, "a new build is not marked");
+    nb.d.querySelector('button[data-update="ollama"]').click();
+    await sleep(40);
+    assert(!nb.d.getElementById("dm-retry-check"));
+    const ok = boot("de", withFailed([{ ...failedOp(OLLAMA_DIGEST), id: "20261012-050000-ollama", status: "ok",
+                                         rolled_back: false, reason: null }, failedOp(OLLAMA_DIGEST), ...BACKUPS.ops]));
+    await sleep(120);
+    assert.strictEqual(noteOf(ok.d), null, "a later successful update clears the mark");
+
     // 6. English: no German left in rows, dialog or backups tab
     const h = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
         { ...PLAN_GLITCH, installed_version: null, tag_digits: 0, jump_unknown: true }) } });
@@ -289,7 +354,8 @@ const BASE_SCRIPT = {
     const german = ["Aktualisieren", "Lädt", "Übersicht", "Installierte", "Ausrollen", "ausstehend", "Erledigt", "Zurückrollen",
                     "Löschen", "Datenbank", "Betroffene", "Rollback-Kopie", "Erstellt", "Größe", "Zeitpunkt", "Ergebnis",
                     "erfolgreich", "keine Änderung", "in Benutzung", "Projekt", "Datei", "nur manuell", "Abbrechen",
-                    "unbekannt", "Hauptversion", "Vermutliche", "Ursache", "Speichermangel", "Wartezeit"];
+                    "unbekannt", "Hauptversion", "Vermutliche", "Ursache", "Speichermangel", "Wartezeit",
+                    "Ausgabe", "gescheitert", "trotzdem"];
     assert(all.includes("The installed version is unknown and the tag 16-alpine follows every new release"));
     const found = german.filter((w) => all.includes(w));
     console.log("\nEN German leftovers:", found.length ? found : "none");
