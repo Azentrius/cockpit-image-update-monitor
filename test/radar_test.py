@@ -119,6 +119,57 @@ FB_TAGS = ["6.0.0", "6.0", "6", "sha256-x.sig", "5.4.4", "6.0.1", "5.4.5", "6.0.
 check("ghcr manifest match", R.registry_match("ghcr.io/formbricks/formbricks", want, FB_TAGS), "5.4.5")
 check("ghcr checks newest first", skopeo_calls[:3], ["6.0.2", "6.0.1", "6.0.0"])
 
+# The installed image may be older than the 20 newest version tags
+# (Formbricks 5.0.2 behind 19 newer 5.x and three 6.x tags).
+MANY = [f"5.{m}.{p}" for m in range(5) for p in range(6)] + ["6.0.0", "6.0.1", "6.0.2"]
+MANIFESTS["5.0.2"] = b"m502"
+want502 = "sha256:" + hashlib.sha256(b"m502").hexdigest()
+skopeo_calls.clear()
+check("20 newest tags miss an older build", R.registry_match("ghcr.io/formbricks/formbricks", want502, MANY), None)
+check("... and stop after 20", len(skopeo_calls), 20)
+check("a deeper search finds it", R.registry_match("ghcr.io/formbricks/formbricks", want502, MANY, 100), "5.0.2")
+
+# What a floating tag points to right now, without a pull
+MANIFESTS["latest"] = b"m602"
+d602 = "sha256:" + hashlib.sha256(b"m602").hexdigest()
+check("tag digest outside Docker Hub: the manifest", R.tag_digest("ghcr.io/formbricks/formbricks", "latest"), d602)
+skopeo_calls.clear()
+tn = R.resolve_tag("ghcr.io/formbricks/formbricks", "latest", FB_TAGS, None)
+check("latest resolves to 6.0.2", tn, {"digest": d602, "version": "6.0.2", "tag": "6.0.2"})
+skopeo_calls.clear()
+check("same digest: the previous result is reused",
+      (R.resolve_tag("ghcr.io/formbricks/formbricks", "latest", FB_TAGS, tn), skopeo_calls), (tn, ["latest"]))
+MANIFESTS["latest"] = b"new-build"
+dnew = "sha256:" + hashlib.sha256(b"new-build").hexdigest()
+check("a build without a version tag: version unknown, digest kept",
+      R.resolve_tag("ghcr.io/formbricks/formbricks", "latest", FB_TAGS, tn), {"digest": dnew, "version": None, "tag": None})
+hub_urls = []
+
+
+def hub_tag(req, timeout=0):
+    hub_urls.append(req.full_url)
+    return io.BytesIO(json.dumps({"name": "latest", "digest": D_OLLAMA}).encode())
+
+
+real_urlopen, R.urllib.request.urlopen = R.urllib.request.urlopen, hub_tag
+n_skopeo = len(skopeo_calls)
+check("tag digest on Docker Hub: the API, no manifest",
+      (R.tag_digest("ollama/ollama", "latest"), hub_urls, len(skopeo_calls) - n_skopeo),
+      (D_OLLAMA, [R.HUB + "ollama/ollama/tags/latest"], 0))
+check("official images live under library/", (R.tag_digest("postgres", "16-alpine"), hub_urls[-1]),
+      (D_OLLAMA, R.HUB + "library/postgres/tags/16-alpine"))
+R.urllib.request.urlopen = real_urlopen
+check("hub path: host compared as a whole, names checked",
+      [R.hub_path(x) for x in ("postgres", "ollama/ollama", "docker.io/sakowicz/actual-ai", "ghcr.io/a/b",
+                               "evil.example/docker.io/x", "docker.io/../x", "docker.io/a/b?c")],
+      ["library/postgres", "ollama/ollama", "sakowicz/actual-ai", None, None, None, None])
+try:
+    R.tag_digest("ollama/ollama", "latest/../../x")
+    bad_tag = "accepted"
+except ValueError:
+    bad_tag = "refused"
+check("a tag outside Docker's grammar never reaches a URL", bad_tag, "refused")
+
 # ---------------------------------------------------------------- analyse
 TAGS = {
     "postgres": PG_TAGS,
@@ -128,8 +179,22 @@ TAGS = {
     "boky/postfix": ["latest"],
 }
 R.list_tags = lambda repo: TAGS[repo]
-hub_calls = []
-R.match_digest = lambda repo, digest, created, tags: (hub_calls.append(repo), "0.30.11")[1]
+hub_calls, limits, tag_matches = [], [], []
+
+
+def fake_match(repo, digest, created, tags, limit=20):
+    """Installed images come with their creation date, tag_now lookups without."""
+    if created is None:
+        tag_matches.append(repo)
+    else:
+        hub_calls.append(repo)
+        limits.append(limit)
+    return "0.30.11"
+
+
+R.match_digest = fake_match
+tag_digests = []
+R.tag_digest = lambda repo, tag: (tag_digests.append((repo, tag)), "sha256:now-" + tag)[1]
 now = datetime(2026, 10, 12, tzinfo=timezone.utc)
 groups = {
     ("postgres", "16-alpine"): {"containers": ["glitchtip-postgres", "docuseal-db"], "images": {
@@ -153,6 +218,22 @@ check("ollama newer 0.31.0 (no rc)", ol["versions"]["0.30.11"]["minor"], "0.31.0
 pv = recs[("pgvector/pgvector", "pg17")]
 check("pgvector: version unknown-scheme, by_tag major pg18", (pv["versions"]["17.10"]["status"], pv["by_tag"]["major"]), ("unknown", "pg18"))
 check("newest for ollama", ol["newest"], "0.31.0")
+check("first lookup of an image searches deep", limits, [R.REGISTRY_CANDIDATES_DEEP])
+check("floating tags resolved, exact ones not",
+      sorted(tag_digests), [("docker.io/ollama/ollama", "latest"), ("glitchtip/glitchtip", "latest"),
+                            ("pgvector/pgvector", "pg17"), ("postgres", "16-alpine")])
+check("tag_now of ollama latest", ol["tag_now"], {"digest": "sha256:now-latest", "version": "0.30.11", "tag": "0.30.11"})
+check("tag_now cache from the previous run", R.tag_now_cache([ol, gl, {"image": "x", "tag": "1"}])[
+      ("docker.io/ollama/ollama", "latest")], ol["tag_now"])
+hub_calls.clear()
+tag_matches.clear()
+again = R.analyse((("docker.io/ollama/ollama", "latest"), groups[("docker.io/ollama/ollama", "latest")]),
+                  R.digest_cache([ol]), now, R.tag_now_cache([ol]))
+check("unchanged digest: tag_now reused, no search", (again["tag_now"], hub_calls, tag_matches), (ol["tag_now"], [], []))
+real_td, R.tag_digest = R.tag_digest, lambda repo, tag: (_ for _ in ()).throw(RuntimeError("hub down"))
+broken = R.analyse((("glitchtip/glitchtip", "latest"), groups[("glitchtip/glitchtip", "latest")]), {}, now)
+check("tag lookup fails: no tag_now, the record stays good", ("tag_now" in broken, broken["status"]), (False, "major"))
+R.tag_digest = real_td
 
 # cache: second run must not query again; miss is retried only after 7 days
 cache = R.digest_cache([ol])
@@ -163,15 +244,17 @@ miss = {"ido": {"version": None, "src": "digest", "ts": "2026-10-10T00:00:00Z"}}
 R.analyse((("docker.io/ollama/ollama", "latest"), groups[("docker.io/ollama/ollama", "latest")]), miss, now)
 check("recent miss not retried", hub_calls, [])
 miss = {"ido": {"version": None, "src": "digest", "ts": "2026-09-01T00:00:00Z"}}
+limits.clear()
 R.analyse((("docker.io/ollama/ollama", "latest"), groups[("docker.io/ollama/ollama", "latest")]), miss, now)
-check("old miss retried", hub_calls, ["docker.io/ollama/ollama"])
+check("old miss retried, only the newest tags", (hub_calls, limits), (["docker.io/ollama/ollama"], [R.REGISTRY_CANDIDATES]))
 
 # registry error keeps previous good record, marks it stale
 R.list_tags = lambda repo: (_ for _ in ()).throw(RuntimeError("registry down"))
 err = R.analyse((("glitchtip/glitchtip", "latest"), groups[("glitchtip/glitchtip", "latest")]), {}, now)
 check("error record keeps local version", (err["status"], err["installed"]["idg"]["version"]), ("error", "6.1.8"))
 merged = R.keep_last_good([err], [gl])[0]
-check("stale merge", (merged.get("stale"), merged["versions"]["6.1.8"]["minor"]), (True, "6.2.0"))
+check("stale merge keeps the last tag_now too",
+      (merged.get("stale"), merged["versions"]["6.1.8"]["minor"], merged["tag_now"]["digest"]), (True, "6.2.0", "sha256:now-latest"))
 
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

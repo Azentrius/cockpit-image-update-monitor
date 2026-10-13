@@ -82,6 +82,13 @@ const cells = (tr) => [...tr.querySelectorAll("td")];
     // up to date shows the version with a check mark
     assert.strictEqual(cells(row(d, "calcom"))[4].textContent.trim(), "✓ 6.2.0");
 
+    // a floating tag: what it points to in the registry right now
+    const tagNow = (n) => { const x = cells(row(d, n))[2]; return [x.textContent.trim(), (x.querySelector(".dm-tagnow") || {}).title]; };
+    console.log("tag_now:", ["ollama", "formbricks-app", "glitchtip-postgres"].map((n) => n + " -> " + tagNow(n)[0]).join(" | "));
+    assert.deepStrictEqual(tagNow("ollama"), ["latest = 0.40.3", "In der Registry zeigt latest gerade auf 0.40.3 (vom Radar geprüft)."]);
+    assert.strictEqual(tagNow("formbricks-app")[0], "latest = 6.0.2");
+    assert.deepStrictEqual(tagNow("glitchtip-postgres"), ["16-alpine", undefined], "no tag_now: the tag alone");
+
     // unknown installed version: newest shown, status not "aktuell"
     c = cells(row(d, "formbricks-app"));
     console.log("formbricks-app:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
@@ -100,7 +107,8 @@ const cells = (tr) => [...tr.querySelectorAll("td")];
     const eh = [...e.querySelectorAll("#dm-table thead th")].map((t) => t.textContent).slice(2, 5);
     console.log("EN cols:", eh.join(" | "), "| ollama tip:", cells(row(e, "ollama"))[3].querySelector(".dm-ver").title.split("\n")[0]);
     assert.deepStrictEqual(eh.join("|"), "Configured|Installed|Newest version");
-    assert(!/Installiert|neueste|Umrandet|liefert|Registry-Tag /.test(e.body.textContent + [...e.querySelectorAll("[title]")].map((x) => x.title).join(" ")));
+    assert(!/Installiert|neueste|Umrandet|liefert|Registry-Tag |zeigt gerade/.test(e.body.textContent + [...e.querySelectorAll("[title]")].map((x) => x.title).join(" ")));
+    assert.strictEqual(cells(row(e, "ollama"))[2].querySelector(".dm-tagnow").title, "In the registry, latest points to 0.40.3 right now (checked by the radar).");
 
     // no radar file: legend hidden, installed from inventory still shown
     const n = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": null });

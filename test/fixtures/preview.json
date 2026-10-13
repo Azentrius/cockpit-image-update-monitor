@@ -27,7 +27,9 @@
    "free_bytes": 42949672960,
    "installed_version": "0.30.11",
    "tag_digits": 0,
-   "jump_unknown": false
+   "jump_unknown": false,
+   "target_version": "0.40.3",
+   "jump": "minor"
   },
   "*": {
    "container": "glitchtip-postgres",
@@ -62,7 +64,9 @@
    "free_bytes": 42949672960,
    "installed_version": "16.14",
    "tag_digits": 1,
-   "jump_unknown": false
+   "jump_unknown": false,
+   "target_version": "16.15",
+   "jump": "minor"
   }
  },
  "backups": {

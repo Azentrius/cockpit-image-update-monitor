@@ -53,7 +53,8 @@ html { background: var(--bg-page); }
 
 .az-cell-actions .dm-cell { display: inline-flex; align-items: center; gap: var(--space-xs); }
 .dm-ver { font-family: var(--az-font-code); font-size: 13px; }
-.dm-cfg, .dm-muted, .dm-digest { color: var(--text-subtle); }
+.dm-cfg, .dm-muted, .dm-digest, .dm-tagnow { color: var(--text-subtle); }
+.dm-tagnow { font-size: 12px; white-space: nowrap; }
 .dm-small { font-size: 12px; }
 .dm-inst { white-space: nowrap; }
 /* "→ 16.15": the newer image is on the server but not rolled out (as "Roll-out pending"). */

@@ -348,6 +348,11 @@ check("plan: databases of the project", sorted((d["name"], d["kind"], d["size"])
 check("plan: compose changed + pulled", (p["config_changed"], p["pulled"]), (True, True))
 check("plan: version from the variable, the tag fixes one block -> size of the jump known",
       (p["installed_version"], p["tag_digits"], p["jump_unknown"]), ("16.14", 1, False))
+check("plan: pulled already -> the target is the pulled image (16.14 -> 16.15)",
+      (p["target_version"], p["jump"]), ("16.15", "minor"))
+check("jump sizes", [U.jump_of(a, b) for a, b in (("5.0.2", "6.0.2"), ("5.0.2", "5.4.5"), ("5.0.2", "5.0.3"),
+                                                   ("16.14", "16.15"), ("6.1.8", "6.1.8"), (None, "6.0.2"), ("x", "1"))],
+      ["major", "minor", "patch", "minor", "same", None, None])
 D.images["sha256:fb"] = {"Id": "sha256:fb", "Config": {"Env": ["NODE_VERSION=24.21.0"]}}
 D.add(ctn("formbricks-app", "ghcr.io/formbricks/formbricks:latest", "sha256:fb", project="glitchtip",
           service="formbricks"))
@@ -360,6 +365,16 @@ with open(U.VERSIONS, "w") as f:
 p = plan("formbricks-app")
 check("plan: latest, version known to the radar -> no warning", (p["installed_version"], p["jump_unknown"]),
       ("5.0.2", False))
+check("plan: no tag_now in the radar -> target unknown", (p["target_version"], p["jump"]), (None, None))
+with open(U.VERSIONS, "w") as f:
+    json.dump({"images": [{"image": "ghcr.io/formbricks/formbricks", "tag": "latest",
+                           "installed": {"sha256:fb": {"version": "5.0.2", "src": "digest"}},
+                           "tag_now": {"digest": "sha256:t602", "version": "6.0.2", "tag": "6.0.2"}}]}, f)
+p = plan("formbricks-app")
+check("plan: latest points to 6.0.2 now -> a major jump", (p["target_version"], p["jump"]), ("6.0.2", "major"))
+D.images["sha256:fb"]["RepoDigests"] = ["ghcr.io/formbricks/formbricks@sha256:t602"]
+p = plan("formbricks-app")
+check("plan: latest still points to the running build -> same", (p["target_version"], p["jump"]), ("5.0.2", "same"))
 os.unlink(U.VERSIONS)
 del D.containers["formbricks-app"]
 

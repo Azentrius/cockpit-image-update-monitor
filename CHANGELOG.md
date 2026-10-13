@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.0 – 2026-10-13
+
+Stage 1.2, third part: floating tags resolved. The page says which version `latest` points to, and the
+update says what it brings.
+
+- **What a floating tag points to.** For tags without a full version (`latest`, `stable`,
+  `16-alpine`, `5` …) the radar looks up the digest the tag has in the registry right now, without a
+  pull: the Docker Hub API (no pull quota) or the manifest (`skopeo inspect --raw`). The version tag
+  with the same digest is its version. The *Configured* column then reads e.g. “latest = 6.0.2”.
+  `versions.json` keeps it as `tag_now` and reuses it while the digest stays the same.
+- **Older installed images found.** The first lookup of an installed image outside Docker Hub compares
+  the 100 newest version tags instead of 20, so a build several releases behind gets its version
+  (Formbricks 5.0.2 was 22nd). A retried miss only looks at the 20 newest.
+- **What the update brings.** The plan names the target version: the image pulled already, otherwise
+  what the tag points to now. The dialog shows it (“Brings 6.0.2 Major”). A new major version gets a
+  warning, and *Update* waits for a tick box (“I have checked the release notes for 6.0.2”). With an
+  unknown installed version the existing warning names the target as well.
+- **Tests:** the radar with Docker Hub and registry fakes (tag digest, version of the tag, reuse,
+  deeper first lookup, lookup errors), the plan (target from the pulled image or `tag_now`, jump
+  sizes), the *Configured* column and the dialog (target row, major warning and tick box).
+
 ## 0.9.0 – 2026-10-13
 
 Stage 1.2, second part: the output of every update stays with the history, a build whose update
