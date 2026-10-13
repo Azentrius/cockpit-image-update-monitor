@@ -259,7 +259,12 @@
    },
    "newest": "3.3.1",
    "checked": "2026-10-12T02:17:34Z",
-   "status": "minor"
+   "status": "minor",
+   "tag_now": {
+    "digest": "sha256:now-3.3.1",
+    "version": "3.3.1",
+    "tag": "3.3.1"
+   }
   },
   {
    "image": "docker.io/sakowicz/actual-ai",
@@ -325,7 +330,12 @@
    },
    "newest": "0.40.3",
    "checked": "2026-10-12T02:17:34Z",
-   "status": "minor"
+   "status": "minor",
+   "tag_now": {
+    "digest": "sha256:now-0.40.3",
+    "version": "0.40.3",
+    "tag": "0.40.3"
+   }
   },
   {
    "image": "actualbudget/actual-server",
@@ -678,7 +688,12 @@
    "versions": {},
    "newest": "6.0.2",
    "checked": "2026-10-12T02:17:34Z",
-   "status": "unknown"
+   "status": "unknown",
+   "tag_now": {
+    "digest": "sha256:now-6.0.2",
+    "version": "6.0.2",
+    "tag": "6.0.2"
+   }
   },
   {
    "image": "boky/postfix",

@@ -5,7 +5,8 @@
 Called by the plugin via cockpit.spawn with a FIXED set of commands only:
 
   plan <container>              read-only: what an update would touch (JSON),
-                                including whether the size of the jump is unknown
+                                the version it brings (radar) and the size of
+                                the jump, or that it is unknown
   update <container> [--no-dump]
                                 1. dump every supported database container of
                                    the compose project (pg_dumpall / mariadb-dump)
@@ -59,7 +60,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from diunlib import local_version, tag_digits  # noqa: E402
+from diunlib import local_version, nums_of, tag_digits  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
@@ -233,6 +234,32 @@ def start_radar():
             "Version radar started – the Installed column is up to date within a few minutes.")
 
 
+def radar_record(ref):
+    """The radar's record for this image and tag (versions.json), or None."""
+    repo, tag = split_ref(ref)
+    try:
+        with open(VERSIONS) as f:
+            for r in json.load(f).get("images") or []:
+                if r.get("image") == repo and r.get("tag") == tag:
+                    return r
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def jump_of(installed, target):
+    """How big the step from one version to the other is: "major", "minor",
+    "patch" (by the first block that differs, as the radar names them) or
+    "same"; None if either is unknown."""
+    try:
+        a, b = nums_of(installed), nums_of(target)
+    except (AttributeError, ValueError):
+        return None
+    if a == b:
+        return "same"
+    return "major" if a[:1] != b[:1] else "minor" if a[:2] != b[:2] else "patch"
+
+
 def version_of(ref, image_id):
     """Version of a local image for the history: the tag or the app's version
     variable (diunlib), otherwise what the radar found for this image ID
@@ -336,6 +363,7 @@ def make_plan(name):
             "dbs": [], "free_bytes": None, "config_changed": False,
             "pulled": False, "old_image": c["Image"],
             "installed_version": None, "tag_digits": None, "jump_unknown": False,
+            "target_version": None, "jump": None,
             "jobs": [], "depends_on": [], "dependents": [], "job_order": [], "shared_networks": []}
 
     ctx = compose_ctx(c)
@@ -391,6 +419,17 @@ def make_plan(name):
     plan["installed_version"] = version_of(ref, c["Image"])
     plan["tag_digits"] = tag_digits(split_ref(ref)[1])
     plan["jump_unknown"] = plan["installed_version"] is None and plan["tag_digits"] == 0
+
+    # What the update brings: the image pulled already, otherwise what the
+    # tag points to in the registry right now (radar, "tag_now").
+    if plan["pulled"]:
+        target = version_of(ref, tagid)
+    else:
+        now_ = (radar_record(ref) or {}).get("tag_now") or {}
+        same = bool(now_.get("digest")) and now_["digest"] in repo_digests(c["Image"])
+        target = plan["installed_version"] if same else now_.get("version")
+    plan["target_version"] = target
+    plan["jump"] = jump_of(plan["installed_version"], target)
 
     for m in members:
         k = kind_of(m)

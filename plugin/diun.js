@@ -35,7 +35,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.9.0";
+    const VERSION = "0.10.0";
     const LIB = "/usr/local/lib/diun-radar/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -92,6 +92,7 @@
             "row.manualOnly": "manual only",
             "row.manualOnlyTip": "Not started with docker compose – the add-on cannot recreate it safely.",
             "cfg.tip": "Tag as set in the compose file (or with docker run).",
+            "cfg.tagNow": "In the registry, {tag} points to {v} right now (checked by the radar).",
             "inst.tag": "The tag itself names this version.",
             "inst.env": "Read from the image (variable {name}).",
             "inst.label": "From the image label org.opencontainers.image.version, confirmed by a matching tag in the registry.",
@@ -196,6 +197,11 @@
             "upd.versionUnknown": "unknown",
             "upd.jumpUnknown": "The installed version is unknown and the tag {tag} follows every new release, so nobody can tell how big the jump is. It may be a new major version that needs other settings or additional services. Check the release notes first.",
             "upd.jumpConfirm": "I know that this update may bring a new major version.",
+            "upd.jumpTarget": "{tag} points to {v} right now.",
+            "upd.target": "Brings",
+            "upd.targetSame": "{v} (the version that runs now)",
+            "upd.majorJump": "This update brings a new major version: {from} → {to}. New major versions often need other settings or additional services; check the release notes first.",
+            "upd.majorConfirm": "I have checked the release notes for {to}.",
             "upd.notPossible": "Not possible from the add-on: {reason}",
             "reason.not-compose": "the container was not started with docker compose, so it cannot be recreated safely.",
             "reason.compose-file-missing": "the compose file no longer exists ({files}).",
@@ -332,6 +338,7 @@
             "row.manualOnly": "nur manuell",
             "row.manualOnlyTip": "Nicht mit docker compose gestartet – das Addon kann ihn nicht sicher neu erstellen.",
             "cfg.tip": "Tag, wie er in der Compose-Datei (bzw. bei docker run) steht.",
+            "cfg.tagNow": "In der Registry zeigt {tag} gerade auf {v} (vom Radar geprüft).",
             "inst.tag": "Der Tag nennt die Version bereits exakt.",
             "inst.env": "Aus dem Image gelesen (Variable {name}).",
             "inst.label": "Aus dem Image-Label org.opencontainers.image.version, bestätigt durch einen passenden Tag in der Registry.",
@@ -436,6 +443,11 @@
             "upd.versionUnknown": "unbekannt",
             "upd.jumpUnknown": "Die installierte Version ist unbekannt, und der Tag {tag} folgt jeder neuen Version. Wie groß der Sprung ist, lässt sich deshalb nicht sagen. Es kann eine neue Hauptversion sein, die andere Einstellungen oder zusätzliche Dienste braucht. Prüfen Sie vorher die Release-Notes.",
             "upd.jumpConfirm": "Mir ist bewusst, dass dieses Update eine neue Hauptversion bringen kann.",
+            "upd.jumpTarget": "{tag} zeigt gerade auf {v}.",
+            "upd.target": "Bringt",
+            "upd.targetSame": "{v} (die Version, die jetzt läuft)",
+            "upd.majorJump": "Dieses Update bringt eine neue Hauptversion: {from} → {to}. Neue Hauptversionen brauchen oft andere Einstellungen oder zusätzliche Dienste; prüfen Sie vorher die Release-Notes.",
+            "upd.majorConfirm": "Ich habe die Release-Notes zu {to} geprüft.",
             "upd.notPossible": "Über das Addon nicht möglich: {reason}",
             "reason.not-compose": "Der Container wurde nicht mit docker compose gestartet und lässt sich daher nicht sicher neu erstellen.",
             "reason.compose-file-missing": "Die Compose-Datei existiert nicht mehr ({files}).",
@@ -699,6 +711,7 @@
     }
 
     const LEVELS = [["patch", "Patch"], ["minor", "Minor"], ["major", "Major"]];
+    const LEVEL_NAMES = { patch: "Patch", minor: "Minor", major: "Major" };
 
     // Installed version of a container, first known source wins:
     //   inventory: the tag itself or the image's version variable (always fresh)
@@ -737,6 +750,13 @@
             html += ` <span class="dm-arrow" title="${esc(t("inst.pulledTip", { v: pv }))}">→ ${esc(pv)}</span>`;
         }
         return `<span class="dm-inst">${html}</span>`;
+    }
+
+    // "Configured" column: what a floating tag (latest, 16-alpine) points to
+    // in the registry right now, from the radar ("tag_now").
+    function tagNowNote(ctn, rec) {
+        const v = rec && rec.tag_now && rec.tag_now.version;
+        return v ? ` <span class="dm-tagnow" title="${esc(t("cfg.tagNow", { tag: ctn.tag, v }))}">= ${esc(v)}</span>` : "";
     }
 
     // "Newest version" column. Returns { html, news }:
@@ -869,7 +889,7 @@
         return { kind, html:
             `<td data-label="${L("col.container")}"><span class="dm-cell"><span class="dm-name">${esc(ctn.name)}</span>${together}</span></td>` +
             `<td data-label="${L("col.image")}" class="dm-img"><span class="dm-cell az-mono">${imgCell}</span></td>` +
-            `<td data-label="${L("col.configured")}"><span class="dm-cell dm-ver dm-cfg" title="${L("cfg.tip")}">${esc(ctn.tag)}</span></td>` +
+            `<td data-label="${L("col.configured")}"><span class="dm-cell"><span class="dm-ver dm-cfg" title="${L("cfg.tip")}">${esc(ctn.tag)}</span>${tagNowNote(ctn, rec)}</span></td>` +
             `<td class="az-nowrap" data-label="${L("col.installed")}"><span class="dm-cell">${installedCell(ctn, rec, inst)}</span></td>` +
             `<td data-label="${L("col.new")}"><span class="dm-cell">${ver.html}</span></td>` +
             `<td data-label="${L("col.status")}"><span class="dm-cell">${badge(kind)}${note}</span></td>` +
@@ -1252,11 +1272,19 @@
         });
         const dumpable = dbs.some((d) => d.kind === "postgres" || d.kind === "mysql");
         let html = "";
-        // Unknown version + a tag that follows every release: say so first;
-        // the confirm button waits for every tick box (.dm-gate, see startUpdate).
+        // Unknown version + a tag that follows every release, or a new major
+        // version: say so first; the confirm button waits for every tick box
+        // (.dm-gate, see startUpdate).
+        const tag = tagSplit(plan.image).tag;
         if (plan.jump_unknown) {
-            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.jumpUnknown", { tag: tagSplit(plan.image).tag }))}</p>` +
+            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.jumpUnknown", { tag }))}` +
+                    (plan.target_version ? " " + esc(t("upd.jumpTarget", { tag, v: plan.target_version })) : "") + `</p>` +
                     `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-jump-check"> ${esc(t("upd.jumpConfirm"))}</label>`;
+        }
+        // The update brings a new major version (installed and target known).
+        if (plan.jump === "major") {
+            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.majorJump", { from: plan.installed_version, to: plan.target_version }))}</p>` +
+                    `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-major-check"> ${esc(t("upd.majorConfirm", { to: plan.target_version }))}</label>`;
         }
         // The registry offers exactly the build whose update failed before.
         if (failed) {
@@ -1278,6 +1306,10 @@
             li(t("upd.project"), `${code(plan.project)} <span class="dm-muted">${esc(plan.workdir || "")}</span>`) +
             ("installed_version" in plan
                 ? li(t("upd.installed"), plan.installed_version ? code(plan.installed_version) : esc(t("upd.versionUnknown")))
+                : "") +
+            (plan.target_version
+                ? li(t("upd.target"), plan.jump === "same" ? esc(t("upd.targetSame", { v: plan.target_version }))
+                    : code(plan.target_version) + (plan.jump ? ` <span class="dm-muted">${esc(LEVEL_NAMES[plan.jump] || "")}</span>` : ""))
                 : "") +
             li(t("upd.rollback"), code(repo + ":rollback-…")) +
             li(t("upd.dbs"), dbLines.length ? dbLines.join("<br>") : esc(t("upd.noDb"))) +
@@ -1325,7 +1357,7 @@
                     title, desc, body: planBody(plan, failed),
                     confirm: {
                         label,
-                        disabled: !!plan.jump_unknown || !!failed,
+                        disabled: !!plan.jump_unknown || !!failed || plan.jump === "major",
                         argv: () => {
                             const box = $("dm-dump-check");
                             const dump = box && box.checked && !box.disabled;

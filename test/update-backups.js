@@ -374,9 +374,46 @@ const BASE_SCRIPT = {
     assert(callouts.includes("Ebenfalls im Netzwerk mailrelay: calcom, smtp-relay. Sie nutzen dieses Projekt womöglich; das Update unterbricht es kurz."));
     assert(!rl.d.getElementById("dm-dialog-confirm").disabled, "these are hints, no tick box");
 
+    // 12. What the update brings; a new major version needs a tick box
+    const mj = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
+        { ...PLAN_OLLAMA, config_changed: false, installed_version: "5.0.2", tag_digits: 0, jump_unknown: false,
+          target_version: "6.0.2", jump: "major" }) }, "diun-update.py update": runOk });
+    await sleep(80);
+    mj.d.querySelector('button[data-update="ollama"]').click();
+    await sleep(40);
+    const mjBody = mj.d.getElementById("dm-dialog-body");
+    console.log("major :", kvRows(mjBody).filter((r) => r.startsWith("Bringt") || r.startsWith("Installierte")).join(" | "));
+    assert(kvRows(mjBody).includes("Bringt: 6.0.2 Major"));
+    assert.strictEqual(mjBody.querySelector(".dm-callout-warn").textContent,
+        "Dieses Update bringt eine neue Hauptversion: 5.0.2 → 6.0.2. Neue Hauptversionen brauchen oft andere Einstellungen " +
+        "oder zusätzliche Dienste; prüfen Sie vorher die Release-Notes.");
+    const mc = mj.d.getElementById("dm-dialog-confirm");
+    assert(mc.disabled, "Update waits for the tick box");
+    const mbox = mj.d.getElementById("dm-major-check");
+    assert.strictEqual(mbox.parentElement.textContent.trim(), "Ich habe die Release-Notes zu 6.0.2 geprüft.");
+    mbox.checked = true;
+    mbox.dispatchEvent(new mj.w.Event("change"));
+    assert(!mc.disabled);
+    // a minor step: the row, no warning; the same version: said so
+    for (const [plan, row, gate] of [[{ target_version: "5.4.5", jump: "minor" }, "Bringt: 5.4.5 Minor", false],
+                                     [{ target_version: "5.0.2", jump: "same" }, "Bringt: 5.0.2 (die Version, die jetzt läuft)", false],
+                                     [{ target_version: "6.0.2", jump: null, installed_version: null, jump_unknown: true }, "Bringt: 6.0.2", true]]) {
+        const x = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
+            { ...PLAN_OLLAMA, config_changed: false, installed_version: "5.0.2", tag_digits: 0, jump_unknown: false, ...plan }) } });
+        await sleep(80);
+        x.d.querySelector('button[data-update="ollama"]').click();
+        await sleep(40);
+        const xb = x.d.getElementById("dm-dialog-body");
+        assert(kvRows(xb).includes(row), row);
+        assert.strictEqual(!!x.d.getElementById("dm-major-check"), false);
+        assert.strictEqual(x.d.getElementById("dm-dialog-confirm").disabled, gate);
+        if (plan.jump_unknown) assert(xb.querySelector(".dm-callout-warn").textContent.endsWith("latest zeigt gerade auf 6.0.2."));
+    }
+
     // 6. English: no German left in rows, dialog or backups tab
     const h = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
-        { ...PLAN_GLITCH, installed_version: null, tag_digits: 0, jump_unknown: true, jobs: ["glitchtip-migrate"],
+        { ...PLAN_GLITCH, installed_version: null, tag_digits: 0, jump_unknown: true, target_version: "16.15", jump: null,
+          jobs: ["glitchtip-migrate"],
           depends_on: [{ service: "glitchtip-redis", condition: "service_healthy" }],
           dependents: [{ service: "side", containers: ["glitchtip-side"] }],
           job_order: [{ job: "glitchtip-migrate", services: ["glitchtip-web"] }],
@@ -392,7 +429,8 @@ const BASE_SCRIPT = {
                     "erfolgreich", "keine Änderung", "in Benutzung", "Projekt", "Datei", "nur manuell", "Abbrechen",
                     "unbekannt", "Hauptversion", "Vermutliche", "Ursache", "Speichermangel", "Wartezeit",
                     "Ausgabe", "gescheitert", "trotzdem", "zusammen mit", "Neu erstellt", "Einmal-Jobs", "Wartet auf",
-                    "Hängen davon ab", "gesund", "Ebenfalls"];
+                    "Hängen davon ab", "gesund", "Ebenfalls", "Bringt", "zeigt gerade", "Hauptversion"];
+    assert(all.includes("16-alpine points to 16.15 right now."));
     assert(all.includes("The installed version is unknown and the tag 16-alpine follows every new release"));
     const found = german.filter((w) => all.includes(w));
     console.log("\nEN German leftovers:", found.length ? found : "none");

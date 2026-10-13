@@ -18,8 +18,14 @@ Installed version, first match wins:
   digest    which version tag in the registry points to exactly the
             installed image: Docker Hub API (tag list with digests, no pull
             quota) or, for other registries, the manifests of the newest
-            version tags (skopeo inspect --raw). Results are cached per
-            image id in the output file (positive forever, misses 7 days).
+            version tags (skopeo inspect --raw; the first lookup of an image
+            goes further back). Results are cached per image id in the
+            output file (positive forever, misses 7 days).
+
+What a floating tag (latest, stable, 16-alpine, 5) points to right now is
+resolved the same way, without a pull: its digest in the registry and the
+version tag with that digest ("tag_now", e.g. latest = 6.0.2). Reused while
+the digest stays the same.
 
 Newer versions are compared in the scheme of the installed version
 (prefix + number of numeric blocks + suffix): 16-alpine with 16.14
@@ -51,13 +57,14 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from diunlib import (PLAIN_RE, core, local_version, norm, nums_of,  # noqa: E402
-                     qualify, reachable, scheme, split_ref)
+                     qualify, reachable, scheme, split_ref, tag_digits)
 
 DB_RE = re.compile(r"(^|/)(postgres|postgis|pgvector|timescaledb|mariadb|mysql|mongo|"
                    r"redis|valkey|keydb|clickhouse-server|influxdb|couchdb|"
@@ -67,6 +74,7 @@ WORKERS = 4                # parallel images; keep registries friendly
 HUB = "https://hub.docker.com/v2/repositories/"
 HUB_PAGES = 10             # x 100 tags, newest first
 REGISTRY_CANDIDATES = 20   # manifests checked per image outside Docker Hub
+REGISTRY_CANDIDATES_DEEP = 100   # the first lookup of an installed image goes further back
 RETRY_MISS = timedelta(days=7)
 LEVELS = ("patch", "minor", "major")
 ORDER = {"major": 0, "minor": 1, "patch": 2, "current": 3, "unknown": 4, "error": 5}
@@ -179,22 +187,48 @@ def hub_match(path, digest, created):
     return best_tag(hits)
 
 
-def registry_match(qref, digest, tags):
+def registry_match(qref, digest, tags, limit=REGISTRY_CANDIDATES):
     """Other registries: compare the manifests of the newest version tags."""
     cands = sorted({t for t in tags if PLAIN_RE.match(t)},
                    key=lambda t: nums_of(PLAIN_RE.match(t).group(1)), reverse=True)
-    for t in cands[:REGISTRY_CANDIDATES]:
+    for t in cands[:limit]:
         raw = run(["skopeo", "inspect", "--raw", f"docker://{qref}:{t}"], binary=True)
         if "sha256:" + hashlib.sha256(raw).hexdigest() == digest:
             return t
     return None
 
 
-def match_digest(repo, digest, created, tags):
+def match_digest(repo, digest, created, tags, limit=REGISTRY_CANDIDATES):
     q = qualify(repo)
     if q.startswith("docker.io/"):
         return hub_match(q[len("docker.io/"):], digest, created)
-    return registry_match(q, digest, tags)
+    return registry_match(q, digest, tags, limit)
+
+
+def tag_digest(repo, tag):
+    """Registry digest a tag points to right now, without a pull: the Docker
+    Hub API (no pull quota) or the manifest (skopeo inspect --raw)."""
+    q = qualify(repo)
+    if q.startswith("docker.io/"):
+        url = f"{HUB}{q[len('docker.io/'):]}/tags/{urllib.parse.quote(tag)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "diun-radar"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r).get("digest") or ""
+    raw = run(["skopeo", "inspect", "--raw", f"docker://{q}:{tag}"], binary=True)
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def resolve_tag(repo, tag, tags, prev):
+    """What a floating tag points to now: {"digest", "version", "tag"}, the
+    version from the version tag with the same digest (None if there is
+    none). The previous result is reused while the digest stays the same."""
+    digest = tag_digest(repo, tag)
+    if not digest:
+        return None
+    if prev and prev.get("digest") == digest:
+        return prev
+    found = match_digest(repo, digest, None, tags)
+    return {"digest": digest, "version": core(found) if found else None, "tag": found}
 
 
 # ------------------------------------------------------------ comparison ----
@@ -271,11 +305,14 @@ def resolve(repo, tag, iid, image, tagset, tags, cache, now):
     digest = repo_digest(repo, image)
     if not digest or not tags:
         return {"version": None, "src": None}
-    found = match_digest(repo, digest, parse_iso(image.get("Created")), tags)
+    # The first lookup of an image goes further back; a retried miss only
+    # needs the newest tags (an old image does not get new version tags).
+    limit = REGISTRY_CANDIDATES if hit else REGISTRY_CANDIDATES_DEEP
+    found = match_digest(repo, digest, parse_iso(image.get("Created")), tags, limit)
     return {"version": core(found) if found else None, "src": "digest", "tag": found, "ts": iso(now)}
 
 
-def analyse(item, cache, now):
+def analyse(item, cache, now, tag_cache=None):
     (repo, tag), group = item
     rec = {"image": repo, "tag": tag, "containers": sorted(group["containers"]),
            "db": bool(DB_RE.search(norm(repo).lower())), "reach": reachable(tag)}
@@ -298,6 +335,15 @@ def analyse(item, cache, now):
     if error:
         rec["status"], rec["error"] = "error", error
         return rec
+
+    # A floating tag: which version it points to right now.
+    if tag_digits(tag) < 2:
+        try:
+            now_ = resolve_tag(repo, tag, tags, (tag_cache or {}).get((repo, tag)))
+        except Exception:  # Hub API down, manifest error: no tag_now this run
+            now_ = None
+        if now_:
+            rec["tag_now"] = now_
 
     # Newer versions, relative to every installed version of this tag.
     rec["versions"] = {}
@@ -337,6 +383,12 @@ def digest_cache(prev):
             if isinstance(e, dict) and e.get("src") == "digest":
                 cache[iid] = e
     return cache
+
+
+def tag_now_cache(prev):
+    """{(image, tag): tag_now} of the previous run."""
+    return {(r.get("image"), r.get("tag")): r["tag_now"] for r in prev
+            if isinstance(r, dict) and isinstance(r.get("tag_now"), dict)}
 
 
 def keep_last_good(recs, prev):
@@ -389,7 +441,8 @@ def table(recs):
                 status += " (alt)"
             if r.get("db") and cmp.get("major"):
                 status += " [DB]"
-            rows.append((", ".join(r["containers"]), r["image"], r["tag"], v or "?",
+            tn = (r.get("tag_now") or {}).get("version")
+            rows.append((", ".join(r["containers"]), r["image"], r["tag"] + (f" (={tn})" if tn else ""), v or "?",
                          (x.get("src") or "-") + (f" ({x['tag']})" if x.get("tag") else ""),
                          cmp.get("patch") or "-", cmp.get("minor") or "-", cmp.get("major") or "-",
                          status if v or cmp else status + f"; neueste: {r.get('newest') or '-'}"))
@@ -412,10 +465,10 @@ def main():
         return 1
 
     prev = load_previous(args.output) if args.output else []
-    cache = digest_cache(prev)
+    cache, tags_now = digest_cache(prev), tag_now_cache(prev)
     now = now_utc()
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        recs = list(pool.map(lambda it: analyse(it, cache, now), groups.items()))
+        recs = list(pool.map(lambda it: analyse(it, cache, now, tags_now), groups.items()))
     for r in recs:
         r["checked"] = iso(now)
     if args.output:

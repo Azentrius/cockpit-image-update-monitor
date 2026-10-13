@@ -56,7 +56,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 
 | Column | Meaning |
 |---|---|
-| Configured | The tag as written in the compose file or with `docker run`, e.g. `latest`, `16-alpine`, `v2.1.4`. |
+| Configured | The tag as written in the compose file or with `docker run`, e.g. `latest`, `16-alpine`, `v2.1.4`. For tags without a full version it adds what the tag points to in the registry right now: `latest = 6.0.2`. |
 | Installed | The version that really runs, e.g. `0.30.11`. The tooltip names the source (see below) and the digest. `16.14 → 16.15` means: 16.15 is already on the server but does not run yet. `?` means: cannot be determined, or not covered by the radar yet. |
 | Newest version | Newer versions relative to the **installed** version, as patch / minor / major chips. `✓ 6.2.0` = the installed version is the newest. `newest: 6.0.2` appears when the installed version is unknown. |
 | Status | see the next table |
@@ -104,7 +104,7 @@ On source 2: runtime variables such as `NODE_VERSION`, `PYTHON_VERSION` or `PHP_
 
 On source 4:
 - **Docker Hub:** the hub API returns the tag list with digests. This does **not** count against the pull limit. The search goes by recency, at most 10 pages of 100 tags.
-- **Other registries (ghcr.io …):** the manifests of the 20 newest version tags are compared (`skopeo inspect --raw`).
+- **Other registries (ghcr.io …):** the manifests of the newest version tags are compared (`skopeo inspect --raw`): 100 on the first lookup of an image, 20 when a miss is retried.
 - **Storage:** hits are kept for good, misses are retried after 7 days.
 
 What cannot be determined stays `?`. Typical case: `latest` is built on every commit and matches no release.
@@ -129,6 +129,7 @@ v2.1.4             -> "v"  3 ""
 - **Reach**: how many number blocks does the configured tag fix? `latest` = 0 → everything reachable. `16-alpine` = 1 → patch and minor reachable. `3.12-slim` = 2 → patch only. `v2.1.4` = 3 → nothing.
 - **Database images** (postgres, mariadb, mysql, redis, valkey, clickhouse, mongo …) are marked. Their majors appear as grey info.
 - If a registry fails, the last good result stays and is marked “(older data)”.
+- **Floating tags** (`latest`, `stable`, `16-alpine`, `5` …): the radar looks up the digest the tag has in the registry right now (Docker Hub API or the manifest, no pull) and the version tag with the same digest. The overview shows it next to the tag, and the update dialog says what the update brings.
 - **When:** every 6 hours (`diun-radar.timer`), in the background after every successful update or
   rollback, and on **“Run radar now”** in the *Running containers* card. The button stays busy until
   the run is over; systemd never runs the radar twice at once.
@@ -178,6 +179,10 @@ sequenceDiagram
 (`latest`, `stable` …), nobody can tell what the update brings. The plan says so first: it may be a new
 major version that needs other settings or additional services. *Update* stays disabled until a tick
 box confirms it. Check the release notes before.
+
+**What it brings:** the plan names the target version (the image pulled already, or what the tag points
+to in the registry now) and the size of the jump. A **new major version** gets a warning, and *Update*
+waits for a tick box.
 
 **When it fails:** a box above the live output names the most likely cause: the container and the last
 line of its log that names an error, the last output of its health check, or what `docker compose`
@@ -481,6 +486,7 @@ Covered by the tests, among other things:
 - requirements panel
 - update, rollback, delete and cleanup dialogs, “Run radar now”
 - the warning for an unknown jump size, the most likely cause of a failure, a build that failed before, the kept output
+- what a floating tag points to, the target of an update and the warning for a new major version
 - the version columns
 - version and changelog agree
 
@@ -530,7 +536,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “Registry error”.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Version jumps** via a different tag and **database majors** are manual (change the compose file).
-- **Floating tags with an unknown version** (`latest` without a version label or variable): the update cannot tell how big the jump is and may bring a new major version. The plan warns and asks for an extra confirmation; resolving such tags through the registry comes later in stage 1.2.
+- **Floating tags:** what the tag points to is resolved through the registry only when a version tag has the same digest. Builds without a version tag (e.g. from the main branch) stay unknown; then the plan warns that the size of the jump is unknown.
 - **Dependent services are not restarted:** an update recreates only the services that use the image. A database or cache restarts under the running app, which has to reconnect by itself; the add-on watches it for about 15 seconds, not longer.
 - After updates of images whose version can only be determined by label/digest, `?` shows for a few minutes until the radar run started by the update is done.
 
@@ -544,7 +550,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
-| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **in progress** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds, what is updated together, dependencies) |
+| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **in progress** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds, what is updated together, dependencies; 0.10.0: floating tags resolved) |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |

@@ -55,7 +55,7 @@ again.
 
 Done (see [CHANGELOG](CHANGELOG.md)), marked ✅ below: in 0.8.0 the unknown jump size and the most
 likely cause of a failure (“reason first”); in 0.9.0 the kept output, the restart-loop test, the
-failed builds, what is updated together and the dependencies. Open: resolving floating tags and the
+failed builds, what is updated together and the dependencies; in 0.10.0 the floating tags. Open: the
 update in two steps.
 
 **Seen on the reference host:** `latest` of an app moved to a new major version that needs an extra
@@ -67,10 +67,11 @@ installed version was unknown and the jump invisible.
 - ✅ **Unknown jump size:** if the installed version is unknown and the tag fixes no version number
   (`latest`, `stable`; reach 0 in the README's terms), the plan says “the size of the jump is unknown; a
   new major version is possible” and asks for an extra confirmation.
-- **Resolve floating tags:** the radar finds the version tag with the same digest as the configured tag
-  in the registry (e.g. `latest` = `6.0.2`), without a pull. For the installed image it searches further
-  back than the 20 newest tags, once, and keeps the result. A jump such as 5.x → 6.0.2 then shows as a
-  major chip with the warning that exists already.
+- ✅ **Resolve floating tags:** the radar finds the version tag with the same digest as the configured
+  tag in the registry (e.g. `latest` = `6.0.2`), without a pull. For the installed image it searches
+  further back than the 20 newest tags, once, and keeps the result. A jump such as 5.x → 6.0.2 then
+  shows as a major chip; the update dialog names the target and waits for a tick box on a new major
+  version.
 - **Update in two steps** (a choice in the dialog): fetch first (pull only; nothing that runs changes,
   the row shows “Roll-out pending” with the version that came), roll out second.
 

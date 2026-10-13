@@ -106,6 +106,7 @@ Inputs are checked by regex:
    },
    "by_tag": {"patch": null, "minor": null, "major": "18-alpine", "status": "major"},
    "newest": "18.6",
+   "tag_now": {"digest": "sha256:…", "version": "16.15", "tag": "16.15-alpine"},
    "status": "major",
    "checked": "…",
    "stale": true, "error": "…"
@@ -119,6 +120,7 @@ Inputs are checked by regex:
 | `by_tag` | comparison with the configured tag itself. Only when the tag contains numbers; the plugin uses it as a fallback. |
 | `reach` | levels the configured tag delivers with the Update button. |
 | `newest` | highest plain version tag. Shown when the installed version is unknown. |
+| `tag_now` | (since 0.10.0) only for floating tags (fewer than two version blocks: `latest`, `16-alpine`, `5`): the digest the tag has in the registry right now (Docker Hub API or `skopeo inspect --raw`, no pull) and the version tag with the same digest (`version` / `tag`, `null` if none). Reused while the digest stays the same; missing when the lookup failed. |
 | `status` | `major`, `minor`, `patch`, `current`, `unknown` or `error`, for sorting and for the table. |
 | `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. |
 
@@ -159,6 +161,11 @@ newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+
   `16-alpine` 1, `3.12-slim` 2, `v2.1.4` 3.
 - `jump_unknown`: `installed_version` is `null` **and** `tag_digits` is 0. Nobody can tell how big the
   jump is; the plugin warns first and enables *Update* only after a tick box.
+- `target_version` (since 0.10.0): what the update brings: the version of the image pulled already, or
+  `tag_now.version` from the radar (the installed version when `tag_now.digest` is the running image's).
+  `null` if unknown.
+- `jump`: `major`, `minor` or `patch` by the first version block that differs, `same`, or `null` when
+  either version is unknown. On `major` the plugin warns and waits for a tick box.
 - Relations (since 0.9.0, from `docker compose config` and the containers of the project):
   - `jobs`: containers among `containers` that run once (not running, restart policy `no` or
     `on-failure`), e.g. migrations.
@@ -329,9 +336,11 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   - A plan that arrives after the dialog was closed is dropped (`planSeq`).
   - `jump_unknown` in the plan: the warning comes first in the body. A build that failed before (see
     below) adds its own warning with the cause. The confirm button stays disabled until every tick box
-    (`.dm-gate`: `#dm-jump-check`, `#dm-retry-check`) is set.
+    (`.dm-gate`: `#dm-jump-check`, `#dm-major-check`, `#dm-retry-check`) is set.
+  - `target_version` as a row (“Brings”), with the size of the jump.
   - A `reason` in the result fills `#dm-dialog-reason` (`az-alert--danger`) above the log; every new
     run hides it again.
+- **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`).
 - **Together:** rows of the same compose project with the same image and tag name each other under
   the container name (“together with …”, three names at most). The name itself is `.dm-name`.
 - **Plan groups:** recreated (`containers` without `jobs`), one-off jobs, waits for (`depends_on`),
@@ -354,7 +363,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 
 | File | Checks |
 |---|---|
-| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, hub/registry match with fakes, cache, outage) |
+| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, hub/registry match with fakes, deeper first lookup, `tag_now`, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
 | `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
