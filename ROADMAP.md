@@ -54,8 +54,9 @@ containers do not come up, the reason is visible at once. A failed build is not 
 again.
 
 Done (see [CHANGELOG](CHANGELOG.md)), marked ✅ below: in 0.8.0 the unknown jump size and the most
-likely cause of a failure (“reason first”); in 0.9.0 the kept output, the restart-loop test and the
-failed builds.
+likely cause of a failure (“reason first”); in 0.9.0 the kept output, the restart-loop test, the
+failed builds, what is updated together and the dependencies. Open: resolving floating tags and the
+update in two steps.
 
 **Seen on the reference host:** `latest` of an app moved to a new major version that needs an extra
 service; the app did not start. Dump, rollback copy and rollback worked, and the data stayed untouched.
@@ -89,7 +90,7 @@ installed version was unknown and the jump invisible.
   and the dialog repeats the cause and asks for a tick box.
 - Pinning the tag to the running version comes with stage 2 (change the tag in the compose file).
 
-**What is updated together**
+**What is updated together** ✅
 - **Overview:** if other running containers of the same compose project use the same image, the row
   says so under the container name, e.g. “together with glitchtip-web” (at most three names, then
   “+n”). Visible text, not a tooltip, so it works on phones. The inventory knows project and image of
@@ -100,10 +101,10 @@ installed version was unknown and the jump invisible.
 - Rows stay one per container: the status belongs to each container, and a combined row would hide
   the one that is not healthy.
 
-**Dependencies** (from `docker compose config`, which the plan reads already)
+**Dependencies** ✅ (from `docker compose config`, which the plan reads already)
 - **Show them:** the plan lists what the services depend on (`depends_on`) and what depends on them.
-  Today the update recreates only the services of the image (`up --no-deps`): a database or cache
-  restarts under the running app, which has to reconnect by itself, and nothing says so.
+  The update recreates only the services of the image (`up --no-deps`): a database or cache restarts
+  under the running app, which has to reconnect by itself.
 - **Watch them:** after such an update the add-on also watches the dependent services for the waiting
   time (still running, no new restarts, healthy if they have a health check) without restarting them. A
   failure there makes the update fail and offers the rollback.

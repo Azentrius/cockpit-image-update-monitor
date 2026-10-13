@@ -35,7 +35,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 |---|---|
 | **Overview** | All running containers with *Configured* (tag from compose), *Installed* (real version), *Newest version* (patch / minor / major) and status. Sorted by urgency. |
 | **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**” in the card. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
-| **Update / roll out** | One click first shows a plan (affected containers, compose project, databases, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If nobody can tell how big the jump is (unknown version, tag `latest`), the plan says so and asks for an extra confirmation. If the containers do not come up, the most likely cause from their log stands next to the rollback button. |
+| **Update / roll out** | One click first shows a plan (containers recreated with it, one-off jobs, compose project, databases, what the services wait for and what waits for them, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If nobody can tell how big the jump is (unknown version, tag `latest`), the plan says so and asks for an extra confirmation. If the containers do not come up, the most likely cause from their log stands next to the rollback button. |
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
 | **Use** | The shared Azentrius page frame (header, tabs, signature), light or dark following Cockpit's style, English and German following Cockpit's language (fallback English), loading indicator, rows as blocks on phones, no external resources (strict Cockpit CSP). |
@@ -162,7 +162,9 @@ sequenceDiagram
     H->>D: tag back to the rollback image, compose up -d --no-deps
 ```
 
-**What is included:** all services of the compose project that use **the same image**. With GlitchTip, for example, `web`, `worker` and `migrate`. One-off jobs that end with exit 0 (migrations) count as successful.
+**What is included:** all services of the compose project that use **the same image**. With GlitchTip, for example, `web`, `worker` and `migrate`. One-off jobs that end with exit 0 (migrations) count as successful. The overview says so under the container name (“together with …”).
+
+**Dependencies:** the plan lists what these services wait for (`depends_on`) and which services wait for them. Those are not restarted, but watched for about 15 seconds after the update: if one stops, restarts or turns unhealthy, the update counts as failed. The plan warns when services start without waiting for their migration job, and names other projects on the same network (e.g. a shared mail relay) as a hint.
 
 **Database dump:** before the update every supported database container **of the project** is backed up:
 - **Postgres:** `pg_dumpall` with the superuser `POSTGRES_USER` (default `postgres`, local socket).
@@ -529,7 +531,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Version jumps** via a different tag and **database majors** are manual (change the compose file).
 - **Floating tags with an unknown version** (`latest` without a version label or variable): the update cannot tell how big the jump is and may bring a new major version. The plan warns and asks for an extra confirmation; resolving such tags through the registry comes later in stage 1.2.
-- **Dependencies** (`depends_on`) are not considered: an update recreates only the services that use the image. A database or cache restarts under the running app, which has to reconnect by itself.
+- **Dependent services are not restarted:** an update recreates only the services that use the image. A database or cache restarts under the running app, which has to reconnect by itself; the add-on watches it for about 15 seconds, not longer.
 - After updates of images whose version can only be determined by label/digest, `?` shows for a few minutes until the radar run started by the update is done.
 
 ---
@@ -542,7 +544,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
-| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **in progress** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds) |
+| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **in progress** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds, what is updated together, dependencies) |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |

@@ -5,8 +5,10 @@ are replaced by fakes, /var/backups/image-updates and the other paths by a
 temporary directory. Covers database detection, plan reasons and the unknown jump
 size, argument checks and exit codes, the update flow (dump, rollback tag,
 versions in the history, cleanup, radar start), the most likely cause of a
-failure, the kept output and the digests of the new build, rollback, the
-cleanup rules and the radar verb.
+failure, the kept output and the digests of the new build, what an update
+touches besides its image (jobs, depends_on, dependents, shared networks) and
+the watch of dependent services, rollback, the cleanup rules and the radar
+verb.
 No Docker, no root, no network."""
 import contextlib
 import gzip
@@ -131,7 +133,7 @@ open(os.path.join(COMPOSE_DIR, "compose.yml"), "w").close()
 
 
 def ctn(name, ref, img, project=None, service=None, cmd=None, entrypoint=None, env=(),
-        running=True, files=None):
+        running=True, files=None, networks=()):
     labels = {}
     if project:
         labels = {L["project"]: project, L["service"]: service or name, L["workdir"]: COMPOSE_DIR,
@@ -140,7 +142,8 @@ def ctn(name, ref, img, project=None, service=None, cmd=None, entrypoint=None, e
     return {"Name": "/" + name, "Image": img,
             "Config": {"Image": ref, "Labels": labels, "Env": list(env), "Cmd": cmd, "Entrypoint": entrypoint},
             "State": {"Running": running, "Status": "running" if running else "exited"},
-            "HostConfig": {"RestartPolicy": {"Name": "unless-stopped"}}}
+            "HostConfig": {"RestartPolicy": {"Name": "unless-stopped"}},
+            "NetworkSettings": {"Networks": {n: {} for n in networks}}}
 
 
 class Docker:
@@ -175,9 +178,15 @@ class Docker:
                 return "", 1, "Error: No such object"
             return json.dumps(found), 0, ""
         if cmd[:3] == ["docker", "ps", "-a"]:
-            want = [cmd[i + 1][len("label="):].split("=", 1) for i, a in enumerate(cmd) if a == "--filter"]
+            filters = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--filter"]
+            want = [f[len("label="):].split("=", 1) for f in filters if f.startswith("label=")]
             names = [n for n, c in self.containers.items()
                      if all((c["Config"]["Labels"] or {}).get(k) == v for k, v in want)]
+            net = [f[len("network="):] for f in filters if f.startswith("network=")]
+            if net:
+                names = [n for n in names if net[0] in self.containers[n]["NetworkSettings"]["Networks"]]
+                return "".join(f"{n}\t{(self.containers[n]['Config']['Labels'] or {}).get(U.L_PROJECT, '')}\n"
+                               for n in names), 0, ""
             return "".join(n + "\n" for n in names), 0, ""
         if cmd[:3] == ["docker", "image", "inspect"]:
             if cmd[3:5] == ["--format", "{{.Id}}"]:
@@ -353,6 +362,68 @@ check("plan: latest, version known to the radar -> no warning", (p["installed_ve
       ("5.0.2", False))
 os.unlink(U.VERSIONS)
 del D.containers["formbricks-app"]
+
+# ------------------------------------------- what else an update touches
+fresh_docker()
+D.add(ctn("gt-web", "app:1", "sha256:a1", project="gt", service="web", networks=("gt_default", "mailrelay")))
+D.add(ctn("gt-worker", "app:1", "sha256:a1", project="gt", service="worker", networks=("gt_default",)))
+D.add(ctn("gt-migrate", "app:1", "sha256:a1", project="gt", service="migrate", running=False))
+D.containers["gt-migrate"]["HostConfig"]["RestartPolicy"]["Name"] = "on-failure"
+D.add(ctn("gt-db", "postgres:16", "sha256:p", project="gt", service="db", cmd=["postgres"]))
+D.add(ctn("gt-side", "side:2", "sha256:s", project="gt", service="side"))
+D.add(ctn("smtp", "boky/postfix:latest", "sha256:m", project="smtp-relay", service="smtp", networks=("mailrelay",)))
+D.add(ctn("lonely", "x:1", "sha256:x", networks=("mailrelay",)))
+D.cfg = {"services": {
+    "web": {"depends_on": {"db": {"condition": "service_healthy"},
+                           "migrate": {"condition": "service_completed_successfully"}}},
+    "worker": {"depends_on": {"db": {"condition": "service_started"}}},
+    "migrate": {"depends_on": {"db": {"condition": "service_healthy"}}},
+    "db": {}, "side": {"depends_on": {"web": {"condition": "service_started"}}}}}
+p = plan("gt-web")
+check("relations: one-off job among the same image", (p["services"], p["jobs"]),
+      (["migrate", "web", "worker"], ["gt-migrate"]))
+check("relations: what the services wait for", p["depends_on"], [{"service": "db", "condition": "service_healthy"}])
+check("relations: who waits for them (watched)", p["dependents"], [{"service": "side", "containers": ["gt-side"]}])
+check("relations: a service that does not wait for the job", p["job_order"], [{"job": "migrate", "services": ["worker"]}])
+check("relations: other projects on a shared network",
+      p["shared_networks"], [{"network": "mailrelay", "projects": ["lonely", "smtp-relay"]}])
+D.cfg = {"services": {}}
+check("relations: without depends_on nothing waits, so both services get the warning",
+      [plan("gt-web")[k] for k in ("depends_on", "dependents", "job_order")],
+      [[], [], [{"job": "migrate", "services": ["web", "worker"]}]])
+
+# watching the dependent services after the update
+D.containers["gt-side"]["State"] = {"Running": True, "StartedAt": "2026-10-13T10:00:00Z", "RestartCount": 0}
+before = U.running_state(["gt-side", "gt-migrate", "nope"])
+check("watch: only containers that run now", before, {"gt-side": ("2026-10-13T10:00:00Z", 0)})
+check("watch: keeps running -> nothing failed", quiet(U.watch_dependents, before)[0], [])
+D.containers["gt-side"]["State"]["RestartCount"] = 1
+check("watch: a new restart counts as failed", quiet(U.watch_dependents, before)[0], ["gt-side"])
+D.containers["gt-side"]["State"].update(RestartCount=0, StartedAt="2026-10-13T10:05:00Z")
+check("watch: a restart without the counter (new start time) too", quiet(U.watch_dependents, before)[0], ["gt-side"])
+D.containers["gt-side"]["State"].update(StartedAt="2026-10-13T10:00:00Z", Health={"Status": "unhealthy"})
+check("watch: unhealthy", quiet(U.watch_dependents, before)[0], ["gt-side"])
+check("watch: nothing to watch", quiet(U.watch_dependents, {})[0], [])
+del D.containers["gt-side"]["State"]["Health"]
+
+# an update whose dependent service fails afterwards fails as a whole
+D.cfg = {"services": {"side": {"depends_on": {"web": {"condition": "service_started"}}}}}
+D.tags = {"app:1": "sha256:a2"}
+D.images = {"sha256:a2": {"Id": "sha256:a2", "Config": {"Env": []}, "RepoDigests": ["app@sha256:abc"]}}
+U.wait_healthy = lambda project, services: (True, [], {})
+real_watch, seen = U.watch_dependents, []
+U.watch_dependents = lambda before: seen.append(before) or ["gt-side"]
+LOGS["gt-side"] = ["Error: lost the connection to web"]
+rc, out = quiet(U.cmd_update, "gt-web", do_dump=False)
+release_lock()
+res = json.loads(out.strip().splitlines()[-1][9:])
+check("dependent fails after the update -> exit 4, its cause",
+      (rc, res["status"], res["reason"]["container"], res["reason"]["line"]),
+      (4, "failed", "gt-side", "Error: lost the connection to web"))
+check("the dependent was watched with its state from before the update", list(seen[0]), ["gt-side"])
+U.watch_dependents = real_watch
+LOGS.clear()
+reset_fs()
 
 # -------------------------------------------------- most likely cause
 NODE_LOG = [

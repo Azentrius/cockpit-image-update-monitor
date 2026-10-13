@@ -2,8 +2,8 @@
 
 ## 0.9.0 – 2026-10-13
 
-Stage 1.2, second part: the output of every update stays with the history, and a build whose update
-failed is not offered silently again.
+Stage 1.2, second part: the output of every update stays with the history, a build whose update
+failed is not offered silently again, and the update shows what it touches besides its image.
 
 - **Output kept.** The live output of every update and rollback is stored with the history
   (`/var/backups/image-updates/logs/<op-id>.log`, root only, at most 512 KiB, without the `@@RESULT`
@@ -17,11 +17,27 @@ failed is not offered silently again.
 - **Restart loops:** the end-to-end test has a new step with an app that exits at once under
   `restart: always`. The update must fail within 60 seconds and name the cause with the state
   `restarting`.
+- **What is updated together.** In the overview a row says “together with …” when other running
+  containers of the same compose project use the same image: one click on *Update* recreates them too.
+  The update dialog groups the containers: recreated (same image) and one-off jobs that run again (e.g.
+  `migrate`).
+- **Dependencies.** From `docker compose config` the dialog lists what the services wait for
+  (`depends_on`, with the condition) and which services wait for them.
+  - The services that depend on the updated ones are not restarted, but watched for about 15 seconds
+    after the update: they must keep running, without a new restart, and stay healthy. If one does
+    not, the update counts as failed, with its cause and the rollback button.
+  - A warning when services of the same image do not wait for its one-off job (`depends_on` with
+    `condition: service_completed_successfully`): they can start before the migration is done.
+  - A hint when other compose projects are on the same user-defined network (e.g. one mail relay for
+    several projects); it never blocks anything.
 - **Roadmap:** stage 2 plans a selection field for the target version (a fixed version, a version
   line such as `5`, or `latest`).
 - **Tests:** offline tests for the kept output (cut at the limit, root only, nothing for an aborted
   update), the `log` verb, the digests of the new build, the output button and the failed-build hint
-  with its tick box; the end-to-end test checks the kept output and the digests as well.
+  with its tick box, the relations in the plan (jobs, `depends_on`, dependents, job order, shared
+  networks), the watch of dependent services and the dialog groups. The end-to-end test checks the
+  kept output and the digests, and its project has a service that depends on the database and is
+  watched.
 
 ## 0.8.0 – 2026-10-13
 

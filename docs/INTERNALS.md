@@ -159,6 +159,16 @@ newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+
   `16-alpine` 1, `3.12-slim` 2, `v2.1.4` 3.
 - `jump_unknown`: `installed_version` is `null` **and** `tag_digits` is 0. Nobody can tell how big the
   jump is; the plugin warns first and enables *Update* only after a tick box.
+- Relations (since 0.9.0, from `docker compose config` and the containers of the project):
+  - `jobs`: containers among `containers` that run once (not running, restart policy `no` or
+    `on-failure`), e.g. migrations.
+  - `depends_on`: `[{"service", "condition"}]`, the services outside the image's that they wait for.
+  - `dependents`: `[{"service", "containers"}]`, services whose `depends_on` names one of the image's.
+    `update` watches those that run (see below).
+  - `job_order`: `[{"job", "services"}]`, services of the same image that do not wait for the job with
+    `condition: service_completed_successfully`.
+  - `shared_networks`: `[{"network", "projects"}]`, other compose projects (or container names
+    without a project) on the user-defined networks of these containers, except `<project>_default`.
 
 ### `@@RESULT` (last line of `update` / `rollback` / `cleanup`)
 
@@ -234,6 +244,10 @@ rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_sta
 - `reason` (since 0.8.0): on a failed update, the same object as in `@@RESULT`. A failed rollback adds
   `rollback_reason` with the line that marks it rolled back. The backups tab shows the cause under the
   result (the rollback's if it failed, otherwise the update's).
+- **Dependent services** (since 0.9.0): after the recreated containers are healthy, `update` checks
+  the running containers of `dependents` five times, 3 seconds apart, against their state from before
+  the update (`StartedAt`, `RestartCount`, not `unhealthy`). One that stopped, restarted or turned
+  unhealthy makes the update fail (exit 4) with its own `reason`.
 - `new_digests` (since 0.9.0): the registry digests of the new image (`RepoDigests`, `sha256:…`), the
   values Diun reports as `digest`. `[]` for images built or tagged locally.
 - **Output:** `update` and `rollback`, called through `main`, keep what they print in
@@ -318,6 +332,11 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
     (`.dm-gate`: `#dm-jump-check`, `#dm-retry-check`) is set.
   - A `reason` in the result fills `#dm-dialog-reason` (`az-alert--danger`) above the log; every new
     run hides it again.
+- **Together:** rows of the same compose project with the same image and tag name each other under
+  the container name (“together with …”, three names at most). The name itself is `.dm-name`.
+- **Plan groups:** recreated (`containers` without `jobs`), one-off jobs, waits for (`depends_on`),
+  watched afterwards (`dependents`); `job_order` as a warning, `shared_networks` as a hint. Neither
+  needs a tick box.
 - **Failed builds:** from the history, the newest update of each image counts; if it failed, its
   `new_digests` mark the build. A row with Diun's `digest` among them gets a note under the status. The
   history loads after the table, so the rows are drawn again when the marks change.
@@ -337,11 +356,11 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, hub/registry match with fakes, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, rollback, cleanup rules, `backups`, `radar`, waiting for health, `stream` |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
-| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, output button, a build that failed before (row note, second tick box), delete |
+| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, output button, a build that failed before (row note, second tick box), “together with” in the rows, plan groups and dependencies, delete |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
