@@ -35,7 +35,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 |---|---|
 | **Overview** | All running containers with *Configured* (tag from compose), *Installed* (real version), *Newest version* (patch / minor / major) and status. Sorted by urgency. |
 | **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**” in the card. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
-| **Update / roll out** | One click first shows a plan (affected containers, compose project, databases, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If that fails, there is a rollback button. |
+| **Update / roll out** | One click first shows a plan (affected containers, compose project, databases, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If nobody can tell how big the jump is (unknown version, tag `latest`), the plan says so and asks for an extra confirmation. If the containers do not come up, the most likely cause from their log stands next to the rollback button. |
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
 | **Use** | The shared Azentrius page frame (header, tabs, signature), light or dark following Cockpit's style, English and German following Cockpit's language (fallback English), loading indicator, rows as blocks on phones, no external resources (strict Cockpit CSP). |
@@ -171,6 +171,15 @@ sequenceDiagram
 - **When it stops:** if a dump fails or is incomplete (end marker missing), for example because of a wrong password, or there is too little free space. Then the update stops **before any change** (exit 5); dumps of the other databases made in that attempt are removed again.
 
 **Rollback** points the tag back to the rollback copy and recreates the same services.
+
+**Unknown jump size:** if the installed version is unknown and the tag fixes no version number
+(`latest`, `stable` …), nobody can tell what the update brings. The plan says so first: it may be a new
+major version that needs other settings or additional services. *Update* stays disabled until a tick
+box confirms it. Check the release notes before.
+
+**When it fails:** a box above the live output names the most likely cause: the container and the last
+line of its log that names an error, the last output of its health check, or what `docker compose`
+printed. The rollback button is next to it, and the backups tab keeps the cause in the history.
 
 > **Rollback ≠ data back.** If the new version migrated its database on start, the old program and the new data no longer fit together. Then only the dump helps, and restoring it is deliberately a manual step (see below).
 
@@ -398,6 +407,7 @@ tail -n 5 /var/lib/diun/events.jsonl
 | “Cleanup rules: … not understood” | Fix the line in `/etc/image-updates.conf` (only `KEEP_DUMPS` and `ROLLBACK_IMAGE_DAYS`, numbers) or make it root-only (`chown root:root`, `chmod 644`). Until then nothing is deleted. |
 | “Radar: no data yet” / “(outdated)” | Timer missing or not running: *Missing requirements* panel or `systemctl status diun-radar.timer`. |
 | “Registry error”, “(older data)” | Registry unreachable or rate limit; the last good result stays visible. |
+| Update failed, box “Most likely cause” | The line comes from the container's log (or its health check). Roll back, fix the cause (e.g. a setting a new major version needs), then update again. |
 | Update stops with “dump … failed” | Nothing was changed. Check the database logs; if need be, untick “Create database dump first” (a deliberate decision). |
 | Rollback image cannot be deleted | A container still uses the image; first update all containers on the old build. |
 
@@ -463,6 +473,7 @@ Covered by the tests, among other things:
 - language EN/DE
 - requirements panel
 - update, rollback, delete and cleanup dialogs, “Run radar now”
+- the warning for an unknown jump size, the most likely cause of a failure
 - the version columns
 - version and changelog agree
 
@@ -481,7 +492,7 @@ sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e
 
 The test checks:
 - plan
-- update with dump that fails on purpose
+- update with dump that fails on purpose, with its most likely cause
 - rollback; a second rollback is refused
 - update without dump, with versions in the result and the history
 - cleanup after the update, limited to the test project
@@ -511,7 +522,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “Registry error”.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Version jumps** via a different tag and **database majors** are manual (change the compose file).
-- **Floating tags with an unknown version** (`latest` without a version label or variable): the update cannot tell how big the jump is and may bring a new major version.
+- **Floating tags with an unknown version** (`latest` without a version label or variable): the update cannot tell how big the jump is and may bring a new major version. The plan warns and asks for an extra confirmation; resolving such tags through the registry comes later in stage 1.2.
 - **Dependencies** (`depends_on`) are not considered: an update recreates only the services that use the image. A database or cache restarts under the running app, which has to reconnect by itself.
 - After updates of images whose version can only be determined by label/digest, `?` shows for a few minutes until the radar run started by the update is done.
 
@@ -525,7 +536,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
-| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | planned |
+| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **in progress** (0.8.0: unknown jump size, cause of a failure) |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |

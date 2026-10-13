@@ -24,7 +24,10 @@
      "size": 52428800
     }
    ],
-   "free_bytes": 42949672960
+   "free_bytes": 42949672960,
+   "installed_version": "0.30.11",
+   "tag_digits": 0,
+   "jump_unknown": false
   },
   "*": {
    "container": "glitchtip-postgres",
@@ -56,7 +59,10 @@
      "size": null
     }
    ],
-   "free_bytes": 42949672960
+   "free_bytes": 42949672960,
+   "installed_version": "16.14",
+   "tag_digits": 1,
+   "jump_unknown": false
   }
  },
  "backups": {
@@ -103,6 +109,39 @@
    }
   ],
   "ops": [
+   {
+    "id": "20261012-232502-formbricks-app",
+    "ts": "2026-10-12T23:25:02Z",
+    "kind": "update",
+    "container": "formbricks-app",
+    "project": "formbricks",
+    "image": "ghcr.io/formbricks/formbricks:latest",
+    "services": [
+     "formbricks"
+    ],
+    "containers": [
+     "formbricks-app"
+    ],
+    "rollback": "ghcr.io/formbricks/formbricks:rollback-20261012-232502",
+    "dumps": [
+     "formbricks/20261012-232502_formbricks-db.sql.gz"
+    ],
+    "status": "failed",
+    "can_rollback": false,
+    "from_version": null,
+    "to_version": null,
+    "rolled_back": true,
+    "rollback_ts": "2026-10-12T23:29:08Z",
+    "rollback_status": "ok",
+    "reason": {
+     "container": "formbricks-app",
+     "state": "restarting",
+     "exit_code": 1,
+     "oom": false,
+     "source": "log",
+     "line": "Error: Invalid environment variables: - AUTHZED_ENABLED: Formbricks v6 requires AUTHZED_ENABLED=true; configure SpiceDB before starting the server."
+    }
+   },
    {
     "id": "20261012-031500-glitchtip-postgres",
     "ts": "2026-10-12T01:15:00Z",

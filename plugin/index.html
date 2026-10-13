@@ -10,14 +10,14 @@
          never flashes in the wrong brightness, then the shared stylesheet,
          then what only this page needs. Everything is local, so Cockpit's
          default (strict) CSP applies unchanged. -->
-    <script src="azentrius-theme.js?v=0.7.0"></script>
-    <link rel="stylesheet" href="azentrius.css?v=0.7.0">
-    <link rel="stylesheet" href="diun.css?v=0.7.0">
+    <script src="azentrius-theme.js?v=0.8.0"></script>
+    <link rel="stylesheet" href="azentrius.css?v=0.8.0">
+    <link rel="stylesheet" href="diun.css?v=0.8.0">
     <!-- Cockpit base API + Cockpit's own translation file for the session
          language (sets cockpit.language, e.g. "de"; absent for English). -->
     <script src="../base1/cockpit.js"></script>
     <script src="../base1/po.js"></script>
-    <script src="icons.js?v=0.7.0"></script>
+    <script src="icons.js?v=0.8.0"></script>
 </head>
 <body>
     <!-- Static texts are English (the fallback) and get translated by
@@ -203,6 +203,7 @@
             <p id="dm-dialog-desc" class="dm-dialog-desc"></p>
             <div id="dm-dialog-body" class="dm-dialog-body"></div>
             <p id="dm-dialog-note" class="dm-dialog-note" data-i18n="dialog.note">Runs with administrator privileges via Cockpit. Output appears here live.</p>
+            <div id="dm-dialog-reason" class="az-alert az-alert--danger dm-dialog-reason" role="alert" hidden></div>
             <pre id="dm-dialog-log" class="dm-dialog-log" hidden></pre>
             <p id="dm-dialog-result" class="dm-dialog-result" role="status" aria-live="polite"></p>
         </div>
@@ -217,6 +218,6 @@
         </div>
     </dialog>
 
-    <script src="diun.js?v=0.7.0"></script>
+    <script src="diun.js?v=0.8.0"></script>
 </body>
 </html>

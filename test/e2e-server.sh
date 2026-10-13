@@ -135,13 +135,16 @@ check "Containers run on OLD" '[ "$(img_of imgupd-test-db)" = "$OLD" ] && [ "$(i
 
 echo "=== 2. 'Pull' a newer image (move the tag) + change compose (app exits) ==="
 docker tag "$NEW" imgupd-test/pg:16
-write_compose "exit 3"
+write_compose "echo Error: e2e app failure; exit 3"
 PULLED=$(python3 $INV | python3 -c 'import sys,json; r=[json.loads(l) for l in sys.stdin if json.loads(l)["name"]=="imgupd-test-db"][0]; print(r["pulled"], r["managed"])')
 check "Inventory reports pulled + managed" '[ "$PULLED" = "True True" ]'
 PLAN=$(python3 $H plan imgupd-test-db)
 echo "plan: $PLAN"
 PCHK=$(jget "$PLAN" '(d["services"], d["config_changed"], d["pulled"], [x["name"] for x in d["dbs"]]) == (["app", "db"], True, True, ["imgupd-test-db"])')
 check "Plan: both services, config changed, pulled, DB found" '[ "$PCHK" = True ]'
+PV=$(jget "$PLAN" '(d["installed_version"], d["tag_digits"], d["jump_unknown"])')
+WANT_PV="('$(pg_version "$OLD_IMAGE")', 1, False)"
+check "Plan: installed version known, the tag fixes the major: $PV" '[ "$PV" = "$WANT_PV" ]'
 
 echo "=== 3. Update with dump – must fail (app exit 3) ==="
 python3 $H update imgupd-test-db > /tmp/e2e-1.log 2>&1; RC=$?
@@ -153,6 +156,11 @@ check "Exit 4 + status failed" '[ $RC = 4 ] && [ "$S1" = failed ]'
 check "Dump contains the test data" 'zcat "$DUMPS/$DUMP" | grep -q hello-from-e2e'
 check "Dump readable by root only (600)" '[ "$(stat -c %a "$DUMPS/$DUMP")" = 600 ]'
 check "Rollback tag exists" 'docker image inspect "$RB1" >/dev/null 2>&1'
+CAUSE=$(jget "$R1" '(d["reason"] or {}).get("container") == "imgupd-test-app" and d["reason"]["exit_code"] == 3 and d["reason"]["line"] == "Error: e2e app failure"')
+check "Most likely cause in the result: the app and its error line" '[ "$CAUSE" = True ]'
+check "Most likely cause in the output" 'grep -q "Most likely cause (imgupd-test-app): Error: e2e app failure" /tmp/e2e-1.log'
+HCAUSE=$(OP=$OP1 python3 -c 'import json,os; o=[json.loads(l) for l in open("'"$OPS"'") if json.loads(l).get("id")==os.environ["OP"]][0]; print((o.get("reason") or {}).get("line"))')
+check "Most likely cause in operations.jsonl" '[ "$HCAUSE" = "Error: e2e app failure" ]'
 
 echo "=== 4. Repair compose, roll back ==="
 write_compose "sleep infinity"
