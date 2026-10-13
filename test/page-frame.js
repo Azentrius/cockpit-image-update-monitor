@@ -148,7 +148,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     const b = boot("de");
     await sleep(40);
     const rows = [...b.d.querySelectorAll("#dm-rows tr")];
-    const status = (name) => rows.find((tr) => tr.querySelector("td").textContent === name).querySelector('td[data-label="Status"] .az-label');
+    const status = (name) => rows.find((tr) => tr.querySelector(".dm-name").textContent === name).querySelector('td[data-label="Status"] .az-label');
     const want = { ollama: ["az-label az-label--info", "info-circle", "Update verfügbar"],
                    "glitchtip-postgres": ["az-label az-label--info", "info-circle", "Ausrollen ausstehend"],
                    plausible: ["az-label az-label--info", "info-circle", "Neue Version"],

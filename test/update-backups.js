@@ -97,12 +97,17 @@ const BASE_SCRIPT = {
     // 1. Rows: buttons per kind
     const a = boot("de", BASE_SCRIPT);
     await sleep(80);
-    const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector("td").textContent === name);
+    const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector(".dm-name").textContent === name);
     const describe = (tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent.trim()).filter(Boolean).join(" | ");
     for (const n of ["ollama", "glitchtip-postgres", "actual-ai", "calcom"]) console.log("row:", describe(rowOf(a.d, n)));
     assert(rowOf(a.d, "ollama").querySelector('button[data-update="ollama"]').textContent === "Update");
     assert(rowOf(a.d, "glitchtip-postgres").querySelector("button[data-update]").textContent === "Ausrollen");
     assert(rowOf(a.d, "glitchtip-postgres").textContent.includes("Ausrollen ausstehend"));
+    const together = (n) => { const x = rowOf(a.d, n).querySelector("td .dm-row-note"); return x && x.textContent; };
+    console.log("together:", ["glitchtip-web", "hbbr", "nextcloud-family-cron-1", "ollama"].map((n) => `${n} -> ${together(n)}`).join(" | "));
+    assert.strictEqual(together("glitchtip-web"), "zusammen mit glitchtip-worker");
+    assert.strictEqual(together("hbbr"), "zusammen mit hbbs");
+    assert.strictEqual(together("ollama"), null, "alone in its project with its image");
     console.log("meta:", a.d.getElementById("dm-meta").textContent);
 
     // 2. Update ollama: plan -> body -> confirm -> stream -> success
@@ -342,9 +347,40 @@ const BASE_SCRIPT = {
     await sleep(120);
     assert.strictEqual(noteOf(ok.d), null, "a later successful update clears the mark");
 
+    // 11. What else the update touches: groups, dependencies, warnings
+    const PLAN_REL = { ...PLAN_OLLAMA, config_changed: false, container: "glitchtip-web", image: "glitchtip/glitchtip:latest",
+        project: "glitchtip", services: ["glitchtip-migrate", "glitchtip-web", "glitchtip-worker"],
+        containers: ["glitchtip-migrate", "glitchtip-web", "glitchtip-worker"], jobs: ["glitchtip-migrate"],
+        depends_on: [{ service: "glitchtip-postgres", condition: "service_started" },
+                     { service: "glitchtip-redis", condition: "service_healthy" }],
+        dependents: [{ service: "side", containers: ["glitchtip-side"] }],
+        job_order: [{ job: "glitchtip-migrate", services: ["glitchtip-web", "glitchtip-worker"] }],
+        shared_networks: [{ network: "mailrelay", projects: ["calcom", "smtp-relay"] }],
+        installed_version: "6.2.6", tag_digits: 0, jump_unknown: false };
+    const rl = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_REL) } });
+    await sleep(80);
+    rl.d.querySelector('button[data-update="ollama"]').click();
+    await sleep(40);
+    const rlBody = rl.d.getElementById("dm-dialog-body");
+    const rows11 = kvRows(rlBody);
+    console.log("\nrelations:", rows11.join(" | "));
+    ["Neu erstellt (gleiches Image): glitchtip-web glitchtip-worker",
+     "Einmal-Jobs (laufen erneut): glitchtip-migrate",
+     "Wartet auf: glitchtip-postgres gestartet, glitchtip-redis gesund",
+     "Hängen davon ab (werden danach beobachtet): glitchtip-side"].forEach((want) => assert(rows11.includes(want), want));
+    const callouts = [...rlBody.querySelectorAll(".dm-callout")].map((x) => x.textContent);
+    assert(callouts.includes("glitchtip-web, glitchtip-worker warten nicht auf glitchtip-migrate: Sie können starten, bevor der Job " +
+                             "fertig ist. In der Compose-Datei sorgt depends_on mit condition: service_completed_successfully dafür, dass sie warten."));
+    assert(callouts.includes("Ebenfalls im Netzwerk mailrelay: calcom, smtp-relay. Sie nutzen dieses Projekt womöglich; das Update unterbricht es kurz."));
+    assert(!rl.d.getElementById("dm-dialog-confirm").disabled, "these are hints, no tick box");
+
     // 6. English: no German left in rows, dialog or backups tab
     const h = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
-        { ...PLAN_GLITCH, installed_version: null, tag_digits: 0, jump_unknown: true }) } });
+        { ...PLAN_GLITCH, installed_version: null, tag_digits: 0, jump_unknown: true, jobs: ["glitchtip-migrate"],
+          depends_on: [{ service: "glitchtip-redis", condition: "service_healthy" }],
+          dependents: [{ service: "side", containers: ["glitchtip-side"] }],
+          job_order: [{ job: "glitchtip-migrate", services: ["glitchtip-web"] }],
+          shared_networks: [{ network: "mailrelay", projects: ["calcom"] }] }) } });
     await sleep(80);
     h.d.querySelector('button[data-update="glitchtip-postgres"]').click();
     await sleep(40);
@@ -355,7 +391,8 @@ const BASE_SCRIPT = {
                     "Löschen", "Datenbank", "Betroffene", "Rollback-Kopie", "Erstellt", "Größe", "Zeitpunkt", "Ergebnis",
                     "erfolgreich", "keine Änderung", "in Benutzung", "Projekt", "Datei", "nur manuell", "Abbrechen",
                     "unbekannt", "Hauptversion", "Vermutliche", "Ursache", "Speichermangel", "Wartezeit",
-                    "Ausgabe", "gescheitert", "trotzdem"];
+                    "Ausgabe", "gescheitert", "trotzdem", "zusammen mit", "Neu erstellt", "Einmal-Jobs", "Wartet auf",
+                    "Hängen davon ab", "gesund", "Ebenfalls"];
     assert(all.includes("The installed version is unknown and the tag 16-alpine follows every new release"));
     const found = german.filter((w) => all.includes(w));
     console.log("\nEN German leftovers:", found.length ? found : "none");

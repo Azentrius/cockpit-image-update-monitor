@@ -12,8 +12,9 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 2. tag the running image as <repo>:rollback-<stamp>
                                 3. docker compose pull + up -d --no-deps for every
                                    service of the project that uses the same image
-                                4. wait until the new containers run (healthy);
-                                   if they do not, name the most likely cause
+                                4. wait until the new containers run (healthy),
+                                   then watch the services that depend on them;
+                                   if anything fails, name the most likely cause
                                 5. clean up this project by the rules (see cleanup)
                                 6. start the version radar in the background
   rollback <op-id>              point the tag back at the rollback image and
@@ -90,6 +91,7 @@ NODUMP_RE = re.compile(r"(^|/)(redis|valkey|keydb|memcached|clickhouse-server|mo
 
 HEALTH_TIMEOUT = 180     # seconds to wait for recreated containers
 STABLE_SECONDS = 15      # without a healthcheck: must keep running this long
+WATCH_ROUNDS = 5         # dependent services: checked this often, 3 s apart
 FREE_MARGIN = 1 << 30    # keep at least 1 GiB free beyond the dump estimate
 
 LANG = "de" if os.environ.get("DIUN_LANG", "en") == "de" else "en"
@@ -333,7 +335,8 @@ def make_plan(name):
             "project": None, "workdir": None, "services": [], "containers": [],
             "dbs": [], "free_bytes": None, "config_changed": False,
             "pulled": False, "old_image": c["Image"],
-            "installed_version": None, "tag_digits": None, "jump_unknown": False}
+            "installed_version": None, "tag_digits": None, "jump_unknown": False,
+            "jobs": [], "depends_on": [], "dependents": [], "job_order": [], "shared_networks": []}
 
     ctx = compose_ctx(c)
     if not ctx:
@@ -366,6 +369,7 @@ def make_plan(name):
         if svc.get("build") is not None:
             plan["reason"] = "built-locally"
             return plan, ctx
+    relations(plan, cfg, members, same, services, ctx["project"])
 
     # Has the compose file changed since these containers were created?
     try:
@@ -407,6 +411,108 @@ def make_plan(name):
     plan["free_bytes"] = shutil.disk_usage(BASE if os.path.isdir(BASE) else os.path.dirname(BASE)).free
     plan["updatable"] = True
     return plan, ctx
+
+
+def is_job(c):
+    """A one-off container such as a migration: not running, restart policy
+    "no" or "on-failure"."""
+    policy = ((c.get("HostConfig") or {}).get("RestartPolicy") or {}).get("Name") or "no"
+    return not (c.get("State") or {}).get("Running") and policy in ("no", "on-failure")
+
+
+def relations(plan, cfg, members, same, services, project):
+    """What the update touches besides the services of its image, from
+    `docker compose config` and the containers:
+      jobs             one-off containers among them (migrations), run again
+      depends_on       services they wait for, with the condition
+      dependents       services that wait for them; watched after the update
+      job_order        services of the same image that do not wait for a job
+                       of that image (can start before the migration is done)
+      shared_networks  other compose projects on the same user-defined network
+                       (a hint: being on a network does not prove use)"""
+    svc_cfg = cfg.get("services") or {}
+    svc_of = {m["Name"].lstrip("/"): (m["Config"]["Labels"] or {}).get(L_SERVICE) for m in members}
+    plan["jobs"] = sorted(m["Name"].lstrip("/") for m in same if is_job(m))
+    job_svcs = sorted({svc_of[n] for n in plan["jobs"]} - {None})
+
+    deps = {}
+    for s in services:
+        for d, spec in sorted(((svc_cfg.get(s) or {}).get("depends_on") or {}).items()):
+            if d not in services:
+                deps.setdefault(d, (spec or {}).get("condition") or "service_started")
+    plan["depends_on"] = [{"service": d, "condition": c} for d, c in sorted(deps.items())]
+
+    for s in sorted(svc_cfg):
+        if s in services or not set((svc_cfg[s] or {}).get("depends_on") or {}) & set(services):
+            continue
+        plan["dependents"].append({"service": s, "containers": sorted(n for n, v in svc_of.items() if v == s)})
+
+    for j in job_svcs:
+        waiting = []
+        for s in services:
+            if s in job_svcs:
+                continue
+            cond = (((svc_cfg.get(s) or {}).get("depends_on") or {}).get(j) or {}).get("condition")
+            if cond != "service_completed_successfully":
+                waiting.append(s)
+        if waiting:
+            plan["job_order"].append({"job": j, "services": waiting})
+
+    nets = set()
+    for m in same:
+        nets.update(((m.get("NetworkSettings") or {}).get("Networks") or {}).keys())
+    for n in sorted(nets - {"bridge", "host", "none", project + "_default"}):
+        try:
+            out = run(["docker", "ps", "-a", "--filter", "network=" + n,
+                       "--format", '{{.Names}}\t{{.Label "com.docker.compose.project"}}'])
+        except subprocess.CalledProcessError:
+            continue
+        others = set()
+        for line in out.splitlines():
+            name, _, proj = line.partition("\t")
+            if proj != project:
+                others.add(proj or name)
+        if others:
+            plan["shared_networks"].append({"network": n, "projects": sorted(others)})
+
+
+def running_state(names):
+    """{name: (StartedAt, RestartCount)} of the containers that run now."""
+    out = {}
+    for n in names:
+        try:
+            st = docker_json("inspect", "--type", "container", n)[0].get("State") or {}
+        except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
+            continue
+        if st.get("Running"):
+            out[n] = (st.get("StartedAt"), st.get("RestartCount", 0))
+    return out
+
+
+def watch_dependents(before):
+    """After the update: the dependent services (not recreated) must keep
+    running, without new restarts, and stay healthy if they have a health
+    check. Returns the names of those that do not."""
+    if not before:
+        return []
+    say(f"Beobachte abhängige Dienste: {', '.join(sorted(before))} …",
+        f"Watching dependent services: {', '.join(sorted(before))} …")
+    bad = set()
+    for _ in range(WATCH_ROUNDS):
+        time.sleep(3)
+        for n, (started, restarts) in before.items():
+            try:
+                st = docker_json("inspect", "--type", "container", n)[0].get("State") or {}
+            except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
+                bad.add(n)
+                continue
+            health = (st.get("Health") or {}).get("Status")
+            if (not st.get("Running") or st.get("StartedAt") != started
+                    or st.get("RestartCount", 0) > restarts or health == "unhealthy"):
+                bad.add(n)
+    if not bad:
+        say("Abhängige Dienste laufen weiter.", "Dependent services keep running.")
+    return sorted(bad)
 
 
 # ----------------------------------------------------------------- dumps ----
@@ -797,9 +903,13 @@ def cmd_update(name, do_dump=True):
     op["to_version"] = version_of(ref, new_id)
     versions = {"from_version": op["from_version"], "to_version": op["to_version"]}
 
-    # 4. Recreate only these services
+    # 4. Recreate only these services, then watch those that depend on them
+    watched = running_state([c for d in plan["dependents"] for c in d["containers"]])
     rc = stream(base + ["up", "-d", "--no-deps", "--pull", "never", *services])
     ok, failed, _states = (False, [], {}) if rc != 0 else wait_healthy(project, services)
+    if ok:
+        failed = watch_dependents(watched)
+        ok = not failed
     if rc != 0 or not ok:
         show_logs(failed or plan["containers"])
         op["reason"] = failure_reason(failed or plan["containers"], compose_rc=rc)

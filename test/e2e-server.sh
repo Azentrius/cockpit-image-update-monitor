@@ -122,6 +122,14 @@ services:
     entrypoint: ["sh", "-c"]
     command: ["$1"]
     restart: "${2:-no}"
+  side:
+    image: imgupd-test/side:1
+    container_name: imgupd-test-side
+    entrypoint: ["sh", "-c"]
+    command: ["sleep infinity"]
+    depends_on:
+      db:
+        condition: service_healthy
 EOF
 }
 
@@ -133,6 +141,7 @@ echo "=== 1. Start the test project on the old image ==="
 mkdir -p "$D"
 write_compose "sleep infinity"
 docker tag "$OLD" imgupd-test/pg:16
+docker tag "$OLD" imgupd-test/side:1
 docker compose -p "$P" -f "$D/docker-compose.yml" up -d --wait 2>&1 | tail -n 3
 docker exec imgupd-test-db psql -U postgres -qc "create table e2e(x text); insert into e2e values ('hello-from-e2e');"
 check "Containers run on OLD" '[ "$(img_of imgupd-test-db)" = "$OLD" ] && [ "$(img_of imgupd-test-app)" = "$OLD" ]'
@@ -149,6 +158,8 @@ check "Plan: both services, config changed, pulled, DB found" '[ "$PCHK" = True 
 PV=$(jget "$PLAN" '(d["installed_version"], d["tag_digits"], d["jump_unknown"])')
 WANT_PV="('$(pg_version "$OLD_IMAGE")', 1, False)"
 check "Plan: installed version known, the tag fixes the major: $PV" '[ "$PV" = "$WANT_PV" ]'
+REL=$(jget "$PLAN" 'd["dependents"] == [{"service": "side", "containers": ["imgupd-test-side"]}] and d["depends_on"] == [] and d["jobs"] == []')
+check "Plan: the side service depends on the database (watched)" '[ "$REL" = True ]'
 
 echo "=== 3. Update with dump – must fail (app exit 3) ==="
 python3 $H update imgupd-test-db > /tmp/e2e-1.log 2>&1; RC=$?
@@ -212,6 +223,7 @@ check "Cleanup after the update: other projects untouched" '[ "$(other_dumps)" =
 if radar_unit; then
     check "Radar started after the update" 'grep -q "Version radar started" /tmp/e2e-4.log'
 fi
+check "Dependent service watched and still running" 'grep -q "Dependent services keep running" /tmp/e2e-4.log && [ "$(docker inspect -f "{{.State.Running}}" imgupd-test-side)" = true ]'
 
 echo "=== 6. Again – nothing newer ==="
 python3 $H update imgupd-test-db --no-dump > /tmp/e2e-5.log 2>&1; RC=$?

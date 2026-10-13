@@ -36,7 +36,7 @@ function boot(language, files) {
 }
 const FILES = { "/var/lib/diun-radar/versions.json": radar, "/var/lib/diun/events.jsonl": "", "/var/lib/diun/dismissed.json": null };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const row = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector("td").textContent === name);
+const row = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector(".dm-name").textContent === name);
 const cells = (tr) => [...tr.querySelectorAll("td")];
 
 (async () => {

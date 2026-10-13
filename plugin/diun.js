@@ -169,7 +169,16 @@
             "upd.descPulled": "The newer image for {image} is already on the server. The affected containers are recreated with it; the image running now is kept as a rollback copy first.",
             "upd.cardTitle": "Running containers",
             "upd.planning": "Checking what the update affects …",
-            "upd.containers": "Affected containers",
+            "upd.containers": "Recreated (same image)",
+            "upd.jobs": "One-off jobs (run again)",
+            "upd.dependsOn": "Waits for",
+            "upd.dependents": "Depend on it (watched afterwards)",
+            "cond.healthy": "healthy",
+            "cond.started": "started",
+            "cond.completed": "finished successfully",
+            "upd.jobOrder": "{services} do not wait for {job}: they can start before it is done. In the compose file, depends_on with condition: service_completed_successfully makes them wait.",
+            "upd.sharedNet": "Also on the network {network}: {projects}. They may use this project; the update interrupts it briefly.",
+            "row.together": "together with {names}",
             "upd.project": "Compose project",
             "upd.rollback": "Rollback copy",
             "upd.dbs": "Database dump",
@@ -400,7 +409,16 @@
             "upd.descPulled": "Das neuere Image für {image} liegt schon auf dem Server. Die betroffenen Container werden damit neu erstellt; das jetzt laufende Image wird vorher als Rollback-Kopie gesichert.",
             "upd.cardTitle": "Laufende Container",
             "upd.planning": "Prüfe, was das Update betrifft …",
-            "upd.containers": "Betroffene Container",
+            "upd.containers": "Neu erstellt (gleiches Image)",
+            "upd.jobs": "Einmal-Jobs (laufen erneut)",
+            "upd.dependsOn": "Wartet auf",
+            "upd.dependents": "Hängen davon ab (werden danach beobachtet)",
+            "cond.healthy": "gesund",
+            "cond.started": "gestartet",
+            "cond.completed": "erfolgreich beendet",
+            "upd.jobOrder": "{services} warten nicht auf {job}: Sie können starten, bevor der Job fertig ist. In der Compose-Datei sorgt depends_on mit condition: service_completed_successfully dafür, dass sie warten.",
+            "upd.sharedNet": "Ebenfalls im Netzwerk {network}: {projects}. Sie nutzen dieses Projekt womöglich; das Update unterbricht es kurz.",
+            "row.together": "zusammen mit {names}",
             "upd.project": "Compose-Projekt",
             "upd.rollback": "Rollback-Kopie",
             "upd.dbs": "Datenbank-Dump",
@@ -768,6 +786,7 @@
     // Diun reports it again (see sameFailedBuild).
     let failedBuilds = new Map();
     const rowFailed = new Map();        // container name -> failed update op
+    const siblings = new Map();         // container name -> others an update recreates with it
     let lastRender = null;
 
     function failedBuildsOf(ops) {
@@ -840,9 +859,15 @@
             actions.push(iconButton("check", t("btn.dismiss"), `data-key="${esc(evKey(ev))}"`));
         }
 
+        const sib = siblings.get(ctn.name) || [];
+        const together = sib.length
+            ? `<span class="dm-row-note">${esc(t("row.together", {
+                names: sib.slice(0, 3).join(", ") + (sib.length > 3 ? " +" + (sib.length - 3) : "") }))}</span>`
+            : "";
+
         const L = (key) => esc(t(key));
         return { kind, html:
-            `<td data-label="${L("col.container")}"><span class="dm-cell">${esc(ctn.name)}</span></td>` +
+            `<td data-label="${L("col.container")}"><span class="dm-cell"><span class="dm-name">${esc(ctn.name)}</span>${together}</span></td>` +
             `<td data-label="${L("col.image")}" class="dm-img"><span class="dm-cell az-mono">${imgCell}</span></td>` +
             `<td data-label="${L("col.configured")}"><span class="dm-cell dm-ver dm-cfg" title="${L("cfg.tip")}">${esc(ctn.tag)}</span></td>` +
             `<td class="az-nowrap" data-label="${L("col.installed")}"><span class="dm-cell">${installedCell(ctn, rec, inst)}</span></td>` +
@@ -864,6 +889,19 @@
     function render(containers, eventsMap, radarDoc) {
         lastRender = [containers, eventsMap, radarDoc];
         rowFailed.clear();
+        // An update recreates every service of the project with the same image.
+        siblings.clear();
+        const groups = new Map();
+        containers.forEach((c) => {
+            if (!c.project) return;
+            const k = c.project + "|" + verKey(c.image, c.tag);
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k).push(c.name);
+        });
+        groups.forEach((names) => names.forEach((n) => {
+            const others = names.filter((x) => x !== n).sort();
+            if (others.length) siblings.set(n, others);
+        }));
         const rows = $("dm-rows");
         rows.innerHTML = "";
 
@@ -1227,8 +1265,16 @@
                     (cause ? `<span class="dm-reason-line dm-callout-line">${esc(cause)}</span>` : "") + `</p>` +
                     `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-retry-check"> ${esc(t("upd.retryConfirm"))}</label>`;
         }
+        const jobs = plan.jobs || [];
+        const COND = { service_healthy: "cond.healthy", service_started: "cond.started",
+                       service_completed_successfully: "cond.completed" };
+        const deps = (plan.depends_on || []).map((d) =>
+            `${code(d.service)} <span class="dm-muted">${esc(COND[d.condition] ? t(COND[d.condition]) : d.condition)}</span>`);
+        const watched = (plan.dependents || []).map((d) =>
+            (d.containers && d.containers.length ? d.containers : [d.service]).map(code).join(" "));
         html += `<ul class="dm-kv">` +
-            li(t("upd.containers"), (plan.containers || []).map(code).join(" ")) +
+            li(t("upd.containers"), (plan.containers || []).filter((c) => jobs.indexOf(c) < 0).map(code).join(" ")) +
+            (jobs.length ? li(t("upd.jobs"), jobs.map(code).join(" ")) : "") +
             li(t("upd.project"), `${code(plan.project)} <span class="dm-muted">${esc(plan.workdir || "")}</span>`) +
             ("installed_version" in plan
                 ? li(t("upd.installed"), plan.installed_version ? code(plan.installed_version) : esc(t("upd.versionUnknown")))
@@ -1236,10 +1282,18 @@
             li(t("upd.rollback"), code(repo + ":rollback-…")) +
             li(t("upd.dbs"), dbLines.length ? dbLines.join("<br>") : esc(t("upd.noDb"))) +
             (dumpable && plan.free_bytes != null ? li("", `<span class="dm-muted">${esc(t("upd.free", { free: human(plan.free_bytes) }))}</span>`) : "") +
+            (deps.length ? li(t("upd.dependsOn"), deps.join(", ")) : "") +
+            (watched.length ? li(t("upd.dependents"), watched.join(" ")) : "") +
             `</ul>`;
         html += `<label class="dm-check"><input type="checkbox" id="dm-dump-check"${dumpable ? " checked" : " disabled"}> ` +
                 `${esc(t("upd.dumpCheck"))}</label>`;
         if (plan.config_changed) html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.configChanged"))}</p>`;
+        (plan.job_order || []).forEach((o) => {
+            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.jobOrder", { job: o.job, services: o.services.join(", ") }))}</p>`;
+        });
+        (plan.shared_networks || []).forEach((n) => {
+            html += `<p class="dm-callout">${esc(t("upd.sharedNet", { network: n.network, projects: n.projects.join(", ") }))}</p>`;
+        });
         html += `<p class="dm-callout">${esc(t("upd.dataWarn"))} ${esc(t("upd.downtime"))}</p>`;
         return html;
     }
