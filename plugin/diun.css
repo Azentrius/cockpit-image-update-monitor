@@ -167,9 +167,12 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
 .dm-dialog-result.is-ok { color: var(--status-success); }
 .dm-dialog-result.is-error { color: var(--danger-text); }
 
-/* Plan of an update */
-.dm-kv { list-style: none; margin: 0; padding: 0; font-size: 14px; }
-.dm-kv li { display: flex; gap: var(--space-md); padding: 6px 0; border-block-start: 1px solid var(--line); }
+/* Plan of an update: blocks one below the other with room between them;
+   a warning and its tick box stay closer together (.dm-gate-group). */
+.dm-dialog-body, .dm-gate-group { display: flex; flex-direction: column; gap: var(--space-md); }
+.dm-gate-group { gap: var(--space-sm); }
+.dm-kv { list-style: none; margin: 0; padding: 0; font-size: 14px; line-height: 1.6; }
+.dm-kv li { display: flex; gap: var(--space-md); padding: var(--space-sm) 0; border-block-start: 1px solid var(--line); }
 .dm-kv li:first-child { border-block-start: 0; }
 .dm-kv-k { flex: 0 0 10rem; color: var(--text-subtle); }
 .dm-kv-v { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -181,10 +184,10 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
     font-family: var(--az-font-code);
     font-size: 13px;
 }
-.dm-check { display: flex; align-items: center; gap: var(--space-sm); margin: var(--space-sm) 0 0; cursor: pointer; }
+.dm-check { display: flex; align-items: center; gap: var(--space-sm); margin: 0; cursor: pointer; }
 .dm-check input { inline-size: 16px; block-size: 16px; accent-color: var(--primary); }
 .dm-callout {
-    margin: var(--space-sm) 0 0;
+    margin: 0;
     padding: var(--space-sm) var(--space-md);
     border-inline-start: 3px solid var(--line-control);
     color: var(--text-subtle);

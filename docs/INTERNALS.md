@@ -339,7 +339,9 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   - A plan that arrives after the dialog was closed is dropped (`planSeq`).
   - `jump_unknown` in the plan: the warning comes first in the body. A build that failed before (see
     below) adds its own warning with the cause. The confirm button stays disabled until every tick box
-    (`.dm-gate`: `#dm-jump-check`, `#dm-major-check`, `#dm-retry-check`) is set.
+    (`.dm-gate`: `#dm-jump-check`, `#dm-major-check`, `#dm-retry-check`) is set. Each warning and its
+    tick box form one `.dm-gate-group`; the blocks of the body (groups, plan, dump box, notes) are
+    spaced by the flex gap of `.dm-dialog-body`, not by their own margins.
   - `target_version` as a row (“Brings”), with the size of the jump.
   - A `reason` in the result fills `#dm-dialog-reason` (`az-alert--danger`) above the log; every new
     run hides it again.
