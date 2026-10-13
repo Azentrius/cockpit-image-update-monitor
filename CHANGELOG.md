@@ -21,6 +21,9 @@ update says what it brings.
   only when the radar found the installed version among the image's tags. `pgvector/pgvector:pg17`
   runs PostgreSQL 17.10, but its tags count pgvector releases (`pg17` = `0.8.7-pg17-bookworm`): no
   “pg17 = 0.8.7” and no false “17.10 → 0.8.7 Major” warning.
+- **More room in the update dialog.** A warning and its tick box stay together, with clear space
+  before the plan, the dump box and the notes; the rows of the plan are a little taller, so wrapped
+  container names no longer touch.
 - **Tests:** the radar with Docker Hub and registry fakes (tag digest, version of the tag, reuse,
   deeper first lookup, lookup errors), the plan (target from the pulled image or `tag_now`, a tag in
   another numbering, jump sizes), the *Configured* column and the dialog (target row, major warning

@@ -221,8 +221,11 @@ const BASE_SCRIPT = {
     await sleep(40);
     const jbody = j.d.getElementById("dm-dialog-body");
     console.log("\njump  :", jbody.textContent.replace(/\s+/g, " ").slice(0, 150), "…");
-    assert(jbody.firstElementChild.classList.contains("dm-callout-warn"), "warning first");
-    assert(jbody.firstElementChild.textContent.startsWith("Die installierte Version ist unbekannt, und der Tag latest folgt"));
+    const first = jbody.firstElementChild;
+    assert(first.classList.contains("dm-gate-group"), "warning first, together with its tick box");
+    assert(first.firstElementChild.classList.contains("dm-callout-warn"));
+    assert(first.firstElementChild.textContent.startsWith("Die installierte Version ist unbekannt, und der Tag latest folgt"));
+    assert(first.querySelector(".dm-check #dm-jump-check"), "the tick box in the same group");
     assert(kvRows(jbody).includes("Installierte Version: unbekannt"));
     const jc = j.d.getElementById("dm-dialog-confirm");
     const tick = j.d.getElementById("dm-jump-check");

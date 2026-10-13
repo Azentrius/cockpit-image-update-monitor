@@ -1278,24 +1278,28 @@
         let html = "";
         // Unknown version + a tag that follows every release, or a new major
         // version: say so first; the confirm button waits for every tick box
-        // (.dm-gate, see startUpdate).
+        // (.dm-gate, see startUpdate). A warning and its tick box stay
+        // together (.dm-gate-group).
         const tag = tagSplit(plan.image).tag;
+        const gate = (warning, id, confirm) =>
+            `<div class="dm-gate-group"><p class="dm-callout dm-callout-warn">${warning}</p>` +
+            `<label class="dm-check"><input type="checkbox" class="dm-gate" id="${id}"> ${esc(confirm)}</label></div>`;
         if (plan.jump_unknown) {
-            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.jumpUnknown", { tag }))}` +
-                    (plan.target_version ? " " + esc(t("upd.jumpTarget", { tag, v: plan.target_version })) : "") + `</p>` +
-                    `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-jump-check"> ${esc(t("upd.jumpConfirm"))}</label>`;
+            html += gate(esc(t("upd.jumpUnknown", { tag })) +
+                         (plan.target_version ? " " + esc(t("upd.jumpTarget", { tag, v: plan.target_version })) : ""),
+                         "dm-jump-check", t("upd.jumpConfirm"));
         }
         // The update brings a new major version (installed and target known).
         if (plan.jump === "major") {
-            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.majorJump", { from: plan.installed_version, to: plan.target_version }))}</p>` +
-                    `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-major-check"> ${esc(t("upd.majorConfirm", { to: plan.target_version }))}</label>`;
+            html += gate(esc(t("upd.majorJump", { from: plan.installed_version, to: plan.target_version })),
+                         "dm-major-check", t("upd.majorConfirm", { to: plan.target_version }));
         }
         // The registry offers exactly the build whose update failed before.
         if (failed) {
             const cause = failed.reason ? reasonText(failed.reason) : "";
-            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.failedBuild", { date: fmtDate(new Date(failed.ts)) }))}` +
-                    (cause ? `<span class="dm-reason-line dm-callout-line">${esc(cause)}</span>` : "") + `</p>` +
-                    `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-retry-check"> ${esc(t("upd.retryConfirm"))}</label>`;
+            html += gate(esc(t("upd.failedBuild", { date: fmtDate(new Date(failed.ts)) })) +
+                         (cause ? `<span class="dm-reason-line dm-callout-line">${esc(cause)}</span>` : ""),
+                         "dm-retry-check", t("upd.retryConfirm"));
         }
         const jobs = plan.jobs || [];
         const COND = { service_healthy: "cond.healthy", service_started: "cond.started",
