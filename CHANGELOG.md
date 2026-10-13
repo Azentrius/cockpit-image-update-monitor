@@ -17,6 +17,10 @@ failed is not offered silently again, and the update shows what it touches besid
 - **Restart loops:** the end-to-end test has a new step with an app that exits at once under
   `restart: always`. The update must fail within 60 seconds and name the cause with the state
   `restarting`.
+- **Fixed:** a container in a restart loop counted as failed only after the full wait (180 seconds).
+  Docker counts a restart only when it happens, so the counter can stay 0 while the container is
+  restarting. Now a container seen restarting a second time fails the update at once; a single crash
+  that recovers still does not. Found by the new end-to-end step on the reference host.
 - **What is updated together.** In the overview a row says “together with …” when other running
   containers of the same compose project use the same image: one click on *Update* recreates them too.
   The update dialog groups the containers: recreated (same image) and one-off jobs that run again (e.g.

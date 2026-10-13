@@ -924,6 +924,36 @@ check("health: unhealthy", state("running", "unhealthy"), (False, ["x"]))
 check("health: one-shot job finished with 0", state("exited", policy="no"), (True, []))
 check("health: exited with an error", state("exited", exit_code=1, policy="no"), (False, ["x"]))
 check("health: restart loop", state("restarting", restarts=3), (False, ["x"]))
+
+# Docker counts a restart only when it happens: in the restart loop the
+# counter can stay 0. Seen restarting twice, the container counts as failed
+# at once (two inspects), not after HEALTH_TIMEOUT. One crash that recovers
+# is no failure.
+U.HEALTH_TIMEOUT = 30
+seq, real_handle = [], D.handle
+
+
+def handle(cmd):
+    if cmd[:2] == ["docker", "inspect"] and seq:
+        D.containers["x"]["State"] = seq.pop(0)
+    return real_handle(cmd)
+
+
+D.handle = handle
+state("running")
+seq[:] = [{"Status": "restarting", "Running": True, "ExitCode": 4, "RestartCount": 0, "StartedAt": old + ".1Z"}] * 9
+n0 = len(D.calls)
+with contextlib.redirect_stdout(io.StringIO()):
+    got = REAL_WAIT("p", ["s"])[:2]
+check("health: restart loop with RestartCount 0 fails at the second look",
+      (got, len([c for c in D.calls[n0:] if c[:2] == ["docker", "inspect"]])), ((False, ["x"]), 2))
+seq[:] = [{"Status": "restarting", "Running": True, "ExitCode": 1, "RestartCount": 0, "StartedAt": old + ".1Z"},
+          {"Status": "running", "Running": True, "ExitCode": 0, "RestartCount": 1, "StartedAt": old + ".2Z"}]
+with contextlib.redirect_stdout(io.StringIO()):
+    got = REAL_WAIT("p", ["s"])[:2]
+check("health: one crash that recovers is no failure", got, (True, []))
+D.handle = real_handle
+U.HEALTH_TIMEOUT = 0
 check("health: still starting -> timeout", state("running", "starting"), (False, ["x"]))
 
 # ------------------------------------------------- stream (real subprocess)
