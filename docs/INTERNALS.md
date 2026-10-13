@@ -163,7 +163,10 @@ newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+
   jump is; the plugin warns first and enables *Update* only after a tick box.
 - `target_version` (since 0.10.0): what the update brings: the version of the image pulled already, or
   `tag_now.version` from the radar (the installed version when `tag_now.digest` is the running image's).
-  `null` if unknown.
+  `tag_now.version` counts only when the installed version is unknown or the radar found it among the
+  tags (`versions[<installed>].status` is not `unknown`, `same_series`): `pgvector/pgvector:pg17` runs
+  PostgreSQL 17.10 (`PG_VERSION`) while its tags count pgvector releases (`0.8.7-pg17`). `null` if
+  unknown.
 - `jump`: `major`, `minor` or `patch` by the first version block that differs, `same`, or `null` when
   either version is unknown. On `major` the plugin warns and waits for a tick box.
 - Relations (since 0.9.0, from `docker compose config` and the containers of the project):
@@ -340,7 +343,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   - `target_version` as a row (“Brings”), with the size of the jump.
   - A `reason` in the result fills `#dm-dialog-reason` (`az-alert--danger`) above the log; every new
     run hides it again.
-- **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`).
+- **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`), by the
+  same rule as `target_version`: not when the installed version is known but not among the tags.
 - **Together:** rows of the same compose project with the same image and tag name each other under
   the container name (“together with …”, three names at most). The name itself is `.dm-name`.
 - **Plan groups:** recreated (`containers` without `jobs`), one-off jobs, waits for (`depends_on`),

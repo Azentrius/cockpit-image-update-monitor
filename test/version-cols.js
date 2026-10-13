@@ -88,6 +88,8 @@ const cells = (tr) => [...tr.querySelectorAll("td")];
     assert.deepStrictEqual(tagNow("ollama"), ["latest = 0.40.3", "In der Registry zeigt latest gerade auf 0.40.3 (vom Radar geprüft)."]);
     assert.strictEqual(tagNow("formbricks-app")[0], "latest = 6.0.2");
     assert.deepStrictEqual(tagNow("glitchtip-postgres"), ["16-alpine", undefined], "no tag_now: the tag alone");
+    // pg17 = 0.8.7 counts pgvector releases, the installed 17.10 is PostgreSQL's: not shown
+    assert.deepStrictEqual(tagNow("formbricks-db"), ["pg17", undefined], "tag_now in another numbering: the tag alone");
 
     // unknown installed version: newest shown, status not "aktuell"
     c = cells(row(d, "formbricks-app"));

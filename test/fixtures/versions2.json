@@ -602,7 +602,12 @@
     "major": "pg18",
     "status": "major"
    },
-   "status": "unknown"
+   "status": "unknown",
+   "tag_now": {
+    "digest": "sha256:now-0.8.7-pg17",
+    "version": "0.8.7",
+    "tag": "0.8.7-pg17-bookworm"
+   }
   },
   {
    "image": "valkey/valkey",

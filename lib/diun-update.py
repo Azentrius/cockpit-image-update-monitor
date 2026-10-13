@@ -247,6 +247,15 @@ def radar_record(ref):
     return None
 
 
+def same_series(rec, version):
+    """True if the radar found `version` among the registry's version tags,
+    so what a floating tag points to (tag_now) counts in the same numbering.
+    pgvector:pg17 runs PostgreSQL 17.10 (PG_VERSION) while its tags count
+    pgvector releases (0.8.7-pg17): 17.10 -> 0.8.7 is no jump at all."""
+    v = ((rec or {}).get("versions") or {}).get(version) or {}
+    return v.get("status") not in (None, "unknown")
+
+
 def jump_of(installed, target):
     """How big the step from one version to the other is: "major", "minor",
     "patch" (by the first block that differs, as the radar names them) or
@@ -421,13 +430,20 @@ def make_plan(name):
     plan["jump_unknown"] = plan["installed_version"] is None and plan["tag_digits"] == 0
 
     # What the update brings: the image pulled already, otherwise what the
-    # tag points to in the registry right now (radar, "tag_now").
+    # tag points to in the registry right now (radar, "tag_now") - if that
+    # counts in the same numbering as the installed version.
     if plan["pulled"]:
         target = version_of(ref, tagid)
     else:
-        now_ = (radar_record(ref) or {}).get("tag_now") or {}
+        rec = radar_record(ref) or {}
+        now_ = rec.get("tag_now") or {}
         same = bool(now_.get("digest")) and now_["digest"] in repo_digests(c["Image"])
-        target = plan["installed_version"] if same else now_.get("version")
+        if same:
+            target = plan["installed_version"]
+        elif plan["installed_version"] is None or same_series(rec, plan["installed_version"]):
+            target = now_.get("version")
+        else:
+            target = None
     plan["target_version"] = target
     plan["jump"] = jump_of(plan["installed_version"], target)
 

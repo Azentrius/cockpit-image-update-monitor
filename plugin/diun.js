@@ -753,10 +753,14 @@
     }
 
     // "Configured" column: what a floating tag (latest, 16-alpine) points to
-    // in the registry right now, from the radar ("tag_now").
-    function tagNowNote(ctn, rec) {
+    // in the registry right now, from the radar ("tag_now"). Only when that
+    // counts like the installed version: pgvector:pg17 runs PostgreSQL 17.10,
+    // its tags count pgvector releases (0.8.7-pg17).
+    function tagNowNote(ctn, rec, inst) {
         const v = rec && rec.tag_now && rec.tag_now.version;
-        return v ? ` <span class="dm-tagnow" title="${esc(t("cfg.tagNow", { tag: ctn.tag, v }))}">= ${esc(v)}</span>` : "";
+        const cmp = inst.v && rec && rec.versions ? rec.versions[inst.v] : null;
+        if (!v || (inst.v && (!cmp || cmp.status === "unknown"))) return "";
+        return ` <span class="dm-tagnow" title="${esc(t("cfg.tagNow", { tag: ctn.tag, v }))}">= ${esc(v)}</span>`;
     }
 
     // "Newest version" column. Returns { html, news }:
@@ -889,7 +893,7 @@
         return { kind, html:
             `<td data-label="${L("col.container")}"><span class="dm-cell"><span class="dm-name">${esc(ctn.name)}</span>${together}</span></td>` +
             `<td data-label="${L("col.image")}" class="dm-img"><span class="dm-cell az-mono">${imgCell}</span></td>` +
-            `<td data-label="${L("col.configured")}"><span class="dm-cell"><span class="dm-ver dm-cfg" title="${L("cfg.tip")}">${esc(ctn.tag)}</span>${tagNowNote(ctn, rec)}</span></td>` +
+            `<td data-label="${L("col.configured")}"><span class="dm-cell"><span class="dm-ver dm-cfg" title="${L("cfg.tip")}">${esc(ctn.tag)}</span>${tagNowNote(ctn, rec, inst)}</span></td>` +
             `<td class="az-nowrap" data-label="${L("col.installed")}"><span class="dm-cell">${installedCell(ctn, rec, inst)}</span></td>` +
             `<td data-label="${L("col.new")}"><span class="dm-cell">${ver.html}</span></td>` +
             `<td data-label="${L("col.status")}"><span class="dm-cell">${badge(kind)}${note}</span></td>` +
