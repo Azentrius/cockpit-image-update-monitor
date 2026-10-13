@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.9.0 – 2026-10-13
+
+Stage 1.2, second part: the output of every update stays with the history, and a build whose update
+failed is not offered silently again.
+
+- **Output kept.** The live output of every update and rollback is stored with the history
+  (`/var/backups/image-updates/logs/<op-id>.log`, root only, at most 512 KiB, without the `@@RESULT`
+  line). *Show output* in the history opens it, the rollback's output after the update's. New
+  read-only verb `diun-update.py log <op-id>`. An update that stops before any change keeps nothing, as
+  before.
+- **A build that failed before.** The history stores the registry digests of the new build
+  (`new_digests`). If Diun reports exactly that build again, the row says “The update to this build
+  failed on …”, and the update dialog repeats the cause and enables *Update* only after a tick box. A
+  newer build or a later successful update clears the mark.
+- **Restart loops:** the end-to-end test has a new step with an app that exits at once under
+  `restart: always`. The update must fail within 60 seconds and name the cause with the state
+  `restarting`.
+- **Roadmap:** stage 2 plans a selection field for the target version (a fixed version, a version
+  line such as `5`, or `latest`).
+- **Tests:** offline tests for the kept output (cut at the limit, root only, nothing for an aborted
+  update), the `log` verb, the digests of the new build, the output button and the failed-build hint
+  with its tick box; the end-to-end test checks the kept output and the digests as well.
+
 ## 0.8.0 – 2026-10-13
 
 Stage 1.2, first part: the update says when nobody can tell how big the jump is, and a failed update

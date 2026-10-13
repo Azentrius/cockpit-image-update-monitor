@@ -5,7 +5,8 @@ are replaced by fakes, /var/backups/image-updates and the other paths by a
 temporary directory. Covers database detection, plan reasons and the unknown jump
 size, argument checks and exit codes, the update flow (dump, rollback tag,
 versions in the history, cleanup, radar start), the most likely cause of a
-failure, rollback, the cleanup rules and the radar verb.
+failure, the kept output and the digests of the new build, rollback, the
+cleanup rules and the radar verb.
 No Docker, no root, no network."""
 import contextlib
 import gzip
@@ -29,6 +30,7 @@ TMP = tempfile.mkdtemp(prefix="diun-update-test-")
 U.BASE = os.path.join(TMP, "backups")
 U.DUMPS = os.path.join(U.BASE, "dumps")
 U.OPS = os.path.join(U.BASE, "operations.jsonl")
+U.LOGS = os.path.join(U.BASE, "logs")
 U.LOCK = os.path.join(TMP, "update.lock")
 U.CONF = os.path.join(TMP, "image-updates.conf")
 U.VERSIONS = os.path.join(TMP, "versions.json")
@@ -637,6 +639,59 @@ check("failed rollback: cause in the history",
       ("failed", "glitchtip-postgres", "compose"))
 LOGS.clear()
 U.wait_healthy = lambda project, services: (True, [], {})
+
+# kept output (through main, as the plugin calls it) and the new build's digests
+D.pull_to = ("postgres:16-alpine", "sha256:v18")
+D.images["sha256:v18"] = {"Id": "sha256:v18", "Config": {"Env": ["PG_VERSION=16.18"]},
+                          "RepoDigests": ["postgres@sha256:dddd", "docker.io/library/postgres@sha256:dddd"]}
+U.wait_healthy = lambda project, services: (False, ["glitchtip-postgres"], {})
+LOGS["glitchtip-postgres"] = ["Error: kept for the log test"]
+with as_uid(0):
+    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+release_lock()
+res = json.loads(out.strip().splitlines()[-1][9:])
+logf = os.path.join(U.LOGS, res["op"] + ".log")
+with open(logf) as f:
+    kept = f.read()
+check("kept output: the whole run, without @@RESULT, root only",
+      (rc, "Updating postgres:16-alpine" in kept, "Most likely cause" in kept, "@@RESULT" in kept,
+       oct(os.stat(logf).st_mode & 0o777)), (4, True, True, False, "0o600"))
+check("kept output: the caller still sees everything", "@@RESULT" in out and "Updating postgres:16-alpine" in out, True)
+check("new build: its registry digests in the history", ops()[res["op"]]["new_digests"], ["sha256:dddd"])
+U.wait_healthy = lambda project, services: (True, [], {})
+with as_uid(0):
+    rc, _ = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+with as_uid(0):
+    rc, out = quiet(U.main, ["log", res["op"]])
+check("log: the update, then its rollback",
+      (rc, out.index("Updating") < out.index("--- Rollback ---") < out.index("Rolling")), (0, True))
+bk = json.loads(quiet(U.cmd_backups)[1])
+o = [x for x in bk["ops"] if x["id"] == res["op"]][0]
+check("backups: which outputs are kept, digests of the new build",
+      (o["log"], o["rollback_log"], o["new_digests"]), (True, True, ["sha256:dddd"]))
+check("log: unknown operation -> 2", main_rc("log", "20200101-000000-nope"), 2)
+check("log: invalid id -> 64", main_rc("log", "../../etc/passwd"), 64)
+FakePopen.script = {"glitchtip-postgres": (b"partial", 1)}
+n_logs = len(os.listdir(U.LOGS))
+with as_uid(0):
+    rc, _ = quiet(U.main, ["update", "glitchtip-postgres"])
+release_lock()
+check("an update that stops before any change keeps no output", (rc, len(os.listdir(U.LOGS))), (5, n_logs))
+FakePopen.script = {"glitchtip-postgres": (DUMP_OK, 0)}
+U.LOG_MAX, real_max = 40, U.LOG_MAX
+D.pull_to = ("postgres:16-alpine", "sha256:v19")
+D.images["sha256:v19"] = {"Id": "sha256:v19", "Config": {"Env": ["PG_VERSION=16.19"]}}
+with as_uid(0):
+    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+release_lock()
+res = json.loads(out.strip().splitlines()[-1][9:])
+with open(os.path.join(U.LOGS, res["op"] + ".log")) as f:
+    kept = f.read()
+check("kept output is cut at LOG_MAX and says so", (rc, kept.rstrip().endswith("KiB]"), len(kept) < 200), (0, True, True))
+check("a locally tagged build has no registry digests", ops()[res["op"]]["new_digests"], [])
+U.LOG_MAX = real_max
+LOGS.clear()
 
 # ------------------------------------------------------------ cleanup rules
 reset_fs()

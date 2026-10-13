@@ -34,6 +34,7 @@ D2=$D-my
 BK_DIR=/var/backups/image-updates
 DUMPS=$BK_DIR/dumps
 OPS=$BK_DIR/operations.jsonl
+LOGS=$BK_DIR/logs
 export DIUN_LANG=en
 
 [ "$(id -u)" = 0 ] || { echo "ABORT: run as root"; exit 1; }
@@ -81,6 +82,7 @@ cleanup() {
         fi
     done
     rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}"
+    rm -f "${LOGS:?}"/[0-9]*-imgupd-test-*.log
     if [ -f "$OPS" ]; then
         python3 - "$OPS" <<'PY'
 import json, os, re, sys
@@ -96,11 +98,12 @@ PY
     rm -rf "${D:?}" "${D2:?}"
     echo "Left over: $(docker ps -a --format '{{.Names}}' | grep -c imgupd) containers," \
          "$(docker image ls | grep -c imgupd-test) tags," \
-         "$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' | wc -l) test dump folders"
+         "$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' | wc -l) test dump folders," \
+         "$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l) test logs"
 }
 trap cleanup EXIT
 
-write_compose() {   # $1 = shell command of the "app" service
+write_compose() {   # $1 = shell command of the "app" service, $2 = its restart policy (default "no")
     cat > "$D/docker-compose.yml" <<EOF
 name: $P
 services:
@@ -118,6 +121,7 @@ services:
     container_name: imgupd-test-app
     entrypoint: ["sh", "-c"]
     command: ["$1"]
+    restart: "${2:-no}"
 EOF
 }
 
@@ -161,6 +165,10 @@ check "Most likely cause in the result: the app and its error line" '[ "$CAUSE" 
 check "Most likely cause in the output" 'grep -q "Most likely cause (imgupd-test-app): Error: e2e app failure" /tmp/e2e-1.log'
 HCAUSE=$(OP=$OP1 python3 -c 'import json,os; o=[json.loads(l) for l in open("'"$OPS"'") if json.loads(l).get("id")==os.environ["OP"]][0]; print((o.get("reason") or {}).get("line"))')
 check "Most likely cause in operations.jsonl" '[ "$HCAUSE" = "Error: e2e app failure" ]'
+check "Output kept: root only, without @@RESULT" \
+    '[ "$(stat -c %a "$LOGS/$OP1.log")" = 600 ] && grep -q "Most likely cause" "$LOGS/$OP1.log" && ! grep -q "^@@RESULT" "$LOGS/$OP1.log"'
+NDIG=$(OP=$OP1 python3 -c 'import json,os; o=[json.loads(l) for l in open("'"$OPS"'") if json.loads(l).get("id")==os.environ["OP"]][0]; print(len(o.get("new_digests") or []))')
+check "Registry digests of the new build in the history ($NDIG)" '[ "$NDIG" -ge 1 ]'
 
 echo "=== 4. Repair compose, roll back ==="
 write_compose "sleep infinity"
@@ -171,6 +179,8 @@ check "Containers back on OLD" '[ "$(img_of imgupd-test-db)" = "$OLD" ] && [ "$(
 check "Test data still there" 'docker exec imgupd-test-db psql -U postgres -Atc "select x from e2e" | grep -q hello-from-e2e'
 python3 $H rollback "$OP1" > /tmp/e2e-3.log 2>&1; RC=$?
 check "Second rollback refused (3)" '[ $RC = 3 ]'
+python3 $H log "$OP1" > /tmp/e2e-3b.log 2>&1; RC=$?
+check "log: update and rollback output" '[ $RC = 0 ] && grep -q "Most likely cause" /tmp/e2e-3b.log && grep -q "^--- Rollback ---" /tmp/e2e-3b.log && grep -q "Rollback successful" /tmp/e2e-3b.log'
 
 echo "=== 5. Roll out again without dump – must work; cleanup of this project ==="
 # Three old dumps of the test database: the rules may delete them, never the
@@ -254,6 +264,22 @@ else
     python3 $H radar > /dev/null 2>&1; RC=$?
     check "radar without the unit: exit 2" '[ $RC = 2 ]'
 fi
+
+echo "=== 10b. Restart loop: must fail within seconds, not after the 180 s wait ==="
+docker tag "$OLD" imgupd-test/pg:16
+write_compose "echo Error: e2e restart loop; exit 4" always
+T0=$(date +%s)
+python3 $H update imgupd-test-db --no-dump > /tmp/e2e-10.log 2>&1; RC=$?
+T1=$(date +%s)
+sed 's/^/  | /' /tmp/e2e-10.log
+R5=$(result_of /tmp/e2e-10.log)
+OP5=$(jget "$R5" 'd["op"]')
+LOOP=$(jget "$R5" 'd["status"] == "failed" and (d["reason"] or {}).get("container") == "imgupd-test-app" and d["reason"]["state"] == "restarting" and d["reason"]["line"] == "Error: e2e restart loop"')
+check "Restart loop: exit 4 after $((T1 - T0)) s (limit 60)" '[ $RC = 4 ] && [ $((T1 - T0)) -lt 60 ]'
+check "Restart loop: cause names the app, its state and error line" '[ "$LOOP" = True ]'
+write_compose "sleep infinity"
+python3 $H rollback "$OP5" > /tmp/e2e-11.log 2>&1; RC=$?
+check "Restart loop: rollback, containers back on NEW" '[ $RC = 0 ] && [ "$(img_of imgupd-test-db)" = "$NEW" ] && [ "$(img_of imgupd-test-app)" = "$NEW" ]'
 
 if [ "$E2E_MYSQL" = 1 ]; then
     echo "=== 11. MariaDB + MySQL: dumps with test data ==="

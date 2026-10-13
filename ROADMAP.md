@@ -53,8 +53,9 @@ Decided on the way:
 containers do not come up, the reason is visible at once. A failed build is not offered the same way
 again.
 
-Done in 0.8.0 (see [CHANGELOG](CHANGELOG.md)): the unknown jump size and the most likely cause of a
-failure (“reason first”), both marked ✅ below.
+Done (see [CHANGELOG](CHANGELOG.md)), marked ✅ below: in 0.8.0 the unknown jump size and the most
+likely cause of a failure (“reason first”); in 0.9.0 the kept output, the restart-loop test and the
+failed builds.
 
 **Seen on the reference host:** `latest` of an app moved to a new major version that needs an extra
 service; the app did not start. Dump, rollback copy and rollback worked, and the data stayed untouched.
@@ -76,17 +77,16 @@ installed version was unknown and the jump invisible.
 - ✅ **Reason first:** when containers do not come up, the result names the most telling error line
   (e.g. “Invalid environment variables: …”) above the log lines, next to the rollback button. It is
   also kept in the history.
-- **Keep the output:** the live output of every update and rollback is stored with the history
-  (`/var/backups/image-updates/logs/<op-id>.log`, root only) and can be opened from the history. Today it
-  exists only in the browser while the dialog is open.
-- **Restart loops:** `wait_healthy` already counts a restarting container as failed. An end-to-end case
-  with an image that exits at once proves that the update fails within seconds, not after
-  `HEALTH_TIMEOUT`.
+- ✅ **Keep the output:** the live output of every update and rollback is stored with the history
+  (`/var/backups/image-updates/logs/<op-id>.log`, root only) and can be opened from the history.
+- ✅ **Restart loops:** `wait_healthy` already counts a restarting container as failed. An end-to-end case
+  with an app that exits at once under `restart: always` proves that the update fails within seconds,
+  not after `HEALTH_TIMEOUT`.
 
 **After a failure**
-- **Remember failed builds:** the digest that failed is stored with the operation. As long as the
-  registry offers that same digest, the row says “Update to this build failed on <date>, rolled back”
-  and *Update* asks for a confirmation.
+- ✅ **Remember failed builds:** the registry digests of the new build are stored with the operation.
+  When Diun reports exactly that build again, the row says “The update to this build failed on <date>”,
+  and the dialog repeats the cause and asks for a tick box.
 - Pinning the tag to the running version comes with stage 2 (change the tag in the compose file).
 
 **What is updated together**
@@ -126,8 +126,20 @@ installed version was unknown and the jump invisible.
 
 ## Stage 2 – Version jumps (change the tag in the compose file)
 
-**Goal:** a click on an *outlined* chip (e.g. “Patch v2.1.5” with `v2.1.4` configured) switches to
-that tag safely.
+**Goal:** the version of a container can be changed in the page, safely: a click on an *outlined* chip
+(e.g. “Patch v2.1.5” with `v2.1.4` configured), or a selection field with the versions the registry
+offers.
+
+**Choosing the target** (a selection field in the dialog, filled from the radar's tag list)
+- The configured tag first, marked as such.
+- “Pin to the running version”: the exact tag of what runs now (needs the version known, see stage 1.2
+  “resolve floating tags”).
+- Version lines the registry offers as floating tags, e.g. `5` or `5.4`: they keep patch and minor
+  updates coming without the next major.
+- Exact versions of the same scheme, newest first, grouped by patch / minor / major relative to the
+  installed version.
+- `latest` (or the image's other floating tags), with the warning that it follows every release.
+- Database majors are shown but cannot be chosen (stage 5). Other majors need an extra confirmation.
 
 **Flow**
 

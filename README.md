@@ -181,6 +181,9 @@ box confirms it. Check the release notes before.
 line of its log that names an error, the last output of its health check, or what `docker compose`
 printed. The rollback button is next to it, and the backups tab keeps the cause in the history.
 
+**The same build again:** if Diun reports exactly the build whose update failed, the row says so. The
+update dialog repeats the cause and enables *Update* only after a tick box. A newer build clears the mark.
+
 > **Rollback ≠ data back.** If the new version migrated its database on start, the old program and the new data no longer fit together. Then only the dump helps, and restoring it is deliberately a manual step (see below).
 
 **Locks:** only one update or rollback runs at a time (`/run/lock/diun-update.lock`). A second attempt immediately gets “already running”.
@@ -200,8 +203,10 @@ printed. The rollback button is next to it, and the backups tab keeps the cause 
 |---|---|---|
 | Database dumps | `/var/backups/image-updates/dumps/<project>/<YYYYMMDD-HHMMSS>_<container>.sql.gz` | file 0600, folder 0700 (root only) |
 | Update history | `/var/backups/image-updates/operations.jsonl` | 0600 |
+| Output of each update and rollback | `/var/backups/image-updates/logs/<op-id>.log` (`.rollback.log`) | 0600 |
 | Rollback images | local Docker tags `<repo>:rollback-<YYYYMMDD-HHMMSS>` | – |
 
+- **Output:** *Show output* in the history opens what an update and its rollback printed.
 - **Delete** in the *Backups & dumps* tab. A rollback image still used by a container cannot be deleted. That is the case, for example, as long as other databases still run on the same old Postgres build.
 - **Server backup:** `/var/backups/image-updates` should be part of the backup (e.g. restic), otherwise the dumps live only on the same disk as the database.
 
@@ -473,7 +478,7 @@ Covered by the tests, among other things:
 - language EN/DE
 - requirements panel
 - update, rollback, delete and cleanup dialogs, “Run radar now”
-- the warning for an unknown jump size, the most likely cause of a failure
+- the warning for an unknown jump size, the most likely cause of a failure, a build that failed before, the kept output
 - the version columns
 - version and changelog agree
 
@@ -492,7 +497,7 @@ sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e
 
 The test checks:
 - plan
-- update with dump that fails on purpose, with its most likely cause
+- update with dump that fails on purpose, with its most likely cause, its kept output and the digests of the new build
 - rollback; a second rollback is refused
 - update without dump, with versions in the result and the history
 - cleanup after the update, limited to the test project
@@ -501,6 +506,7 @@ The test checks:
 - backup list with the cleanup preview, `cleanup --dry-run`
 - delete, also with a manipulated path
 - radar run
+- a restart loop (`restart: always`, exits at once) fails within seconds
 - MariaDB (`mariadb:11`) and MySQL (`mysql:8`) dumps with test data; a wrong password stops before any change (`E2E_MYSQL=0` skips this part)
 
 The changes are in [CHANGELOG.md](CHANGELOG.md).
@@ -536,7 +542,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
-| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **in progress** (0.8.0: unknown jump size, cause of a failure) |
+| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **in progress** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds) |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
