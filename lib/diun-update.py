@@ -30,9 +30,15 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 the rules in /etc/image-updates.conf (also run
                                 daily by diun-cleanup.timer)
   radar                         run the version radar now and wait for it
+  retag <container> <tag> --dry-run
+                                read-only: the plan of a tag change (stage 2):
+                                what the radar offers the tag as, the version
+                                it brings, where the tag is written (compose
+                                file or .env) and every line before and after,
+                                or why it cannot be done here
 
-Same tag only ("stage 1"): the image reference in the compose file is never
-changed. Images built locally or pinned by digest are not updated.
+The image reference in the compose file is never changed yet (retag only plans
+the change). Images built locally or pinned by digest are not updated.
 
 Everything the addon writes lives in /var/backups/image-updates (root only):
   dumps/<project>/<stamp>_<container>.sql.gz
@@ -48,6 +54,7 @@ container). DIUN_LANG=de|en selects the language of the log messages.
 
 import fcntl
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -60,7 +67,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from diunlib import local_version, nums_of, tag_digits  # noqa: E402
+from diunlib import core, local_version, nums_of, tag_digits  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
@@ -401,6 +408,7 @@ def make_plan(name):
         plan["reason"] = "compose-config-error"
         plan["detail"] = (e.stderr or "").strip()[-400:]
         return plan, ctx
+    ctx["cfg"] = cfg
     for s in services:
         svc = (cfg.get("services") or {}).get(s) or {}
         if svc.get("build") is not None:
@@ -529,6 +537,278 @@ def relations(plan, cfg, members, same, services, project):
                 others.add(proj or name)
         if others:
             plan["shared_networks"].append({"network": n, "projects": sorted(others)})
+
+
+# ----------------------------------------------------------------- retag ----
+# Stage 2: change the configured tag. Where the tag is written is found in the
+# text of the compose and .env files (no YAML library, no round trip), so the
+# lines that would change can be shown exactly before anything is written.
+TAG_ARG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
+IMAGE_LINE_RE = re.compile(r"^(?P<pre>[ ]*image:[ \t]*)(?P<q>[\"']?)(?P<val>[^\"'\s#]+)(?P=q)"
+                           r"(?P<post>[ \t]*(?:#.*)?)$")
+KEY_LINE_RE = re.compile(r"^(?P<indent>[ ]*)(?P<key>[A-Za-z0-9._-]+):[ \t]*(?:#.*)?$")
+ENV_LINE_RE = re.compile(r"^(?P<pre>[ \t]*(?:export[ \t]+)?(?P<key>[A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*)"
+                         r"(?P<q>[\"']?)(?P<val>.*?)(?P=q)(?P<post>[ \t]+#.*|[ \t]*)$")
+VAR_RE = re.compile(r"\$(?:\{(?P<b>[A-Za-z_][A-Za-z0-9_]*)(?P<op>:?-(?P<default>[^}]*))?\}"
+                    r"|(?P<s>[A-Za-z_][A-Za-z0-9_]*))")
+TAG_VAR_RE = re.compile(r"^(?P<repo>[^$]+):(?P<expr>\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)$")
+NEXTCLOUD_RE = re.compile(r"(^|/)nextcloud$")
+TEXT_MAX = 1 << 20        # compose and .env files larger than this are not read
+
+
+def same_ref(a, b):
+    """Same image reference, however Docker Hub names are written."""
+    if not a or not b:
+        return False
+    (ra, ta), (rb, tb) = split_ref(a), split_ref(b)
+    return ta == tb and norm_ref(ra) == norm_ref(rb)
+
+
+def read_lines(path):
+    """(lines with their line endings, sha256) of a compose or .env file, or
+    None if it is no regular file, larger than TEXT_MAX or not UTF-8."""
+    real = os.path.realpath(path)
+    try:
+        if not os.path.isfile(real) or os.path.getsize(real) > TEXT_MAX:
+            return None
+        with open(real, "rb") as f:
+            data = f.read()
+        return data.decode("utf-8").splitlines(keepends=True), hashlib.sha256(data).hexdigest()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def bare(line):
+    return line.rstrip("\r\n")
+
+
+def indent_of(line):
+    return len(line) - len(line.lstrip(" "))
+
+
+def parent_key(lines, i):
+    """(index, key) of the nearest line above i with less indentation (blank
+    lines and comments skipped); key is None when that line is no plain
+    `name:` key (an anchor `x-app: &app`, a list item ...)."""
+    ind = indent_of(lines[i])
+    for j in range(i - 1, -1, -1):
+        s = bare(lines[j])
+        if not s.strip() or s.lstrip().startswith("#"):
+            continue
+        if indent_of(s) < ind:
+            m = KEY_LINE_RE.match(s)
+            return j, (m["key"] if m else None)
+    return None, None
+
+
+def service_of_line(lines, i):
+    """The service whose block holds line i as a direct key
+    (services.<name>.image), or None: an image in an x- block, under an
+    anchor or anywhere else."""
+    j, key = parent_key(lines, i)
+    if key is None or indent_of(lines[j]) == 0:
+        return None
+    k, top = parent_key(lines, j)
+    return key if top == "services" and indent_of(lines[k]) == 0 else None
+
+
+def interpolate(val, env):
+    """Compose's ${VAR}, $VAR, ${VAR:-default} and ${VAR-default} with the
+    .env values; None when a variable has neither a value nor a default."""
+    missing = []
+
+    def sub(m):
+        name, op = m["b"] or m["s"], m["op"] or ""
+        v = env.get(name)
+        if op.startswith(":-"):
+            return v if v else m["default"]
+        if op.startswith("-"):
+            return v if v is not None else m["default"]
+        if v is None:
+            missing.append(name)
+            return ""
+        return v
+
+    out = VAR_RE.sub(sub, val)
+    return None if missing else out
+
+
+def var_uses(lines):
+    """{name: count} of variable references outside comment lines."""
+    uses = {}
+    for line in lines:
+        if line.lstrip().startswith("#"):
+            continue
+        for m in VAR_RE.finditer(line):
+            n = m["b"] or m["s"]
+            uses[n] = uses.get(n, 0) + 1
+    return uses
+
+
+def offered(choices, tag):
+    """(kind, level, newest) under which the radar offers tag for the
+    installed version (versions.json "choices"), or None."""
+    if tag == choices.get("pin"):
+        return "pin", None, None
+    for x in choices.get("newer") or []:
+        if x.get("tag") == tag:
+            return "newer", x.get("level"), None
+    for x in choices.get("lines") or []:
+        if x.get("tag") == tag:
+            return "line", None, x.get("newest")
+    if tag in (choices.get("floating") or []):
+        return "floating", None, None
+    return None
+
+
+def git_root(path):
+    """The git repository a project directory lies in, or None (a hint only:
+    the add-on never commits)."""
+    p = os.path.realpath(path)
+    while True:
+        if os.path.exists(os.path.join(p, ".git")):
+            return p
+        parent = os.path.dirname(p)
+        if parent == p:
+            return None
+        p = parent
+
+
+def locate_tag(ctx, ref, services, new_tag):
+    """Where the tag of `ref` is written for these services and how each
+    line would read with new_tag: {"changes": [...], "variable": name or
+    None}, or a refusal {"reason", "detail"}.
+      image: repo:5.0.2                 that line (every service of the image)
+      image: repo:${FB_VERSION}         the variable's line in the .env file,
+                                        if it is set there once and used for
+                                        this image only
+      image: ${FB_IMAGE}                the same, with the whole reference
+    Anything else (anchors, a variable with a default only or used
+    elsewhere, a reference built from several variables) is refused."""
+    cfg_svcs = (ctx.get("cfg") or {}).get("services") or {}
+    wanted = set(services) | {s for s, v in cfg_svcs.items() if same_ref((v or {}).get("image"), ref)}
+    defs, env_lines = {}, []
+    for f in ctx["env_files"]:
+        got = read_lines(f) if os.path.exists(f) else None
+        if got is None:
+            continue
+        env_lines += got[0]
+        for i, line in enumerate(got[0]):
+            m = ENV_LINE_RE.match(bare(line))
+            if m:
+                defs.setdefault(m["key"], []).append((f, i, m, got[1]))
+    env = {k: v[-1][2]["val"] for k, v in defs.items()}
+    tag = split_ref(ref)[1]
+    changes, found, unresolved, var_refs, compose_lines = [], set(), set(), {}, []
+    for f in ctx["files"]:
+        got = read_lines(f)
+        if got is None:
+            return {"reason": "unreadable", "detail": f}
+        lines, digest = got
+        compose_lines += lines
+        for i, line in enumerate(lines):
+            m = IMAGE_LINE_RE.match(bare(line))
+            if not m:
+                continue
+            val, svc = m["val"], service_of_line(lines, i)
+            resolved = interpolate(val, env)
+            if resolved is None:
+                unresolved.add(svc)
+                continue
+            if not same_ref(resolved, ref):
+                continue
+            if svc is None:
+                return {"reason": "anchors", "detail": f"{f}:{i + 1}"}
+            if svc not in wanted:
+                continue                   # a later file gives this service another image
+            found.add(svc)
+            if "$" not in val:
+                new = m["pre"] + m["q"] + split_ref(val)[0] + ":" + new_tag + m["q"] + m["post"]
+                changes.append({"file": f, "line": i + 1, "old": bare(line), "new": new,
+                                "service": svc, "sha256": digest})
+                continue
+            whole, part = VAR_RE.fullmatch(val), TAG_VAR_RE.match(val)
+            expr = val if whole else (part["expr"] if part else "")
+            vm = VAR_RE.fullmatch(expr)
+            if not vm:
+                return {"reason": "variable-complex", "detail": f"{f}:{i + 1}"}
+            var_refs.setdefault(vm["b"] or vm["s"], []).append((svc, bool(whole)))
+    missing = sorted(wanted - found)
+    if missing:
+        return {"reason": "variable-complex" if set(missing) & unresolved else "not-found",
+                "detail": ", ".join(missing)}
+    if len(var_refs) > 1:
+        return {"reason": "variable-complex", "detail": ", ".join(sorted(var_refs))}
+    uses = var_uses(compose_lines + env_lines)
+    for name, refs in var_refs.items():
+        if len(defs.get(name, [])) != 1:
+            return {"reason": "variable-complex", "detail": name}
+        if uses.get(name, 0) != len(refs):
+            return {"reason": "variable-shared", "detail": name}
+        f, i, m, digest = defs[name][0]
+        if all(whole for _, whole in refs) and same_ref(m["val"], ref):
+            value = split_ref(m["val"])[0] + ":" + new_tag
+        elif not any(whole for _, whole in refs) and m["val"] == tag:
+            value = new_tag
+        else:
+            return {"reason": "variable-complex", "detail": name}
+        changes.append({"file": f, "line": i + 1, "old": m.string,
+                        "new": m["pre"] + m["q"] + value + m["q"] + m["post"],
+                        "service": None, "sha256": digest})
+    return {"changes": changes, "variable": next(iter(var_refs), None)}
+
+
+def make_retag(name, new_tag):
+    """Read-only plan of a tag change (`retag … --dry-run`): the plan of an
+    update plus what the radar offers the new tag as, the version it brings,
+    where the tag is written and every line before and after; or why it
+    cannot be done here."""
+    if not TAG_ARG_RE.match(new_tag):
+        raise Abort(64, f"Ungültiger Tag: {new_tag}", f"Invalid tag: {new_tag}")
+    plan, ctx = make_plan(name)
+    repo, old_tag = split_ref(plan["image"])
+    rt = plan["retag"] = {"tag": new_tag, "from_tag": old_tag, "image": repo + ":" + new_tag,
+                          "choice": None, "level": None, "newest": None,
+                          "possible": False, "reason": None, "detail": None,
+                          "variable": None, "changes": [], "git": None}
+
+    def refuse(reason, detail=None):
+        rt["reason"], rt["detail"] = reason, detail
+        return plan
+
+    if not plan["updatable"]:
+        return refuse(plan["reason"], plan.get("detail"))
+    if new_tag == old_tag:
+        return refuse("same-tag")
+    rec = radar_record(plan["image"]) or {}
+    installed = plan["installed_version"]
+    choices = ((rec.get("versions") or {}).get(installed) or {}).get("choices") if installed else None
+    if not choices:
+        return refuse("no-choices")
+    kind = offered(choices, new_tag)
+    if not kind:
+        return refuse("not-offered")
+    rt["choice"], rt["level"], rt["newest"] = kind
+    target = {"pin": installed, "newer": core(new_tag), "line": core(rt["newest"]), "floating": None}[kind[0]]
+    plan["target_version"], plan["jump"] = target, jump_of(installed, target)
+    plan["jump_unknown"] = target is None
+
+    def major(v):
+        return nums_of(v)[0]
+
+    # A database major needs a migration (stage 5); a floating tag can bring one.
+    if rec.get("db") and (target is None or major(target) != major(installed)):
+        return refuse("db-major")
+    # Nextcloud upgrades one major version per step only.
+    if NEXTCLOUD_RE.search(norm_ref(repo)) and (target is None or major(target) - major(installed) > 1):
+        return refuse("major-skip")
+    got = locate_tag(ctx, plan["image"], plan["services"], new_tag)
+    if got.get("reason"):
+        return refuse(got["reason"], got.get("detail"))
+    rt["changes"], rt["variable"] = got["changes"], got["variable"]
+    rt["git"] = git_root(ctx["workdir"])
+    rt["possible"] = True
+    return plan
 
 
 def running_state(names):
@@ -1333,6 +1613,9 @@ def main(argv):
         return cmd_cleanup(dry=len(argv) == 2)
     if argv == ["radar"]:
         return cmd_radar()
+    if len(argv) == 4 and argv[0] == "retag" and argv[3] == "--dry-run":
+        print(json.dumps(make_retag(argv[1], argv[2]), ensure_ascii=False))
+        return 0
     raise Abort(64, "Unbekannter Befehl: " + " ".join(argv), "Unknown command: " + " ".join(argv))
 
 
