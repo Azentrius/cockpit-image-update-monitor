@@ -14,7 +14,10 @@
 # re-tagging that name to NEW_IMAGE creates the "pulled" state without any
 # registry access during the test.
 # The MariaDB/MySQL part uses MARIADB_IMAGE (default mariadb:11) and
-# MYSQL_IMAGE (default mysql:8); E2E_MYSQL=0 skips it.
+# MYSQL_IMAGE (default mysql:8); E2E_MYSQL=0 skips it. E2E_LIB runs the
+# helpers from another folder (e.g. a branch before it is installed).
+# The tag change (stage 2) needs choices from the radar: the test puts a
+# record for its own image into versions.json and removes it again.
 #
 #   sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e2e-server.sh
 #
@@ -25,8 +28,10 @@
 # (SC2034 is off for the whole file: the check '…' strings run through eval,
 # so shellcheck cannot see that the variables they read are used.)
 set -u
-H=/usr/local/lib/diun-radar/diun-update.py
-INV=/usr/local/lib/diun-radar/diun-inventory.py
+LIB=${E2E_LIB:-/usr/local/lib/diun-radar}
+H=$LIB/diun-update.py
+INV=$LIB/diun-inventory.py
+VERSIONS=/var/lib/diun-radar/versions.json
 P=imgupd-test
 P2=imgupd-test-my
 D=${E2E_DIR:-/root/imgupd-test}
@@ -64,6 +69,35 @@ img_of() { docker inspect -f '{{.Image}}' "$1"; }
 pg_version() { docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" | sed -n 's/^PG_VERSION=\([0-9.]*\).*/\1/p'; }
 other_dumps() { find "$DUMPS" -name '*.sql.gz' ! -path "$DUMPS/$P/*" ! -path "$DUMPS/$P2/*" 2>/dev/null | wc -l; }
 radar_unit() { systemctl cat diun-radar.service >/dev/null 2>&1; }
+cfg_image() { docker inspect -f '{{.Config.Image}}' "$1"; }
+sum_of() { sha256sum < "$1"; }
+# The radar cannot list tags of the local-only test image, so the test offers
+# $1 itself: a record in versions.json for the running version of
+# imgupd-test-db (after any radar run started by an update has finished).
+offer() {
+    local v
+    for _ in $(seq 120); do systemctl is-active --quiet diun-radar.service || break; sleep 1; done
+    v=$(jget "$(python3 "$H" plan imgupd-test-db)" 'd["installed_version"]')
+    python3 - "$VERSIONS" "$v" "$1" <<'PY'
+import json, os, sys, tempfile
+p, version, tag = sys.argv[1:4]
+os.makedirs(os.path.dirname(p), exist_ok=True)
+try:
+    d = json.load(open(p))
+except (OSError, ValueError):
+    d = {"images": []}
+d["images"] = [r for r in d.get("images") or [] if not (r.get("image") or "").startswith("imgupd-test/")]
+d["images"].append({"image": "imgupd-test/pg", "tag": "16", "db": True,
+                    "containers": ["imgupd-test-app", "imgupd-test-db"],
+                    "versions": {version: {"status": "current", "choices": {
+                        "pin": tag, "lines": [], "newer": [], "floating": []}}}})
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p))
+with os.fdopen(fd, "w") as f:
+    json.dump(d, f, ensure_ascii=False, indent=1)
+os.chmod(tmp, 0o644)
+os.replace(tmp, p)
+PY
+}
 
 cleanup() {
     echo "=== Cleanup ==="
@@ -81,8 +115,25 @@ cleanup() {
             echo "WARNING: $t not removed"
         fi
     done
-    rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}"
+    rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${BK_DIR:?}/compose/${P:?}"
+    rmdir "$BK_DIR/compose" 2>/dev/null
     rm -f "${LOGS:?}"/[0-9]*-imgupd-test-*.log
+    if [ -f "$VERSIONS" ]; then
+        python3 - "$VERSIONS" <<'PY'
+import json, os, sys, tempfile
+p = sys.argv[1]
+d = json.load(open(p))
+keep = [r for r in d.get("images") or [] if not (r.get("image") or "").startswith("imgupd-test/")]
+if len(keep) != len(d.get("images") or []):
+    d["images"] = keep
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p))
+    with os.fdopen(fd, "w") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, p)
+    print("versions.json: test record removed")
+PY
+    fi
     if [ -f "$OPS" ]; then
         python3 - "$OPS" <<'PY'
 import json, os, re, sys
@@ -99,7 +150,8 @@ PY
     echo "Left over: $(docker ps -a --format '{{.Names}}' | grep -c imgupd) containers," \
          "$(docker image ls | grep -c imgupd-test) tags," \
          "$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' | wc -l) test dump folders," \
-         "$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l) test logs"
+         "$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l) test logs," \
+         "$(find "$BK_DIR/compose" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l) test file backups"
 }
 trap cleanup EXIT
 
@@ -350,6 +402,77 @@ EOF
     check "Nothing left: no dump, no .part, no record, no tag" \
         '[ "$(find "$DUMPS/$P2" -name "*.sql.gz" | wc -l)" = "$N_BEFORE" ] && [ -z "$(find "$DUMPS/$P2" -name "*.part")" ] && [ "$(wc -l < "$OPS")" = "$OPS_BEFORE" ] && [ "$(docker image ls --format "{{.Repository}}:{{.Tag}}" | grep -c "^imgupd-test/")" = "$TAGS_BEFORE" ]'
 fi
+
+echo "=== 13. Tag change in the compose file, then rollback ==="
+# The containers run on NEW (tag imgupd-test/pg:16) since 10b. The radar
+# offers the running version's own tag, 16.15: both lines (db, app) change.
+docker tag "$NEW" imgupd-test/pg:16.15
+SUM0=$(sum_of "$D/docker-compose.yml")
+offer 16.15
+DRY=$(python3 $H retag imgupd-test-db 16.15 --dry-run)
+FP=$(jget "$DRY" 'd["retag"]["fingerprint"]')
+N=$(jget "$DRY" '(d["retag"]["possible"], len(d["retag"]["changes"]), d["retag"]["choice"])')
+check "retag --dry-run: possible, two lines (db and app), a pin" '[ "$N" = "(True, 2, '"'"'pin'"'"')" ]'
+python3 $H retag imgupd-test-db 16.15 --expect "$(printf '%064d' 0)" --no-dump > /tmp/e2e-12.log 2>&1; RC=$?
+check "retag with another fingerprint: exit 5, file unchanged" '[ $RC = 5 ] && [ "$(sum_of "$D/docker-compose.yml")" = "$SUM0" ]'
+python3 $H retag imgupd-test-db 16.15 --expect "$FP" --no-dump > /tmp/e2e-13.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-13.log
+R6=$(result_of /tmp/e2e-13.log)
+OP6=$(jget "$R6" 'd["op"]')
+S6=$(jget "$R6" '(d["status"], d["image"])')
+BK6=$(jget "$R6" 'd["backup"]')
+check "retag: exit 0, the new tag in the result" '[ $RC = 0 ] && [ "$S6" = "('"'"'ok'"'"', '"'"'imgupd-test/pg:16.15'"'"')" ]'
+check "retag: both containers carry the new tag" \
+    '[ "$(cfg_image imgupd-test-db)" = imgupd-test/pg:16.15 ] && [ "$(cfg_image imgupd-test-app)" = imgupd-test/pg:16.15 ]'
+check "retag: exactly those two lines changed" \
+    '[ "$(grep -c "image: imgupd-test/pg:16.15$" "$D/docker-compose.yml")" = 2 ] && [ "$(sed "s|pg:16.15$|pg:16|" "$D/docker-compose.yml" | sha256sum)" = "$SUM0" ]'
+check "retag: the old file kept byte-exact, root only" \
+    '[ "$(sum_of "$BK6/1_docker-compose.yml")" = "$SUM0" ] && [ "$(stat -c %a "$BK6")" = 700 ] && [ "$(stat -c %a "$BK6/1_docker-compose.yml")" = 600 ]'
+python3 $H rollback "$OP6" > /tmp/e2e-14.log 2>&1; RC=$?
+check "retag rollback: exit 0, file byte-identical, containers on the old tag" \
+    '[ $RC = 0 ] && [ "$(sum_of "$D/docker-compose.yml")" = "$SUM0" ] && [ "$(cfg_image imgupd-test-db)" = imgupd-test/pg:16 ] && [ "$(cfg_image imgupd-test-app)" = imgupd-test/pg:16 ]'
+
+echo "=== 14. Tag change through a variable of the .env file, then rollback ==="
+printf 'PG_TAG=16  # the e2e tag\n' > "$D/.env"
+sed -i 's|image: imgupd-test/pg:16$|image: imgupd-test/pg:${PG_TAG}|' "$D/docker-compose.yml"
+docker compose -p "$P" -f "$D/docker-compose.yml" up -d --force-recreate --wait 2>&1 | tail -n 2
+SUM1=$(sum_of "$D/docker-compose.yml")
+ENV0=$(sum_of "$D/.env")
+offer 16.15
+DRY=$(python3 $H retag imgupd-test-db 16.15 --dry-run)
+FP=$(jget "$DRY" 'd["retag"]["fingerprint"]')
+VAR=$(jget "$DRY" '(d["retag"]["possible"], d["retag"]["variable"], len(d["retag"]["changes"]), d["retag"]["reason"])')
+check "retag --dry-run via .env: one line, the variable" '[ "$VAR" = "(True, '"'"'PG_TAG'"'"', 1, None)" ]'
+python3 $H retag imgupd-test-db 16.15 --expect "$FP" --no-dump > /tmp/e2e-15.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-15.log
+OP7=$(jget "$(result_of /tmp/e2e-15.log)" 'd["op"]')
+check "retag via .env: exit 0, the .env line changed, the compose file not" \
+    '[ $RC = 0 ] && grep -q "^PG_TAG=16.15  # the e2e tag$" "$D/.env" && [ "$(sum_of "$D/docker-compose.yml")" = "$SUM1" ]'
+check "retag via .env: the containers carry the new tag" '[ "$(cfg_image imgupd-test-app)" = imgupd-test/pg:16.15 ]'
+python3 $H rollback "$OP7" > /tmp/e2e-16.log 2>&1; RC=$?
+check "retag via .env rollback: .env byte-identical, containers on the old tag" \
+    '[ $RC = 0 ] && [ "$(sum_of "$D/.env")" = "$ENV0" ] && [ "$(cfg_image imgupd-test-app)" = imgupd-test/pg:16 ]'
+
+echo "=== 15. Tag change refused: a shared variable, an anchor ==="
+sed -i 's|image: imgupd-test/side:1$|image: imgupd-test/side:${PG_TAG}|' "$D/docker-compose.yml"
+offer 16.15
+REF=$(jget "$(python3 $H retag imgupd-test-db 16.15 --dry-run)" '(d["retag"]["possible"], d["retag"]["reason"])')
+check "retag: a variable also used by another image -> refused" '[ "$REF" = "(False, '"'"'variable-shared'"'"')" ]'
+rm -f "$D/.env"
+write_compose "sleep infinity"
+python3 - "$D/docker-compose.yml" <<'PY'
+import sys
+p = sys.argv[1]
+text = open(p).read()
+head = "x-pg: &pg\n  image: imgupd-test/pg:16\n\n"
+text = text.replace("    image: imgupd-test/pg:16\n", "    <<: *pg\n")
+open(p, "w").write(head + text)
+PY
+SUM2=$(sum_of "$D/docker-compose.yml")
+REF=$(jget "$(python3 $H retag imgupd-test-db 16.15 --dry-run)" '(d["retag"]["possible"], d["retag"]["reason"])')
+check "retag: the image under a YAML anchor -> refused, file unchanged" \
+    '[ "$REF" = "(False, '"'"'anchors'"'"')" ] && [ "$(sum_of "$D/docker-compose.yml")" = "$SUM2" ]'
+write_compose "sleep infinity"
 
 echo
 [ $FAIL = 0 ] && echo "E2E: ALL CHECKS PASSED" || echo "E2E: FAILURES"

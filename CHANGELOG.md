@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.11.0 – 2026-10-14
+## 0.11.0 – 2026-10-15
 
-Stage 2, first part: the radar collects what a version selection field can offer.
+Stage 2, first parts: the radar collects what a version selection field can offer, and the helper
+plans and makes a tag change with a byte-exact backup. The page does not offer it yet.
 
 - **Choices per installed version.** Next to the newest patch, minor and major, `versions.json` now
   keeps a short list for every installed version, in its scheme and never older than what runs: the
@@ -20,13 +21,26 @@ Stage 2, first part: the radar collects what a version selection field can offer
   refuses a tag the radar does not offer, a database to another major, Nextcloud more than one major
   ahead, an image under a YAML anchor and variables that are set twice, only have a default or are
   used elsewhere. Tried read-only on the reference host: every compose file there writes the tag in
-  the `image:` line, and GlitchTip's web, worker and migration job change together.
+  the `image:` line, and GlitchTip's web, worker and migration job change together. The plan carries
+  a fingerprint of what it shows.
+- **The tag change.** `retag <container> <tag> --expect <fingerprint>` makes the plan again and only
+  goes on when it still has the fingerprint the preview showed. Then: dumps, the rollback copy of the
+  image, byte-exact copies of the files under `/var/backups/image-updates/compose/<project>/<stamp>/`,
+  the planned lines written atomically with the file's owner and mode, and `docker compose config`
+  must give every service the new reference. A failed check or a new image that cannot be pulled puts
+  the files back before any container changes (exit 5). After that it is an update with the new tag;
+  the containers are always recreated, so they carry it. The history records it as a tag change with
+  its lines, and the rollback puts the files back, unless one was edited after the change.
 - **Tests:** the choices with tag lists modelled on Formbricks, Nextcloud, PostgreSQL, Valkey and
   ClickHouse (lines, levels, flavours, caps, no pin when the registry lacks the running version's
   tag) and in the radar run; the fixtures carry choices for five images. The tag change with compose
   and `.env` files on disk: direct tags (CRLF, quotes, comments), two services and a job, anchors,
   variables (tag or whole reference, shared, set twice, default only, missing), database and
-  Nextcloud majors, the refusals, and that nothing is written.
+  Nextcloud majors, the refusals, and that nothing is written. The change itself: fingerprint, the
+  written lines (CRLF, quotes, comment, owner, mode), backup, failed check and failed pull restoring
+  the files, rollback restoring them byte-exact, an edited file stopping the rollback, the `.env`
+  variant. End to end on a Docker host: a tag change in the compose file and one through `.env`, each
+  with its rollback, and the refusals for a shared variable and an anchor.
 
 ## 0.10.0 – 2026-10-14
 

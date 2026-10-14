@@ -314,8 +314,9 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 ## Security model
 
 - **Root code in one place only.** Everything Cockpit or systemd runs as root lives in `/usr/local/lib/diun-radar` (root-owned). `/var/lib/diun` is **writable from the Diun container**; nothing is ever run from there.
-- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run`, read-only).
-  - Container names, operation IDs, dump paths, rollback tags and target tags are checked by regex. Path tricks (`../`) are refused. A target tag must also be one of the versions the radar offers.
+- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run` and `retag … --expect <fingerprint>`).
+  - Container names, operation IDs, dump paths, rollback tags, target tags and fingerprints are checked by regex. Path tricks (`../`) are refused. A target tag must also be one of the versions the radar offers.
+- **Your compose files.** Only a tag change writes to them, and only the lines its preview showed: it makes the plan again and stops if the result differs from what was shown (a fingerprint). Before writing it keeps byte-exact copies under `/var/backups/image-updates/compose/` (root only), writes atomically with the original owner and mode, and checks the result with `docker compose config`; a failed check puts the files back before any container changes. A rollback restores them, unless they were edited afterwards.
   - `delete-image` and the cleanup delete only `…:rollback-YYYYMMDD-HHMMSS` and never an image in use.
   - The cleanup rules come from `/etc/image-updates.conf` only if it belongs to root and nobody else can write it.
 - **Cockpit rights.** Reading runs with `superuser: "try"`, actions with `superuser: "require"`. Without administrative access in Cockpit there is a clear message instead of an error.
@@ -402,7 +403,8 @@ sudo python3 /usr/local/lib/diun-radar/diun-versions.py --table     # table, wri
 # What does the plugin see?
 sudo /usr/local/lib/diun-radar/diun-inventory.py                    # one JSON line per container
 sudo /usr/local/lib/diun-radar/diun-update.py plan <container>      # plan, changes nothing
-sudo /usr/local/lib/diun-radar/diun-update.py retag <container> <tag> --dry-run   # tag change: lines before/after, changes nothing
+sudo /usr/local/lib/diun-radar/diun-update.py retag <container> <tag> --dry-run   # tag change: lines before/after + fingerprint, changes nothing
+sudo /usr/local/lib/diun-radar/diun-update.py retag <container> <tag> --expect <fingerprint>   # the tag change itself (rollback: rollback <op-id>)
 sudo /usr/local/lib/diun-radar/diun-update.py backups               # dumps, rollback images, history, cleanup preview
 sudo /usr/local/lib/diun-radar/diun-update.py cleanup --dry-run     # what the cleanup rules would delete
 journalctl -u diun-cleanup.service -n 20                            # last daily cleanup
