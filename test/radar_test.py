@@ -106,6 +106,16 @@ check("choices 16-alpine: every newer minor, the newest of each newer major",
        [("16.15-alpine", "minor"), ("18.1-alpine", "major"), ("17.6-alpine", "major")]))
 check("choices: no pin when the registry lacks the running version's tag",
       R.choices("16.13-alpine", PG_TAGS, set(PG_TAGS))["pin"], None)
+VK_ALL = ["latest", "8", "8.1", "8.1.4", "9", "9.1", "9.1.0", "9.1.2", "9.2", "9.2.0-rc1"]
+check("choices: a line without a released version (9.2 = rc) is left out",
+      [(x["tag"], x["newest"]) for x in R.choices("9.1.0", VK_ALL, set(VK_ALL))["lines"]],
+      [("9", "9.1.2"), ("9.1", "9.1.2")])
+CH_ALL = (["24.3.3.102-alpine", "24.3.18.7-alpine", "24.3-alpine", "26.9.19-alpine", "26.9.19.9-alpine"] +
+          [f"{y}.{m}{s}" for y, last in ((25, 12), (26, 9)) for m in range(1, last + 1) for s in ("-alpine", ".1.1-alpine")])
+ch = R.choices("24.3.3.102-alpine", CH_ALL, set(CH_ALL))
+check("choices with four blocks: only major/minor lines, the running line stays among many newer ones",
+      [x["tag"] for x in ch["lines"]],
+      [f"26.{m}-alpine" for m in range(9, 0, -1)] + ["25.12-alpine", "25.11-alpine", "24.3-alpine"])
 MANY_TAGS = ([f"0.30.{i}" for i in range(11, 41)] + [f"0.{m}.{p}" for m in range(31, 61) for p in (0, 1)] +
              [f"{m}.{n}.0" for m in range(1, 21) for n in (0, 1)])
 ch = R.choices("0.30.11", MANY_TAGS, set(MANY_TAGS))

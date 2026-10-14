@@ -299,8 +299,10 @@ def choices(as_tag, tags, tagset):
     `as_tag` (stage 2), in its scheme and never older than it:
       pin       as_tag itself, if the registry has it (to stop following a
                 floating tag), else None
-      lines     version lines (5, 5.4, 16-alpine): tags with fewer blocks and
-                the newest version tag in each, broad lines first
+      lines     major and minor lines (5, 5.4, 16-alpine) with the newest
+                version tag in each, broad lines first; only lines with a
+                released version in them, the running version's own lines
+                always
       newer     exact versions with their level: every newer patch of the
                 installed minor line, the newest version of each newer minor
                 line of the same major, the newest version of each newer
@@ -315,8 +317,8 @@ def choices(as_tag, tags, tagset):
             continue
         if s[1] == n and s[3] > cur:
             exact.append((s[3], t))
-        elif s[1] < n and s[3] >= cur[:s[1]]:
-            lines[t] = s[3]
+        elif s[1] <= min(n - 1, 2) and s[3] >= cur[:s[1]]:
+            lines[t] = s[3]     # 26.9.19-alpine next to 26.9.19.9-alpine is no line
     exact.sort(reverse=True)
     newer = [{"tag": t, "level": "patch"} for v, t in exact if v[:2] == cur[:2]][:CHOICES_PATCH]
     for level, line in (("minor", lambda v: v[:2] if v[0] == cur[0] else None),
@@ -333,9 +335,18 @@ def choices(as_tag, tags, tagset):
         hits = [x for x in known if x[0][:len(nums)] == nums]
         return max(hits)[1] if hits else None
 
-    line_list = sorted(({"tag": t, "newest": newest_in(v)} for t, v in lines.items()),
-                       key=lambda x: (scheme(x["newest"])[3] if x["newest"] else (), -tag_digits(x["tag"])),
-                       reverse=True)[:CHOICES_LINES]
+    # A line without a released version may point to a pre-release (valkey
+    # 9.2 before 9.2.0): left out. The running version's lines (5 and 5.0 for
+    # 5.0.2) always stay, the others fill up newest first.
+    def order(x):
+        return scheme(x[2])[3], -len(x[0])
+
+    found = [(v, t, newest_in(v)) for t, v in lines.items()]
+    found = [x for x in found if x[2]]
+    own = [x for x in found if x[0] == cur[:len(x[0])]]
+    rest = sorted((x for x in found if x[0] != cur[:len(x[0])]), key=order, reverse=True)
+    keep = sorted(own + rest[:max(CHOICES_LINES - len(own), 0)], key=order, reverse=True)
+    line_list = [{"tag": t, "newest": newest} for v, t, newest in keep]
     words = ("latest", "stable", "production")
     flavour = [suffix.lstrip("-")] if suffix.startswith("-") else []
     floating = [w for w in flavour + [w + suffix for w in words] if w in tagset]
