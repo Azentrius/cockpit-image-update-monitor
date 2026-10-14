@@ -131,7 +131,43 @@
      "minor": null,
      "major": "35.0.1-apache",
      "status": "major",
-     "as_tag": "34.0.3-apache"
+     "as_tag": "34.0.3-apache",
+     "choices": {
+      "pin": "34.0.3-apache",
+      "lines": [
+       {
+        "tag": "35-apache",
+        "newest": "35.0.1-apache"
+       },
+       {
+        "tag": "35.0-apache",
+        "newest": "35.0.1-apache"
+       },
+       {
+        "tag": "34-apache",
+        "newest": "34.0.4-apache"
+       },
+       {
+        "tag": "34.0-apache",
+        "newest": "34.0.4-apache"
+       }
+      ],
+      "newer": [
+       {
+        "tag": "34.0.4-apache",
+        "level": "patch"
+       },
+       {
+        "tag": "35.0.1-apache",
+        "level": "major"
+       }
+      ],
+      "floating": [
+       "apache",
+       "stable-apache",
+       "production-apache"
+      ]
+     }
     }
    },
    "newest": "35.0.1",
@@ -172,7 +208,41 @@
      "minor": "16.15-alpine",
      "major": "18.6-alpine",
      "status": "major",
-     "as_tag": "16.14-alpine"
+     "as_tag": "16.14-alpine",
+     "choices": {
+      "pin": "16.14-alpine",
+      "lines": [
+       {
+        "tag": "18-alpine",
+        "newest": "18.6-alpine"
+       },
+       {
+        "tag": "17-alpine",
+        "newest": "17.11-alpine"
+       },
+       {
+        "tag": "16-alpine",
+        "newest": "16.15-alpine"
+       }
+      ],
+      "newer": [
+       {
+        "tag": "16.15-alpine",
+        "level": "minor"
+       },
+       {
+        "tag": "18.6-alpine",
+        "level": "major"
+       },
+       {
+        "tag": "17.11-alpine",
+        "level": "major"
+       }
+      ],
+      "floating": [
+       "alpine"
+      ]
+     }
     },
     "16.15": {
      "patch": null,
@@ -254,7 +324,28 @@
      "minor": "3.3.1",
      "major": null,
      "status": "minor",
-     "as_tag": "3.1.6"
+     "as_tag": "3.1.6",
+     "choices": {
+      "pin": "3.1.6",
+      "lines": [],
+      "newer": [
+       {
+        "tag": "3.1.7",
+        "level": "patch"
+       },
+       {
+        "tag": "3.3.1",
+        "level": "minor"
+       },
+       {
+        "tag": "3.2.4",
+        "level": "minor"
+       }
+      ],
+      "floating": [
+       "latest"
+      ]
+     }
     }
    },
    "newest": "3.3.1",
@@ -325,7 +416,28 @@
      "minor": "0.40.3",
      "major": null,
      "status": "minor",
-     "as_tag": "0.30.11"
+     "as_tag": "0.30.11",
+     "choices": {
+      "pin": "0.30.11",
+      "lines": [],
+      "newer": [
+       {
+        "tag": "0.40.3",
+        "level": "minor"
+       },
+       {
+        "tag": "0.35.1",
+        "level": "minor"
+       },
+       {
+        "tag": "0.31.2",
+        "level": "minor"
+       }
+      ],
+      "floating": [
+       "latest"
+      ]
+     }
     }
    },
    "newest": "0.40.3",
@@ -390,7 +502,41 @@
      "minor": null,
      "major": "v3.2.1",
      "status": "major",
-     "as_tag": "v2.1.4"
+     "as_tag": "v2.1.4",
+     "choices": {
+      "pin": "v2.1.4",
+      "lines": [
+       {
+        "tag": "v3",
+        "newest": "v3.2.1"
+       },
+       {
+        "tag": "v3.2",
+        "newest": "v3.2.1"
+       },
+       {
+        "tag": "v2",
+        "newest": "v2.1.5"
+       },
+       {
+        "tag": "v2.1",
+        "newest": "v2.1.5"
+       }
+      ],
+      "newer": [
+       {
+        "tag": "v2.1.5",
+        "level": "patch"
+       },
+       {
+        "tag": "v3.2.1",
+        "level": "major"
+       }
+      ],
+      "floating": [
+       "latest"
+      ]
+     }
     }
    },
    "newest": "v3.2.1",

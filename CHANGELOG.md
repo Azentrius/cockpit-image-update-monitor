@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.0 – 2026-10-14
+
+Stage 2, first part: the radar collects what a version selection field can offer.
+
+- **Choices per installed version.** Next to the newest patch, minor and major, `versions.json` now
+  keeps a short list for every installed version, in its scheme and never older than what runs: the
+  running version's own tag (to pin it), the version lines the registry offers (`5`, `5.4`,
+  `16-alpine`) with the newest version in each, newer exact versions by level (every newer patch, the
+  newest of each newer minor line, the newest of each newer major) and `latest` / `stable` /
+  `production` in the image's flavour (`stable-apache`). Pre-releases, other flavours (`fpm` instead
+  of `apache`) and `v`-prefixed twins are left out. The page does not use the list yet.
+- **Tests:** the choices with tag lists modelled on Formbricks, Nextcloud and PostgreSQL (lines,
+  levels, flavours, caps, no pin when the registry lacks the running version's tag) and in the radar
+  run; the fixtures carry choices for five images.
+
 ## 0.10.0 – 2026-10-14
 
 Stage 1.2, third part: floating tags resolved. The page says which version `latest` points to, and the

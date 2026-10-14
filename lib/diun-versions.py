@@ -32,6 +32,9 @@ Newer versions are compared in the scheme of the installed version
 installed -> 16.15-alpine / 18.0-alpine; -rc / -beta / -jdk variants never
 count. "reach" tells which levels the configured tag delivers by itself
 (16-alpine: patch + minor; latest: all; v2.1.4: none - change the tag).
+"choices" is the short list a selection field offers instead (pin the
+running version, version lines like 5 or 16-alpine, newer exact versions,
+latest/stable), never older than what runs.
 
 Database images are flagged ("db": true): the plugin shows their major
 updates as grey info, because a DB major means a migration (dump/restore,
@@ -74,6 +77,9 @@ HUB = "https://hub.docker.com/v2/repositories/"
 HUB_PAGES = 10             # x 100 tags, newest first
 REGISTRY_CANDIDATES = 20   # manifests checked per image outside Docker Hub
 REGISTRY_CANDIDATES_DEEP = 100   # the first lookup of an installed image goes further back
+CHOICES_PATCH = 10         # newer patches of the installed minor line offered for selection
+CHOICES_LINE = 15          # newest version per newer minor line, and per newer major
+CHOICES_LINES = 12         # version lines (5, 5.4, 16-alpine)
 # Docker's reference grammar: path components and tag names. Anything else
 # never ends up in a Docker Hub URL.
 HUB_PATH_RE = re.compile(r"^[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?:/[a-z0-9]+(?:[._-]+[a-z0-9]+)*)+$")
@@ -288,6 +294,55 @@ def compare(tag, tags):
     return res
 
 
+def choices(as_tag, tags, tagset):
+    """What a selection field can offer instead of the installed version
+    `as_tag` (stage 2), in its scheme and never older than it:
+      pin       as_tag itself, if the registry has it (to stop following a
+                floating tag), else None
+      lines     version lines (5, 5.4, 16-alpine): tags with fewer blocks and
+                the newest version tag in each, broad lines first
+      newer     exact versions with their level: every newer patch of the
+                installed minor line, the newest version of each newer minor
+                line of the same major, the newest version of each newer
+                major; newest first per level
+      floating  latest / stable / production (with the flavour suffix, e.g.
+                stable-apache), never pre-releases."""
+    prefix, n, suffix, cur = scheme(as_tag)
+    exact, lines = [], {}
+    for t in tags:
+        s = scheme(t)
+        if not s or s[0] != prefix or s[2] != suffix:
+            continue
+        if s[1] == n and s[3] > cur:
+            exact.append((s[3], t))
+        elif s[1] < n and s[3] >= cur[:s[1]]:
+            lines[t] = s[3]
+    exact.sort(reverse=True)
+    newer = [{"tag": t, "level": "patch"} for v, t in exact if v[:2] == cur[:2]][:CHOICES_PATCH]
+    for level, line in (("minor", lambda v: v[:2] if v[0] == cur[0] else None),
+                        ("major", lambda v: v[:1] if v[0] != cur[0] else None)):
+        seen = set()
+        for v, t in exact:
+            key = line(v) if v[:2] != cur[:2] else None
+            if key and key not in seen and len(seen) < CHOICES_LINE:
+                seen.add(key)
+                newer.append({"tag": t, "level": level})
+    known = exact + [(cur, as_tag)]
+
+    def newest_in(nums):
+        hits = [x for x in known if x[0][:len(nums)] == nums]
+        return max(hits)[1] if hits else None
+
+    line_list = sorted(({"tag": t, "newest": newest_in(v)} for t, v in lines.items()),
+                       key=lambda x: (scheme(x["newest"])[3] if x["newest"] else (), -tag_digits(x["tag"])),
+                       reverse=True)[:CHOICES_LINES]
+    words = ("latest", "stable", "production")
+    flavour = [suffix.lstrip("-")] if suffix.startswith("-") else []
+    floating = [w for w in flavour + [w + suffix for w in words] if w in tagset]
+    return {"pin": as_tag if as_tag in tagset else None, "lines": line_list, "newer": newer,
+            "floating": floating}
+
+
 def newest_plain(tags):
     """Highest plain version tag (1.2 / v1.2.3), for display when the
     installed version is unknown."""
@@ -366,7 +421,8 @@ def analyse(item, cache, now, tag_cache=None):
             continue
         as_tag = sch[0] + v + sch[2]
         rec["versions"][v] = dict(compare(as_tag, tags), as_tag=as_tag,
-                                  scheme=sch[0] + ".".join(["N"] * sch[1]) + sch[2])
+                                  scheme=sch[0] + ".".join(["N"] * sch[1]) + sch[2],
+                                  choices=choices(as_tag, tags, tagset))
     # Relative to the configured tag itself (fallback when the installed
     # version is unknown; pg17 -> pg18).
     if scheme(tag):

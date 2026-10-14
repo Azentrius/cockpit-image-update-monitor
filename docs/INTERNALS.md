@@ -102,7 +102,14 @@ Inputs are checked by regex:
    },
    "versions": {
      "16.14": {"patch": null, "minor": "16.15-alpine", "major": "18.6-alpine",
-               "status": "major", "as_tag": "16.14-alpine", "scheme": "N.N-alpine"}
+               "status": "major", "as_tag": "16.14-alpine", "scheme": "N.N-alpine",
+               "choices": {
+                 "pin": "16.14-alpine",
+                 "lines": [{"tag": "18-alpine", "newest": "18.6-alpine"},
+                           {"tag": "16-alpine", "newest": "16.15-alpine"}],
+                 "newer": [{"tag": "16.15-alpine", "level": "minor"},
+                           {"tag": "18.6-alpine", "level": "major"}],
+                 "floating": ["alpine"]}}
    },
    "by_tag": {"patch": null, "minor": null, "major": "18-alpine", "status": "major"},
    "newest": "18.6",
@@ -117,6 +124,7 @@ Inputs are checked by regex:
 |---|---|
 | `installed` | per **image ID**, also for the newer image that is already pulled. `src` is `tag`, `env:<NAME>`, `label` or `digest`. Digest matches are the cache for the next run: hits are kept for good, `version: null` is retried after 7 days. |
 | `versions[<installed version>]` | newer tags in the scheme of the installed version. `status: "unknown"` when there is no matching scheme (e.g. pgvector `pg17` with `PG_VERSION` 17.10). |
+| `versions[…].choices` | (since 0.11.0, for the stage-2 selection field) what can replace the configured tag, in the installed version's scheme and never older: `pin` = the installed version's own tag, `null` if the registry lacks it; `lines` = tags with fewer blocks (`5`, `5.4`, `16-alpine`) and the newest version tag in each, broad lines first, at most 12; `newer` = exact tags with `level` `patch` / `minor` / `major`: every newer patch of the installed minor line (at most 10), the newest of each newer minor line and of each newer major (at most 15 each), newest first per level; `floating` = `latest`, `stable`, `production` (with the flavour suffix, e.g. `stable-apache`, or the bare flavour `apache`) when the registry has them. Pre-releases (`-rc.1`), other flavours and `v`-prefixed twins never count. Missing without a scheme and in data from radars before 0.11.0. |
 | `by_tag` | comparison with the configured tag itself. Only when the tag contains numbers; the plugin uses it as a fallback. |
 | `reach` | levels the configured tag delivers with the Update button. |
 | `newest` | highest plain version tag. Shown when the installed version is unknown. |
@@ -369,7 +377,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 
 | File | Checks |
 |---|---|
-| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, hub/registry match with fakes, deeper first lookup, `tag_now`, cache, outage) |
+| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
 | `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
