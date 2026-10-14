@@ -77,6 +77,42 @@ check("best_tag glitchtip", R.best_tag(["6.1", "6.1.8"]), "6.1.8")
 check("best_tag nothing", R.best_tag(["latest", "stable"]), None)
 check("newest_plain", R.newest_plain(["6.0.0", "6.0", "6", "sha256-abc.sig", "5.4.4", "6.0.2", "6.0.1", "latest"]), "6.0.2")
 
+# ---------------------------------------------------------------- choices
+FB_ALL = ["latest", "stable", "main", "edge", "4", "4.9", "4.9.3", "5", "5.0", "5.0.1", "5.0.2", "5.0.3", "5.1",
+          "5.1.0", "5.1.1", "5.2.0", "5.3.0", "5.3.2", "5.4", "5.4.4", "5.4.5", "v5.4.5", "6", "6.0", "6.0.0", "6.0.1",
+          "6.0.2", "6.1.0-rc.1"]
+ch = R.choices("5.0.2", FB_ALL, set(FB_ALL))
+check("choices: pin the running version", ch["pin"], "5.0.2")
+check("choices: version lines with their newest version, broad first, none older than 5.0.2",
+      [(x["tag"], x["newest"]) for x in ch["lines"]],
+      [("6", "6.0.2"), ("6.0", "6.0.2"), ("5", "5.4.5"), ("5.4", "5.4.5"), ("5.1", "5.1.1"), ("5.0", "5.0.3")])
+check("choices: every newer patch, the newest of each newer minor line, no rc, no v-prefix",
+      [(x["tag"], x["level"]) for x in ch["newer"]],
+      [("5.0.3", "patch"), ("5.4.5", "minor"), ("5.3.2", "minor"), ("5.2.0", "minor"), ("5.1.1", "minor"),
+       ("6.0.2", "major")])
+check("choices: floating tags without pre-releases", ch["floating"], ["latest", "stable"])
+NC_ALL = ["apache", "stable-apache", "production-apache", "latest", "fpm", "33-apache", "33.0.9-apache", "34-apache",
+          "34.0-apache", "34.0.3-apache", "34.0.4-apache", "35-apache", "35.0-apache", "35.0.1-apache", "35.0.1-fpm",
+          "35.0.1"]
+ch = R.choices("34.0.3-apache", NC_ALL, set(NC_ALL))
+check("choices apache: the flavour stays (no fpm, no plain 35.0.1)",
+      (ch["pin"], [x["tag"] for x in ch["lines"]], [(x["tag"], x["level"]) for x in ch["newer"]], ch["floating"]),
+      ("34.0.3-apache", ["35-apache", "35.0-apache", "34-apache", "34.0-apache"],
+       [("34.0.4-apache", "patch"), ("35.0.1-apache", "major")], ["apache", "stable-apache", "production-apache"]))
+ch = R.choices("16.14-alpine", PG_TAGS, set(PG_TAGS))
+check("choices 16-alpine: every newer minor, the newest of each newer major",
+      (ch["pin"], [(x["tag"], x["newest"]) for x in ch["lines"]], [(x["tag"], x["level"]) for x in ch["newer"]]),
+      ("16.14-alpine", [("18-alpine", "18.1-alpine"), ("16-alpine", "16.15-alpine")],
+       [("16.15-alpine", "minor"), ("18.1-alpine", "major"), ("17.6-alpine", "major")]))
+check("choices: no pin when the registry lacks the running version's tag",
+      R.choices("16.13-alpine", PG_TAGS, set(PG_TAGS))["pin"], None)
+MANY_TAGS = ([f"0.30.{i}" for i in range(11, 41)] + [f"0.{m}.{p}" for m in range(31, 61) for p in (0, 1)] +
+             [f"{m}.{n}.0" for m in range(1, 21) for n in (0, 1)])
+ch = R.choices("0.30.11", MANY_TAGS, set(MANY_TAGS))
+check("choices are capped: 10 patches, 15 minor lines, 15 majors",
+      (len(ch["newer"]), [ch["newer"][i]["tag"] for i in (0, 9, 10, 24, 25, 39)]),
+      (40, ["0.30.40", "0.30.31", "0.60.1", "0.46.1", "20.1.0", "6.1.0"]))
+
 # ---------------------------------------------------------- hub / registry
 D_OLLAMA = "sha256:c484b703176aa19dfc0a54cbfb60ab8094b38faa04283fb77eba1d33319e5eca"
 pages_seen = []
@@ -217,6 +253,10 @@ check("ollama label rejected, digest 0.30.11", (ol["installed"]["ido"]["version"
 check("ollama newer 0.31.0 (no rc)", ol["versions"]["0.30.11"]["minor"], "0.31.0")
 pv = recs[("pgvector/pgvector", "pg17")]
 check("pgvector: version unknown-scheme, by_tag major pg18", (pv["versions"]["17.10"]["status"], pv["by_tag"]["major"]), ("unknown", "pg18"))
+check("choices per installed version, none without a scheme",
+      (ol["versions"]["0.30.11"]["choices"], pg["versions"]["16.15"]["choices"]["newer"][0], "choices" in pv["versions"]["17.10"]),
+      ({"pin": "0.30.11", "lines": [], "newer": [{"tag": "0.30.12", "level": "patch"}, {"tag": "0.31.0", "level": "minor"}],
+        "floating": ["latest"]}, {"tag": "18.1-alpine", "level": "major"}, False))
 check("newest for ollama", ol["newest"], "0.31.0")
 check("first lookup of an image searches deep", limits, [R.REGISTRY_CANDIDATES_DEEP])
 check("floating tags resolved, exact ones not",
