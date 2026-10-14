@@ -34,15 +34,23 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 read-only: the plan of a tag change (stage 2):
                                 what the radar offers the tag as, the version
                                 it brings, where the tag is written (compose
-                                file or .env) and every line before and after,
-                                or why it cannot be done here
+                                file or .env), every line before and after and
+                                a fingerprint of it; or why it cannot be done
+  retag <container> <tag> --expect <fingerprint> [--no-dump]
+                                the tag change itself, only if the plan made
+                                again has the same fingerprint: dumps, rollback
+                                tag, byte-exact backup of the files, the lines
+                                written (atomically), `docker compose config`
+                                checked, then the update steps 3 to 6 with the
+                                new tag. A rollback restores the files.
 
-The image reference in the compose file is never changed yet (retag only plans
-the change). Images built locally or pinned by digest are not updated.
+Only retag changes the compose or .env files, and only the lines it showed.
+Images built locally or pinned by digest are not updated.
 
 Everything the addon writes lives in /var/backups/image-updates (root only):
   dumps/<project>/<stamp>_<container>.sql.gz
-  operations.jsonl              one JSON line per update / rollback
+  compose/<project>/<stamp>/    the files a tag change wrote, as they were
+  operations.jsonl              one JSON line per update / tag change / rollback
   logs/<op-id>.log              output of the update (.rollback.log: of its rollback)
 
 The machine-readable result of update/rollback/cleanup is the last line:
@@ -544,6 +552,7 @@ def relations(plan, cfg, members, same, services, project):
 # text of the compose and .env files (no YAML library, no round trip), so the
 # lines that would change can be shown exactly before anything is written.
 TAG_ARG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
+FP_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_LINE_RE = re.compile(r"^(?P<pre>[ ]*image:[ \t]*)(?P<q>[\"']?)(?P<val>[^\"'\s#]+)(?P=q)"
                            r"(?P<post>[ \t]*(?:#.*)?)$")
 KEY_LINE_RE = re.compile(r"^(?P<indent>[ ]*)(?P<key>[A-Za-z0-9._-]+):[ \t]*(?:#.*)?$")
@@ -688,7 +697,8 @@ def locate_tag(ctx, ref, services, new_tag):
     cfg_svcs = (ctx.get("cfg") or {}).get("services") or {}
     wanted = set(services) | {s for s, v in cfg_svcs.items() if same_ref((v or {}).get("image"), ref)}
     defs, env_lines = {}, []
-    for f in ctx["env_files"]:
+    # Without an --env-file compose reads <project directory>/.env itself.
+    for f in ctx["env_files"] or [os.path.join(ctx["workdir"], ".env")]:
         got = read_lines(f) if os.path.exists(f) else None
         if got is None:
             continue
@@ -758,11 +768,19 @@ def locate_tag(ctx, ref, services, new_tag):
     return {"changes": changes, "variable": next(iter(var_refs), None)}
 
 
+def fingerprint(new_tag, changes):
+    """What the page showed, as one value: the new tag and every change with
+    its file checksum. `retag` without --dry-run only writes when the plan it
+    makes again gives the same fingerprint."""
+    data = {"tag": new_tag, "changes": [[c["file"], c["line"], c["old"], c["new"], c["sha256"]] for c in changes]}
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
 def make_retag(name, new_tag):
     """Read-only plan of a tag change (`retag … --dry-run`): the plan of an
     update plus what the radar offers the new tag as, the version it brings,
     where the tag is written and every line before and after; or why it
-    cannot be done here."""
+    cannot be done here. Returns (plan, compose context)."""
     if not TAG_ARG_RE.match(new_tag):
         raise Abort(64, f"Ungültiger Tag: {new_tag}", f"Invalid tag: {new_tag}")
     plan, ctx = make_plan(name)
@@ -770,11 +788,11 @@ def make_retag(name, new_tag):
     rt = plan["retag"] = {"tag": new_tag, "from_tag": old_tag, "image": repo + ":" + new_tag,
                           "choice": None, "level": None, "newest": None,
                           "possible": False, "reason": None, "detail": None,
-                          "variable": None, "changes": [], "git": None}
+                          "variable": None, "changes": [], "git": None, "fingerprint": None}
 
     def refuse(reason, detail=None):
         rt["reason"], rt["detail"] = reason, detail
-        return plan
+        return plan, ctx
 
     if not plan["updatable"]:
         return refuse(plan["reason"], plan.get("detail"))
@@ -807,8 +825,93 @@ def make_retag(name, new_tag):
         return refuse(got["reason"], got.get("detail"))
     rt["changes"], rt["variable"] = got["changes"], got["variable"]
     rt["git"] = git_root(ctx["workdir"])
+    rt["fingerprint"] = fingerprint(new_tag, rt["changes"])
     rt["possible"] = True
-    return plan
+    return plan, ctx
+
+
+def sha256_of(path):
+    with open(os.path.realpath(path), "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def changed_bytes(path, changes):
+    """The file's bytes with the planned lines replaced (line endings kept),
+    or None when the file is no longer the one that was planned."""
+    got = read_lines(path)
+    if got is None or any(c["sha256"] != got[1] for c in changes):
+        return None
+    lines = got[0]
+    for c in changes:
+        i = c["line"] - 1
+        if i >= len(lines) or bare(lines[i]) != c["old"]:
+            return None
+        lines[i] = c["new"] + lines[i][len(bare(lines[i])):]
+    return "".join(lines).encode("utf-8")
+
+
+def write_like(path, data):
+    """Replace a file atomically with data, keeping its owner and mode (a
+    symlink stays; the file it points to is replaced)."""
+    real = os.path.realpath(path)
+    st = os.stat(real)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(real), prefix="." + os.path.basename(real) + ".",
+                               suffix=".imgupd")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chown(tmp, st.st_uid, st.st_gid)
+        os.chmod(tmp, st.st_mode & 0o7777)
+        os.replace(tmp, real)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def backup_files(project, st, paths):
+    """Byte-exact copies of the files a tag change writes, in
+    compose/<project>/<stamp>/ (root only). Returns (folder,
+    [{"path", "backup", "sha256"}])."""
+    if not NAME_RE.match(project):
+        raise Abort(64, f"Ungültiger Projektname: {project}", f"Invalid project name: {project}")
+    top = os.path.join(BASE, "compose")
+    d = os.path.join(top, project, st)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    for x in (top, os.path.dirname(d), d):
+        os.chmod(x, 0o700)
+    saved = []
+    for i, p in enumerate(paths, 1):
+        with open(os.path.realpath(p), "rb") as f:
+            data = f.read()
+        b = os.path.join(d, f"{i}_{os.path.basename(p)}")
+        fd = os.open(b, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        saved.append({"path": p, "backup": b, "sha256": hashlib.sha256(data).hexdigest()})
+    return d, saved
+
+
+def restore_files(saved):
+    """Put the saved bytes back, after a failed check or on rollback."""
+    for x in saved:
+        with open(x["backup"], "rb") as f:
+            write_like(x["path"], f.read())
+
+
+def drop_backup(folder):
+    """Remove the backup of a tag change that stopped before any container
+    changed, and the project and compose folders if they are empty then."""
+    shutil.rmtree(folder, ignore_errors=True)
+    for parent in (os.path.dirname(folder), os.path.dirname(os.path.dirname(folder))):
+        try:
+            os.rmdir(parent)
+        except OSError:
+            break
 
 
 def running_state(names):
@@ -1171,23 +1274,108 @@ def cmd_update(name, do_dump=True):
     plan, ctx = make_plan(name)
     if not plan["updatable"]:
         raise Abort(2, f"Nicht aktualisierbar: {plan['reason']}", f"Not updatable: {plan['reason']}")
+    return roll_out(name, plan, ctx, do_dump)
 
+
+def cmd_retag(name, new_tag, expect, do_dump=True):
+    """Change the configured tag (stage 2): the plan of `retag --dry-run`
+    once more, and only if it still matches what the page showed."""
+    if not FP_RE.match(expect):
+        raise Abort(64, f"Ungültiger Fingerabdruck: {expect}", f"Invalid fingerprint: {expect}")
+    lock()
+    plan, ctx = make_retag(name, new_tag)
+    rt = plan["retag"]
+    if not rt["possible"]:
+        why = rt["reason"] + (f" ({rt['detail']})" if rt.get("detail") else "")
+        raise Abort(5, f"Tag-Wechsel nicht möglich: {why}", f"Tag change not possible: {why}")
+    if rt["fingerprint"] != expect:
+        raise Abort(5, "Die Dateien haben sich seit der Vorschau geändert – nichts geändert, bitte neu planen.",
+                    "The files changed since the preview – nothing changed, please plan again.")
+    return roll_out(name, plan, ctx, do_dump, retag=rt)
+
+
+def discard(op):
+    """A run that stops before any container changed leaves nothing behind:
+    no rollback tag, no dumps."""
+    if op.get("rollback"):
+        run(["docker", "rmi", op["rollback"]], check=False)
+    for rel in op["dumps"]:
+        try:
+            remove_dump(rel)
+        except (Abort, OSError):
+            pass
+
+
+def change_files(op, ctx, retag, services, st):
+    """Step 2b of a tag change: back up the files byte-exact, write the
+    planned lines, check with `docker compose config` that the services use
+    the new image. Anything wrong puts the files back and stops before a
+    container changes (exit 5)."""
+    by_file = {}
+    for c in retag["changes"]:
+        by_file.setdefault(c["file"], []).append(c)
+    new = {f: changed_bytes(f, cs) for f, cs in by_file.items()}
+    if any(v is None for v in new.values()):
+        discard(op)
+        raise Abort(5, "Die Dateien haben sich seit der Planung geändert – nichts geändert.",
+                    "The files changed since planning – nothing changed.")
+    op["backup"], saved = backup_files(op["project"], st, sorted(by_file))
+    for x in saved:
+        x["new_sha256"] = hashlib.sha256(new[x["path"]]).hexdigest()
+    op["backup_files"] = saved
+    say(f"Sicherung der Dateien: {op['backup']}", f"Files backed up to {op['backup']}")
+    try:
+        for f in sorted(new):
+            write_like(f, new[f])
+        for c in retag["changes"]:
+            say(f"{c['file']}:{c['line']}: {c['old'].strip()}  →  {c['new'].strip()}",
+                f"{c['file']}:{c['line']}: {c['old'].strip()}  →  {c['new'].strip()}")
+        cfg = json.loads(run(compose_cmd(ctx) + ["config", "--format", "json"]))
+        svc = cfg.get("services") or {}
+        wrong = [s for s in services if not same_ref((svc.get(s) or {}).get("image"), retag["image"])]
+        if wrong:
+            raise ValueError("services on another image: " + ", ".join(wrong))
+    except (subprocess.CalledProcessError, OSError, ValueError) as e:
+        detail = (getattr(e, "stderr", None) or str(e)).strip()[-300:]
+        try:
+            restore_files(saved)
+        except OSError as e2:
+            raise Abort(1, f"Wiederherstellen fehlgeschlagen ({e2}) – die alten Dateien liegen in {op['backup']}.",
+                        f"Restoring failed ({e2}) – the old files are in {op['backup']}.")
+        drop_backup(op["backup"])
+        discard(op)
+        raise Abort(5, f"Prüfung der geänderten Dateien fehlgeschlagen: {detail} – Dateien wiederhergestellt, "
+                       f"nichts geändert.",
+                    f"Check of the changed files failed: {detail} – files restored, nothing changed.")
+    say("docker compose config: in Ordnung.", "docker compose config: OK.")
+
+
+def roll_out(name, plan, ctx, do_dump, retag=None):
+    """The update itself. With retag (a tag change) the configured tag is
+    changed first (change_files) and the new tag is rolled out."""
     st = stamp()
     op_id = f"{st}-{name}"
     ref = plan["image"]
+    new_ref = retag["image"] if retag else ref
     repo, _tag = split_ref(ref)
     services, project = plan["services"], plan["project"]
     old_ids = {n: inspect(n)["Image"] for n in plan["containers"]}
     old_id = old_ids[name]
-    op = {"id": op_id, "ts": now_iso(), "kind": "update", "container": name,
+    op = {"id": op_id, "ts": now_iso(), "kind": "retag" if retag else "update", "container": name,
           "project": project, "workdir": ctx["workdir"], "files": ctx["files"],
           "env_files": ctx["env_files"], "services": services,
           "containers": plan["containers"], "image": ref, "old_id": old_id,
           "from_version": version_of(ref, old_id), "to_version": None,
           "rollback": None, "dumps": [], "status": "running"}
 
-    say(f"Update {ref} in Projekt {project}: Services {', '.join(services)}",
-        f"Updating {ref} in project {project}: services {', '.join(services)}")
+    if retag:
+        op.update(to_image=new_ref, from_tag=retag["from_tag"], to_tag=retag["tag"],
+                  changes=[{k: c[k] for k in ("file", "line", "old", "new")} for c in retag["changes"]])
+        say(f"Tag-Wechsel {ref} → {new_ref} in Projekt {project}: Services {', '.join(services)}",
+            f"Changing {ref} to {new_ref} in project {project}: services {', '.join(services)}")
+    else:
+        say(f"Update {ref} in Projekt {project}: Services {', '.join(services)}",
+            f"Updating {ref} in project {project}: services {', '.join(services)}")
     if plan["config_changed"]:
         say("Hinweis: Die Compose-Datei wurde seit dem letzten Start geändert – diese Änderungen werden mit ausgerollt.",
             "Note: the compose file changed since these containers were created – those changes get rolled out too.")
@@ -1205,11 +1393,7 @@ def cmd_update(name, do_dump=True):
         except Abort:
             # An aborted update leaves nothing behind, not even the dumps
             # of the other databases that worked.
-            for rel in op["dumps"]:
-                try:
-                    remove_dump(rel)
-                except (Abort, OSError):
-                    pass
+            discard(op)
             raise
     elif do_dump:
         say("Kein unterstützter Datenbank-Container im Projekt – kein Dump.",
@@ -1227,13 +1411,24 @@ def cmd_update(name, do_dump=True):
     op["rollback"] = rb
     say(f"Rollback-Sicherung: {rb}", f"Rollback image: {rb}")
 
+    # 2b. Tag change: back up the files, write the planned lines, check them
+    if retag:
+        change_files(op, ctx, retag, services, st)
+
     # 3. Pull (registry failures are reported, an already pulled image still counts)
     base = compose_cmd(ctx)
     if stream(base + ["pull", "--ignore-pull-failures", *services]) != 0:
         say("Warnung: Pull meldete Fehler – es wird mit dem lokal vorhandenen Image weitergemacht.",
             "Warning: pull reported errors – continuing with the image available locally.")
-    new_id = image_id(ref)
-    if new_id and all(v == new_id for v in old_ids.values()):
+    new_id = image_id(new_ref)
+    if retag and not new_id:
+        restore_files(op["backup_files"])
+        drop_backup(op["backup"])
+        discard(op)
+        raise Abort(5, f"Das Image {new_ref} ist nicht verfügbar – Dateien wiederhergestellt, nichts geändert.",
+                    f"The image {new_ref} is not available – files restored, nothing changed.")
+    # A tag change always recreates: the containers must carry the new tag.
+    if not retag and new_id and all(v == new_id for v in old_ids.values()):
         run(["docker", "rmi", rb], check=False)
         op.update(status="nochange", rollback=None, new_id=new_id, to_version=op["from_version"])
         record(op, log=op_id + ".log")
@@ -1243,8 +1438,10 @@ def cmd_update(name, do_dump=True):
         return 0
     op["new_id"] = new_id
     op["new_digests"] = repo_digests(new_id)
-    op["to_version"] = version_of(ref, new_id)
+    op["to_version"] = version_of(new_ref, new_id)
     versions = {"from_version": op["from_version"], "to_version": op["to_version"]}
+    if retag:
+        versions.update(image=new_ref, backup=op["backup"])
 
     # 4. Recreate only these services, then watch those that depend on them
     watched = running_state([c for d in plan["dependents"] for c in d["containers"]])
@@ -1259,12 +1456,19 @@ def cmd_update(name, do_dump=True):
         op["status"] = "failed"
         record(op, log=op_id + ".log")
         say_reason(op["reason"])
-        say("Update fehlgeschlagen. Zurückrollen ist möglich.", "Update failed. A rollback is possible.")
+        if retag:
+            say("Tag-Wechsel fehlgeschlagen. Zurückrollen ist möglich (stellt auch die Dateien wieder her).",
+                "Tag change failed. A rollback is possible (it restores the files too).")
+        else:
+            say("Update fehlgeschlagen. Zurückrollen ist möglich.", "Update failed. A rollback is possible.")
         result(op=op_id, status="failed", rollback=rb, dumps=op["dumps"], reason=op["reason"], **versions)
         return 4
     op["status"] = "ok"
     record(op, log=op_id + ".log")
-    say("Update erfolgreich.", "Update successful.")
+    if retag:
+        say(f"Tag-Wechsel erfolgreich: {new_ref}", f"Tag change successful: {new_ref}")
+    else:
+        say("Update erfolgreich.", "Update successful.")
 
     # 5. + 6. Never let these turn a successful update into a failure.
     cleanup_after_update(project, repo)
@@ -1278,7 +1482,7 @@ def cmd_rollback(op_id):
         raise Abort(64, f"Ungültige Vorgangs-ID: {op_id}", f"Invalid operation id: {op_id}")
     lock()
     op = load_ops().get(op_id)
-    if not op or op.get("kind") != "update":
+    if not op or op.get("kind") not in ("update", "retag"):
         raise Abort(2, f"Vorgang {op_id} nicht gefunden.", f"Operation {op_id} not found.")
     if op.get("rolled_back"):
         raise Abort(3, "Dieser Vorgang wurde bereits zurückgerollt.", "This operation was already rolled back.")
@@ -1287,10 +1491,29 @@ def cmd_rollback(op_id):
         raise Abort(2, "Das Rollback-Image existiert nicht mehr.", "The rollback image no longer exists.")
     ctx = {"project": op["project"], "workdir": op["workdir"], "files": op["files"],
            "env_files": op.get("env_files") or []}
+    saved = (op.get("backup_files") or []) if op.get("kind") == "retag" else []
+    # A tag change is undone with its files. Check them all before touching one:
+    # a file edited since then, or a damaged backup, stops the rollback.
+    for x in saved:
+        try:
+            now_sum, bk_sum = sha256_of(x["path"]), sha256_of(x["backup"])
+        except OSError as e:
+            raise Abort(2, f"Datei oder Sicherung nicht lesbar: {e}", f"File or backup not readable: {e}")
+        if bk_sum != x["sha256"]:
+            raise Abort(2, f"Die Sicherung {x['backup']} ist beschädigt – nichts geändert.",
+                        f"The backup {x['backup']} is damaged – nothing changed.")
+        if now_sum != x.get("new_sha256"):
+            raise Abort(5, f"{x['path']} wurde nach dem Tag-Wechsel geändert – nichts geändert. Die alte Datei "
+                           f"liegt in {x['backup']}.",
+                        f"{x['path']} changed after the tag change – nothing changed. The old file is in {x['backup']}.")
     say(f"Rollback von {op['image']} auf {rb} (Projekt {op['project']}) …",
         f"Rolling {op['image']} back to {rb} (project {op['project']}) …")
     say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
         "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
+    if saved:
+        restore_files(saved)
+        for x in saved:
+            say(f"Wiederhergestellt: {x['path']}", f"Restored: {x['path']}")
     run(["docker", "tag", rb, op["image"]])
     rc = stream(compose_cmd(ctx) + ["up", "-d", "--no-deps", "--pull", "never", *op["services"]])
     ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["services"])
@@ -1362,9 +1585,9 @@ def cmd_backups():
 
     ops = sorted((dict(o) for o in all_ops.values()), key=lambda o: o.get("id", ""), reverse=True)[:30]
     for o in ops:
-        o["can_rollback"] = (o.get("kind") == "update" and o.get("status") in ("ok", "failed")
+        o["can_rollback"] = (o.get("kind") in ("update", "retag") and o.get("status") in ("ok", "failed")
                              and not o.get("rolled_back") and norm_ref(o.get("rollback") or "") in rb_refs)
-        for k in ("workdir", "files", "env_files", "old_id", "new_id"):
+        for k in ("workdir", "files", "env_files", "old_id", "new_id", "backup_files"):
             o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))
         o["rollback_log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".rollback.log"))
@@ -1465,7 +1688,7 @@ def cleanup_plan(rules, dumps, images, ops, project=None, repo=None, now=None):
         last = {}
         for o in ops.values():
             p = o.get("project")
-            if o.get("kind") == "update" and p and o.get("id", "") > last.get(p, {}).get("id", ""):
+            if o.get("kind") in ("update", "retag") and p and o.get("id", "") > last.get(p, {}).get("id", ""):
                 last[p] = o
         protected = {d for o in last.values() for d in o.get("dumps") or []}
         groups = {}
@@ -1614,8 +1837,10 @@ def main(argv):
     if argv == ["radar"]:
         return cmd_radar()
     if len(argv) == 4 and argv[0] == "retag" and argv[3] == "--dry-run":
-        print(json.dumps(make_retag(argv[1], argv[2]), ensure_ascii=False))
+        print(json.dumps(make_retag(argv[1], argv[2])[0], ensure_ascii=False))
         return 0
+    if len(argv) in (5, 6) and argv[0] == "retag" and argv[3] == "--expect" and argv[5:] in ([], ["--no-dump"]):
+        return keep_output(cmd_retag, argv[1], argv[2], argv[4], do_dump=len(argv) == 5)
     raise Abort(64, "Unbekannter Befehl: " + " ".join(argv), "Unknown command: " + " ".join(argv))
 
 

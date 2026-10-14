@@ -160,6 +160,7 @@ class Docker:
         self.pull_to = None          # (ref, image id) the next pull moves the tag to
         self.up_rc = 0
         self.up_out = []             # what a failing `compose up` prints
+        self.images_from = None      # () -> {service: image} read from the files, as compose does
 
     def add(self, c):
         self.containers[c["Name"].lstrip("/")] = c
@@ -173,6 +174,8 @@ class Docker:
             if "--hash" in cmd:
                 svcs = cmd[cmd.index("--hash") + 1].split(",")
                 return "".join(f"{s} {self.hashes.get(s, 'h-' + s)}\n" for s in svcs), 0, ""
+            if self.images_from:
+                return json.dumps({"services": {s: {"image": i} for s, i in self.images_from().items()}}), 0, ""
             return json.dumps(self.cfg), 0, ""
         if cmd[:2] == ["docker", "inspect"]:
             names = cmd[4:] if cmd[2:4] == ["--type", "container"] else cmd[2:]
@@ -233,9 +236,12 @@ class Docker:
             if self.up_rc:
                 U.STREAM_TAIL[:] = self.up_out
                 return self.up_rc
+            refs = self.images_from() if self.images_from else {}
             for c in self.containers.values():
-                iid = self.tags.get(U.norm_ref(c["Config"]["Image"]))
                 svc = (c["Config"]["Labels"] or {}).get(U.L_SERVICE)
+                if svc in cmd and svc in refs:
+                    c["Config"]["Image"] = refs[svc]
+                iid = self.tags.get(U.norm_ref(c["Config"]["Image"]))
                 if iid and svc in cmd:
                     c["Image"] = iid
         return 0
@@ -1024,7 +1030,7 @@ def radar(*recs):
 
 def retag(name, tag):
     with contextlib.redirect_stdout(io.StringIO()):
-        return U.make_retag(name, tag)
+        return U.make_retag(name, tag)[0]
 
 
 def why(name, *tags):
@@ -1145,6 +1151,16 @@ check("retag: only a default in the compose file -> refused", why("plausible", "
 write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PV}\n")
 check("retag: a variable that is not in the .env file -> refused", why("plausible", "v2.1.5"), ["variable-complex"])
 del D.containers["plausible"]
+write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
+default_env = os.path.join(COMPOSE_DIR, ".env")
+with open(default_env, "w") as f:
+    f.write("PLAUSIBLE_VERSION=v2.1.4\n")
+D.add(ctn("plausible", PL + ":v2.1.4", "sha256:pl", project="pl", service="plausible", files=pl_file))
+check("retag: no env file label -> the .env of the project directory, as compose reads it",
+      [(c["file"], c["new"]) for c in retag("plausible", "v2.1.5")["retag"]["changes"]],
+      [(default_env, "PLAUSIBLE_VERSION=v2.1.5")])
+os.unlink(default_env)
+del D.containers["plausible"]
 
 # Databases keep their major; Nextcloud goes one major at a time.
 pg_file = write("pg.yml", "services:\n  db:\n    image: postgres:16-alpine\n")
@@ -1168,6 +1184,173 @@ del D.containers["nc"]
 D.add(ctn("pinned2", "nginx@sha256:abc", "sha256:n", project="glitchtip", service="pinned2"))
 check("retag: what cannot be updated cannot be retagged either", why("pinned2", "1.27"), ["digest-pinned"])
 del D.containers["pinned2"]
+os.unlink(U.VERSIONS)
+
+# ------------------------------------------------------- retag (the change)
+reset_fs()
+fresh_docker()
+release_lock()
+U.systemctl = Systemctl()
+U.wait_healthy = lambda project, services: (True, [], {})
+radar(REC_FB, REC_PL)
+
+
+def compose_images(files, env_file=None):
+    """What compose would read from the files: {service: image}."""
+    def get():
+        env = {}
+        if env_file:
+            for line in open(env_file, encoding="utf-8").read().splitlines():
+                m = U.ENV_LINE_RE.match(line)
+                if m:
+                    env[m["key"]] = m["val"]
+        out = {}
+        for f in files:
+            lines = open(f, encoding="utf-8", newline="").read().splitlines(True)
+            for i, line in enumerate(lines):
+                m = U.IMAGE_LINE_RE.match(U.bare(line))
+                svc = U.service_of_line(lines, i) if m else None
+                if svc:
+                    out[svc] = U.interpolate(m["val"], env)
+        return out
+    return get
+
+
+def raw(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def apply(name, tag, fp, *extra):
+    with as_uid(0):
+        rc, out = quiet(U.main, ["retag", name, tag, "--expect", fp, "--no-dump", *extra])
+    release_lock()
+    res = [ln for ln in out.splitlines() if ln.startswith("@@RESULT ")]
+    return rc, (json.loads(res[-1][9:]) if res else None), out
+
+
+def leftovers():
+    """Rollback tags, backup folders and history entries: all must stay empty
+    when a tag change stops before any container changed."""
+    bk = os.path.join(U.BASE, "compose")
+    return ([t for t in D.tags if ":rollback-" in t], sorted(os.listdir(bk)) if os.path.isdir(bk) else [],
+            len(ops()))
+
+
+for i in ("fb", "fb503", "fb545", "pl", "pl215"):
+    D.images["sha256:" + i] = {"Id": "sha256:" + i, "Config": {"Env": []}}
+D.tags.update({FB + ":5.0.2": "sha256:fb", FB + ":5.0.3": "sha256:fb503", FB + ":5.4.5": "sha256:fb545",
+               PL + ":v2.1.4": "sha256:pl", PL + ":v2.1.5": "sha256:pl215"})
+FB_TEXT = ('services:\n  formbricks:\n    image: "ghcr.io/formbricks/formbricks:5.0.2"   # 6 needs AuthZed\n'
+           "    restart: always\n  migrate:\n    image: ghcr.io/formbricks/formbricks:5.0.2\n"
+           "    command: migrate\n")
+fb_file = write("fbx.yml", FB_TEXT, newline="\r\n")
+os.chmod(fb_file, 0o640)
+FB_BEFORE = raw(fb_file)
+D.add(ctn("formbricks-app", FB + ":5.0.2", "sha256:fb", project="fbx", service="formbricks", files=fb_file))
+D.add(ctn("formbricks-migrate", FB + ":5.0.2", "sha256:fb", project="fbx", service="migrate", files=fb_file,
+          running=False))
+D.images_from = compose_images([fb_file])
+fp = retag("formbricks-app", "5.4.5")["retag"]["fingerprint"]
+check("retag: the dry run gives a fingerprint", bool(U.FP_RE.match(fp or "")), True)
+check("retag: invalid fingerprint -> 64, unknown flag -> 64",
+      (main_rc("retag", "formbricks-app", "5.4.5", "--expect", "abc"),
+       main_rc("retag", "formbricks-app", "5.4.5", "--expect", fp, "--force")), (64, 64))
+rc, res, out = apply("formbricks-app", "5.4.5", "0" * 64)
+check("retag: another fingerprint than the preview -> exit 5, nothing written or left",
+      (rc, raw(fb_file) == FB_BEFORE, leftovers()), (5, True, ([], [], 0)))
+with open(fb_file, "ab") as f:
+    f.write(b"# edited after the preview\r\n")
+rc, res, out = apply("formbricks-app", "5.4.5", fp)
+check("retag: a file edited after the preview -> exit 5, nothing changed", (rc, leftovers()), (5, ([], [], 0)))
+with open(fb_file, "wb") as f:
+    f.write(FB_BEFORE)
+
+rc, res, out = apply("formbricks-app", "5.4.5", fp)
+op = ops()[res["op"]]
+check("retag: exit 0, status ok, the new tag in the result and the history",
+      (rc, res["status"], res["image"], op["kind"], op["from_tag"], op["to_tag"], op["from_version"], op["to_version"]),
+      (0, "ok", FB + ":5.4.5", "retag", "5.0.2", "5.4.5", "5.0.2", "5.4.5"))
+check("retag: exactly the planned lines changed (quotes, comment, CRLF kept), owner and mode too",
+      (raw(fb_file) == FB_BEFORE.replace(b"formbricks:5.0.2", b"formbricks:5.4.5"), oct(os.stat(fb_file).st_mode & 0o777)),
+      (True, "0o640"))
+check("retag: both services recreated on the new tag",
+      sorted((c["Config"]["Image"], c["Image"]) for c in D.containers.values()),
+      [(FB + ":5.4.5", "sha256:fb545")] * 2)
+bk = op["backup_files"][0]
+check("retag: byte-exact backup, root only, in compose/<project>/<stamp>/",
+      (raw(bk["backup"]) == FB_BEFORE, oct(os.stat(bk["backup"]).st_mode & 0o777),
+       oct(os.stat(op["backup"]).st_mode & 0o777), os.path.dirname(op["backup"]) ==
+       os.path.join(U.BASE, "compose", "fbx")),
+      (True, "0o600", "0o700", True))
+check("retag: the changes and the rollback tag in the history",
+      ([c["line"] for c in op["changes"]], op["rollback"] in D.tags and D.tags[op["rollback"]] == "sha256:fb"),
+      ([3, 6], True))
+with contextlib.redirect_stdout(io.StringIO()) as buf:
+    U.cmd_backups()
+hist = [o for o in json.loads(buf.getvalue())["ops"] if o["id"] == res["op"]][0]
+check("retag: backups lists it as rollable, without the backup file paths",
+      (hist["can_rollback"], "backup_files" in hist, hist["to_tag"]), (True, False, "5.4.5"))
+check("retag: the same tag again -> refused (exit 5)", apply("formbricks-app", "5.4.5", fp)[0], 5)
+
+with as_uid(0):
+    rc, out = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+check("retag rollback: exit 0, the file byte-identical again, the containers on the old tag and image",
+      (rc, raw(fb_file) == FB_BEFORE, sorted((c["Config"]["Image"], c["Image"]) for c in D.containers.values())),
+      (0, True, [(FB + ":5.0.2", "sha256:fb")] * 2))
+
+fp = retag("formbricks-app", "5.0.3")["retag"]["fingerprint"]
+rc, res, out = apply("formbricks-app", "5.0.3", fp)
+with open(fb_file, "ab") as f:
+    f.write(b"# edited after the change\r\n")
+edited = raw(fb_file)
+with as_uid(0):
+    rc2, out2 = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+check("retag rollback: a file edited after the change -> exit 5, nothing touched",
+      (rc, rc2, raw(fb_file) == edited, ops()[res["op"]].get("rolled_back")), (0, 5, True, None))
+with open(fb_file, "wb") as f:
+    f.write(FB_BEFORE)
+for c in D.containers.values():
+    c["Config"]["Image"], c["Image"] = FB + ":5.0.2", "sha256:fb"
+shutil.rmtree(os.path.join(U.BASE, "compose"))
+os.unlink(U.OPS)
+for t in [t for t in D.tags if ":rollback-" in t]:
+    del D.tags[t]
+
+D.images_from = lambda: {"formbricks": FB + ":5.0.2", "migrate": FB + ":5.4.5"}
+fp = retag("formbricks-app", "5.4.5")["retag"]["fingerprint"]
+rc, res, out = apply("formbricks-app", "5.4.5", fp)
+check("retag: compose config does not give the new image -> exit 5, file restored, nothing left",
+      (rc, raw(fb_file) == FB_BEFORE, leftovers(), "files restored" in out), (5, True, ([], [], 0), True))
+D.images_from = compose_images([fb_file])
+del D.tags[FB + ":5.0.3"]
+fp = retag("formbricks-app", "5.0.3")["retag"]["fingerprint"]
+rc, res, out = apply("formbricks-app", "5.0.3", fp)
+check("retag: the new image cannot be pulled -> exit 5, file restored, nothing left",
+      (rc, raw(fb_file) == FB_BEFORE, leftovers()), (5, True, ([], [], 0)))
+del D.containers["formbricks-app"], D.containers["formbricks-migrate"]
+
+# The tag in a variable of the .env file: that file changes and comes back.
+pl_env = write("plx.env", "PLAUSIBLE_VERSION=v2.1.4  # keep with the db\n")
+pl_file = write("plx.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
+ENV_BEFORE, PLY_BEFORE = raw(pl_env), raw(pl_file)
+D.add(ctn("plausible", PL + ":v2.1.4", "sha256:pl", project="plx", service="plausible", files=pl_file,
+          env_files=pl_env))
+D.images_from = compose_images([pl_file], pl_env)
+fp = retag("plausible", "v2.1.5")["retag"]["fingerprint"]
+rc, res, out = apply("plausible", "v2.1.5", fp)
+check("retag via .env: only the variable's line changes, the container runs the new tag",
+      (rc, raw(pl_env), raw(pl_file) == PLY_BEFORE, D.containers["plausible"]["Config"]["Image"]),
+      (0, b"PLAUSIBLE_VERSION=v2.1.5  # keep with the db\n", True, PL + ":v2.1.5"))
+with as_uid(0):
+    rc, out = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+check("retag via .env: rollback restores the .env byte-identical",
+      (rc, raw(pl_env) == ENV_BEFORE, D.containers["plausible"]["Image"]), (0, True, "sha256:pl"))
+del D.containers["plausible"]
+D.images_from = None
 os.unlink(U.VERSIONS)
 
 # ------------------------------------------------- stream (real subprocess)

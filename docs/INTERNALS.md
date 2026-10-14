@@ -14,7 +14,7 @@ together.
 | `/var/lib/diun-radar/versions.json` | result of the version radar | root, 644 (StateDirectory) |
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
-| `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log` | root, 700 / 600 |
+| `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log`, `compose/<project>/<stamp>/<n>_<file>` (the compose / `.env` files a tag change wrote, byte-exact as they were) | root, 700 / 600 |
 | `/etc/image-updates.conf` | cleanup rules (optional, see below) | root, not writable by others |
 | `/opt/diun/` | Diun stack (`docker-compose.yml`, `diun.yml`), from `diun-deps.sh install diun` | root |
 | `/etc/systemd/system/diun-radar.{service,timer}` | radar every 6 h (`*-*-* 00/6:17:00`) | root |
@@ -43,6 +43,7 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `cleanup --dry-run` | read (console) | text |
 | | `radar` | action, no dialog | text; waits for the radar run (`systemctl start diun-radar.service`) |
 | | `retag <container> <tag> --dry-run` | read (since 0.11.0; the page uses it from stage 2's selection field on) | one JSON object: the `plan` plus `retag`, see below |
+| | `retag <container> <tag> --expect <fingerprint> [--no-dump]` | action (since 0.11.0) | text + `@@RESULT {…}` |
 | `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – |
 
 Inputs are checked by regex:
@@ -54,6 +55,7 @@ Inputs are checked by regex:
 | dump path | `^<name>/\d{8}-\d{6}_<name>\.sql\.gz$` + `realpath` check |
 | rollback tag | `^rollback-\d{8}-\d{6}$` |
 | target tag (`retag`) | `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`, and it must be one of the radar's `choices` |
+| fingerprint (`retag --expect`) | `^[0-9a-f]{64}$` |
 
 `DIUN_LANG` only selects the language of the text output.
 
@@ -203,7 +205,7 @@ plus:
                        "old": "    image: ghcr.io/formbricks/formbricks:5.0.2",
                        "new": "    image: ghcr.io/formbricks/formbricks:5",
                        "service": "formbricks", "sha256": "…"}],
-          "git": null}
+          "git": null, "fingerprint": "…"}
 ```
 
 - `choice`: under which the radar offers the tag for the installed version (`versions[…].choices`):
@@ -217,7 +219,10 @@ plus:
   - `image: repo:${VAR}` or `image: ${VAR}`: the variable's line in the `.env` file (label
     `…environment_file`), when it is set there exactly once and used nowhere else; `service` is `null`
     and `variable` names it.
+  Without an env file label the `.env` of the project directory counts, as compose reads it then.
 - `git`: the git repository the project directory lies in, as a hint (nothing is committed).
+- `fingerprint`: sha256 over the new tag and every change (file, line, before, after, file
+  checksum). The page passes it to `retag … --expect`.
 - `reason` when `possible` is false, `detail` names the file:line, service or variable:
 
 | `reason` | Meaning |
@@ -234,6 +239,29 @@ plus:
 | `variable-shared` | the variable is also used elsewhere |
 | `unreadable` | a compose file is no regular UTF-8 file of at most 1 MiB |
 
+### `retag … --expect <fingerprint>` (the tag change, since 0.11.0)
+
+Takes the update lock, makes the plan again and stops with exit 5 before anything changes when the tag
+change is no longer possible or the fingerprint differs (a file edited since the preview). Then, as
+`update` with these differences:
+
+1. Dumps (unless `--no-dump`), rollback tag of the running image.
+2. **The files:** byte-exact copies to `compose/<project>/<stamp>/<n>_<name>` (folders 700, files
+   600); each planned line replaced in the text (line endings kept), written atomically (temporary file
+   in the same folder, owner and mode of the original, `rename`); a symlinked file is written where
+   the link points. Then `docker compose config`: every service of the image must resolve to the new
+   reference. If not, or if writing fails, the copies are put back, the rollback tag and dumps removed,
+   exit 5: no container changed.
+3. Pull; the new image must then exist locally, otherwise the same: files back, exit 5.
+4. `up -d --no-deps` always, even when the image ID stays the same (pinning `latest` to the running
+   version): the containers must carry the new tag. Waiting, watching the dependents, cleanup and radar
+   as in `update`.
+
+A rollback of a tag change first checks every file against the checksum written (`new_sha256`) and
+every copy against the original's (`sha256`): a file edited after the change, or a damaged copy,
+stops it (exit 5 / 2) without touching anything. Then the copies go back, the old tag points to the
+rollback image again and the services are recreated. The copies stay with the history entry.
+
 ### `@@RESULT` (last line of `update` / `rollback` / `cleanup`)
 
 ```
@@ -241,6 +269,8 @@ update:   @@RESULT {"op": "20261012-015025-imgupd-test-db", "status": "ok|nochan
                     "rollback": "repo:rollback-20261012-015025", "dumps": ["project/…sql.gz"],
                     "from_version": "16.14", "to_version": "16.15"}
           (on failed also "reason": {…}, see below)
+retag:    as update, status "ok|failed", plus "image": "repo:<new tag>" and
+          "backup": "/var/backups/image-updates/compose/<project>/<stamp>"
 rollback: @@RESULT {"op": "…", "status": "ok|failed"}            (on failed also "reason")
 cleanup:  @@RESULT {"status": "ok|nochange", "dumps": ["project/…sql.gz"],
                     "images": ["repo:rollback-…"], "bytes": 3145728, "failed": ["…"]}
@@ -314,6 +344,10 @@ rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_sta
   unhealthy makes the update fail (exit 4) with its own `reason`.
 - `new_digests` (since 0.9.0): the registry digests of the new image (`RepoDigests`, `sha256:…`), the
   values Diun reports as `digest`. `[]` for images built or tagged locally.
+- **Tag change** (since 0.11.0): `kind: "retag"`, `image` is the old reference, plus `to_image`,
+  `from_tag`, `to_tag`, `changes` (`file`, `line`, `old`, `new`), `backup` (the folder) and
+  `backup_files` (`path`, `backup`, `sha256` before, `new_sha256` after). `backups` leaves
+  `backup_files` out. Its dumps count as the project's last update for the cleanup.
 - **Output:** `update` and `rollback`, called through `main`, keep what they print in
   `logs/<op-id>.log` and `logs/<op-id>.rollback.log` (600, written atomically, at most 512 KiB, without
   `@@RESULT`). Only runs that reach the history keep output; an update stopped before any change does
@@ -425,7 +459,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, `.env` variables, anchors, refusals, nothing written), waiting for health, `stream` |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
@@ -438,7 +472,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
 | `tools/check-units.sh` | `systemd-analyze verify` for the unit templates (CI lint step, next to shellcheck and ruff) |
-| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL) |
+| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL); since 0.11.0 also the tag change in the compose file and through `.env` with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again). `E2E_LIB=<folder>` runs helpers that are not installed yet. |
 
 The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds
 `inventory3.jsonl` and `versions2.json` from `inventory2.jsonl`.
