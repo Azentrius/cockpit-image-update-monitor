@@ -12,6 +12,7 @@ verb.
 No Docker, no root, no network."""
 import contextlib
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -133,12 +134,14 @@ open(os.path.join(COMPOSE_DIR, "compose.yml"), "w").close()
 
 
 def ctn(name, ref, img, project=None, service=None, cmd=None, entrypoint=None, env=(),
-        running=True, files=None, networks=()):
+        running=True, files=None, networks=(), env_files=None):
     labels = {}
     if project:
         labels = {L["project"]: project, L["service"]: service or name, L["workdir"]: COMPOSE_DIR,
                   L["files"]: files or os.path.join(COMPOSE_DIR, "compose.yml"),
                   L["hash"]: "h-" + (service or name)}
+        if env_files:
+            labels[U.L_ENVFILES] = env_files
     return {"Name": "/" + name, "Image": img,
             "Config": {"Image": ref, "Labels": labels, "Env": list(env), "Cmd": cmd, "Entrypoint": entrypoint},
             "State": {"Running": running, "Status": "running" if running else "exited"},
@@ -992,6 +995,180 @@ check("health: one crash that recovers is no failure", got, (True, []))
 D.handle = real_handle
 U.HEALTH_TIMEOUT = 0
 check("health: still starting -> timeout", state("running", "starting"), (False, ["x"]))
+
+# ------------------------------------------------ retag --dry-run (stage 2)
+reset_fs()
+fresh_docker()
+for i in ("fb", "app", "pl"):                       # versions from the tag itself
+    D.images["sha256:" + i] = {"Id": "sha256:" + i, "Config": {"Env": []}}
+RT = os.path.join(TMP, "retag")
+os.makedirs(RT)
+
+
+def write(name, text, newline="\n"):
+    path = os.path.join(RT, name)
+    with open(path, "w", encoding="utf-8", newline=newline) as f:
+        f.write(text)
+    return path
+
+
+def sha(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def radar(*recs):
+    with open(U.VERSIONS, "w") as f:
+        json.dump({"images": list(recs)}, f)
+
+
+def retag(name, tag):
+    with contextlib.redirect_stdout(io.StringIO()):
+        return U.make_retag(name, tag)
+
+
+def why(name, *tags):
+    return [retag(name, t)["retag"]["reason"] for t in tags]
+
+
+def edits(r):
+    return [(os.path.basename(c["file"]), c["line"], c["old"], c["new"], c["service"]) for c in r["changes"]]
+
+
+FB = "ghcr.io/formbricks/formbricks"
+GT = "glitchtip/glitchtip"
+PL = "ghcr.io/plausible/community-edition"
+REC_FB = {"image": FB, "tag": "5.0.2", "db": False, "versions": {"5.0.2": {"status": "major", "choices": {
+    "pin": "5.0.2", "lines": [{"tag": "6", "newest": "6.0.2"}, {"tag": "5", "newest": "5.4.5"}],
+    "newer": [{"tag": "5.0.3", "level": "patch"}, {"tag": "5.4.5", "level": "minor"}, {"tag": "6.0.2", "level": "major"}],
+    "floating": ["latest"]}}}}
+REC_GT = {"image": GT, "tag": "latest", "db": False, "versions": {"6.1.8": {"status": "minor", "choices": {
+    "pin": "6.1.8", "lines": [{"tag": "6", "newest": "6.2.6"}], "newer": [{"tag": "6.2.6", "level": "minor"}],
+    "floating": ["latest"]}}}}
+REC_PL = {"image": PL, "tag": "v2.1.4", "db": False, "versions": {"2.1.4": {"status": "major", "choices": {
+    "pin": "v2.1.4", "lines": [], "newer": [{"tag": "v2.1.5", "level": "patch"}, {"tag": "v3.2.1", "level": "major"}],
+    "floating": []}}}}
+REC_PG = {"image": "postgres", "tag": "16-alpine", "db": True, "versions": {"16.14": {"status": "major", "choices": {
+    "pin": "16.14-alpine", "lines": [{"tag": "17-alpine", "newest": "17.11-alpine"}, {"tag": "16-alpine", "newest": "16.15-alpine"}],
+    "newer": [{"tag": "16.15-alpine", "level": "minor"}, {"tag": "17.11-alpine", "level": "major"}], "floating": ["alpine"]}}}}
+REC_NC = {"image": "nextcloud", "tag": "apache", "db": False, "versions": {"34.0.3": {"status": "major", "choices": {
+    "pin": "34.0.3-apache", "lines": [{"tag": "36-apache", "newest": "36.0.0-apache"}],
+    "newer": [{"tag": "35.0.1-apache", "level": "major"}, {"tag": "36.0.0-apache", "level": "major"}],
+    "floating": ["stable-apache"]}}}}
+REC_APP = {"image": "acme/app", "tag": "1.0.0", "db": False, "versions": {"1.0.0": {"status": "patch", "choices": {
+    "pin": "1.0.0", "lines": [], "newer": [{"tag": "1.0.1", "level": "patch"}], "floating": []}}}}
+radar(REC_FB, REC_GT, REC_PL, REC_PG, REC_NC, REC_APP)
+
+# A direct tag in a CRLF file, with quotes and a comment that must stay.
+fb_file = write("fb.yml", 'services:\n  formbricks:\n    image: "ghcr.io/formbricks/formbricks:5.0.2"   # 6 needs AuthZed\n'
+                          "    restart: always\n  db:\n    image: pgvector/pgvector:pg17\n", newline="\r\n")
+D.add(ctn("formbricks-app", FB + ":5.0.2", "sha256:fb", project="formbricks", service="formbricks", files=fb_file))
+D.cfg = {"services": {"formbricks": {"image": FB + ":5.0.2"}, "db": {"image": "pgvector/pgvector:pg17"}}}
+before = sha(fb_file)
+p = retag("formbricks-app", "5")
+r = p["retag"]
+check("retag: a version line, the compose line before and after (quotes, comment, CRLF file)",
+      (r["possible"], r["choice"], r["newest"], r["image"], edits(r)),
+      (True, "line", "5.4.5", FB + ":5",
+       [("fb.yml", 3, '    image: "ghcr.io/formbricks/formbricks:5.0.2"   # 6 needs AuthZed',
+         '    image: "ghcr.io/formbricks/formbricks:5"   # 6 needs AuthZed', "formbricks")]))
+check("retag: the line brings its newest version", (p["target_version"], p["jump"], p["jump_unknown"]), ("5.4.5", "minor", False))
+check("retag --dry-run writes nothing; the plan names the file's checksum", (sha(fb_file), r["changes"][0]["sha256"]),
+      (before, before))
+p = retag("formbricks-app", "6.0.2")
+check("retag: a new major is planned (the page asks for a tick box)", (p["retag"]["possible"], p["retag"]["level"], p["jump"]),
+      (True, "major", "major"))
+p = retag("formbricks-app", "latest")
+check("retag: a floating tag -> what it brings is unknown", (p["retag"]["choice"], p["target_version"], p["jump_unknown"]),
+      ("floating", None, True))
+check("retag: the configured tag, or one the radar does not offer (older, rc, other word) -> refused",
+      why("formbricks-app", "5.0.2", "4.9.3", "5.4.5-rc.1", "edge"), ["same-tag"] + ["not-offered"] * 3)
+radar(REC_GT)
+check("retag: no choices in the radar data -> refused", why("formbricks-app", "5"), ["no-choices"])
+radar(REC_FB, REC_GT, REC_PL, REC_PG, REC_NC, REC_APP)
+check("retag: invalid tag -> 64, without --dry-run -> 64",
+      (main_rc("retag", "formbricks-app", "5;rm", "--dry-run"), main_rc("retag", "formbricks-app", "5")), (64, 64))
+with as_uid(0):
+    rc, out = quiet(U.main, ["retag", "formbricks-app", "5", "--dry-run"])
+check("retag --dry-run: JSON on stdout, exit 0", (rc, json.loads(out)["retag"]["changes"][0]["line"]), (0, 3))
+del D.containers["formbricks-app"]
+
+# Two services of one image; anchors elsewhere in the file do not matter.
+D.images["sha256:gt"] = {"Id": "sha256:gt", "Config": {"Env": ["GLITCHTIP_VERSION=6.1.8"]}}
+gt_file = write("gt.yml", "x-defaults: &defaults\n  restart: unless-stopped\n\nservices:\n  web:\n    <<: *defaults\n"
+                          "    image: glitchtip/glitchtip:latest\n  worker:\n    <<: *defaults\n"
+                          "    image: glitchtip/glitchtip:latest  # same build\n    command: ./bin/run-celery.sh\n")
+D.add(ctn("glitchtip-web", GT + ":latest", "sha256:gt", project="gt", service="web", files=gt_file))
+D.add(ctn("glitchtip-worker", GT + ":latest", "sha256:gt", project="gt", service="worker", files=gt_file))
+D.cfg = {"services": {"web": {"image": GT + ":latest"}, "worker": {"image": GT + ":latest"}}}
+p = retag("glitchtip-web", "6")
+check("retag: every service of the image changes, anchors elsewhere are fine",
+      [(c[1], c[3], c[4]) for c in edits(p["retag"])],
+      [(7, "    image: glitchtip/glitchtip:6", "web"), (10, "    image: glitchtip/glitchtip:6  # same build", "worker")])
+p = retag("glitchtip-web", "6.1.8")
+check("retag: pin the running version of latest", (p["retag"]["choice"], p["target_version"], p["jump"]), ("pin", "6.1.8", "same"))
+del D.containers["glitchtip-web"], D.containers["glitchtip-worker"]
+
+# The image inside an anchor: the line belongs to no service.
+an_file = write("anchor.yml", "x-app: &app\n  image: acme/app:1.0.0\n  restart: always\n\nservices:\n  app:\n    <<: *app\n")
+D.add(ctn("anchor-app", "acme/app:1.0.0", "sha256:app", project="an", service="app", files=an_file))
+D.cfg = {"services": {"app": {"image": "acme/app:1.0.0"}}}
+check("retag: an image under an anchor -> refused", why("anchor-app", "1.0.1"), ["anchors"])
+write("anchor.yml", "services:\n  app:\n    build: .\n    image: acme/other:2\n")
+check("retag: no line with this image (include:, generated files) -> refused", why("anchor-app", "1.0.1"), ["not-found"])
+del D.containers["anchor-app"]
+
+# The tag in a variable of the .env file.
+pl_env = write("pl.env", "# Plausible\nBASE_URL=https://stats.example.org\nPLAUSIBLE_VERSION=v2.1.4  # keep with the db\n")
+pl_file = write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
+D.add(ctn("plausible", PL + ":v2.1.4", "sha256:pl", project="pl", service="plausible", files=pl_file, env_files=pl_env))
+D.cfg = {"services": {"plausible": {"image": PL + ":v2.1.4"}}}
+p = retag("plausible", "v2.1.5")
+check("retag: a variable of the .env file -> that line changes, the compose file stays",
+      (p["retag"]["possible"], p["retag"]["variable"], edits(p["retag"]), p["target_version"], p["jump"]),
+      (True, "PLAUSIBLE_VERSION", [("pl.env", 3, "PLAUSIBLE_VERSION=v2.1.4  # keep with the db",
+                                    "PLAUSIBLE_VERSION=v2.1.5  # keep with the db", None)], "2.1.5", "patch"))
+write("pl.env", 'PLAUSIBLE_IMAGE="ghcr.io/plausible/community-edition:v2.1.4"\n')
+write("pl.yml", "services:\n  plausible:\n    image: ${PLAUSIBLE_IMAGE}\n")
+check("retag: a variable holding the whole reference",
+      [c[3] for c in edits(retag("plausible", "v2.1.5")["retag"])], ['PLAUSIBLE_IMAGE="ghcr.io/plausible/community-edition:v2.1.5"'])
+write("pl.env", "PLAUSIBLE_VERSION=v2.1.4\n")
+write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n"
+                "  cron:\n    image: acme/cron:${PLAUSIBLE_VERSION}\n")
+check("retag: a variable used elsewhere too -> refused", why("plausible", "v2.1.5"), ["variable-shared"])
+write("pl.env", "PLAUSIBLE_VERSION=v2.1.3\nPLAUSIBLE_VERSION=v2.1.4\n")
+write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
+check("retag: a variable set twice -> refused", why("plausible", "v2.1.5"), ["variable-complex"])
+write("pl.env", "BASE_URL=https://stats.example.org\n")
+write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION:-v2.1.4}\n")
+check("retag: only a default in the compose file -> refused", why("plausible", "v2.1.5"), ["variable-complex"])
+write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PV}\n")
+check("retag: a variable that is not in the .env file -> refused", why("plausible", "v2.1.5"), ["variable-complex"])
+del D.containers["plausible"]
+
+# Databases keep their major; Nextcloud goes one major at a time.
+pg_file = write("pg.yml", "services:\n  db:\n    image: postgres:16-alpine\n")
+D.add(ctn("pg", "postgres:16-alpine", "sha256:pg", project="pg", service="db", files=pg_file, cmd=["postgres"],
+          env=["PG_VERSION=16.14"]))
+D.images["sha256:pg"] = {"Id": "sha256:pg", "Config": {"Env": ["PG_VERSION=16.14"]}}
+D.cfg = {"services": {"db": {"image": "postgres:16-alpine"}}}
+check("retag: a database to another major, also through a line or a floating tag -> refused",
+      why("pg", "17.11-alpine", "17-alpine", "alpine"), ["db-major"] * 3)
+check("retag: a database within its major", [c[3] for c in edits(retag("pg", "16.15-alpine")["retag"])],
+      ["    image: postgres:16.15-alpine"])
+del D.containers["pg"]
+nc_file = write("nc.yml", "services:\n  app:\n    image: nextcloud:apache\n")
+D.add(ctn("nc", "nextcloud:apache", "sha256:nc", project="nc", service="app", files=nc_file))
+D.images["sha256:nc"] = {"Id": "sha256:nc", "Config": {"Env": ["NEXTCLOUD_VERSION=34.0.3"]}}
+D.cfg = {"services": {"app": {"image": "nextcloud:apache"}}}
+check("retag: Nextcloud two majors ahead or to an unknown version -> refused",
+      why("nc", "36.0.0-apache", "36-apache", "stable-apache"), ["major-skip"] * 3)
+check("retag: Nextcloud one major ahead", (retag("nc", "35.0.1-apache")["retag"]["possible"]), True)
+del D.containers["nc"]
+D.add(ctn("pinned2", "nginx@sha256:abc", "sha256:n", project="glitchtip", service="pinned2"))
+check("retag: what cannot be updated cannot be retagged either", why("pinned2", "1.27"), ["digest-pinned"])
+del D.containers["pinned2"]
+os.unlink(U.VERSIONS)
 
 # ------------------------------------------------- stream (real subprocess)
 U.subprocess = subprocess

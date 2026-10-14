@@ -42,6 +42,7 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `cleanup` | action (also `diun-cleanup.service`) | text + `@@RESULT {…}` |
 | | `cleanup --dry-run` | read (console) | text |
 | | `radar` | action, no dialog | text; waits for the radar run (`systemctl start diun-radar.service`) |
+| | `retag <container> <tag> --dry-run` | read (since 0.11.0; the page uses it from stage 2's selection field on) | one JSON object: the `plan` plus `retag`, see below |
 | `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – |
 
 Inputs are checked by regex:
@@ -52,6 +53,7 @@ Inputs are checked by regex:
 | operation ID | `^\d{8}-\d{6}-<name>$` |
 | dump path | `^<name>/\d{8}-\d{6}_<name>\.sql\.gz$` + `realpath` check |
 | rollback tag | `^rollback-\d{8}-\d{6}$` |
+| target tag (`retag`) | `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`, and it must be one of the radar's `choices` |
 
 `DIUN_LANG` only selects the language of the text output.
 
@@ -187,6 +189,50 @@ newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+
     `condition: service_completed_successfully`.
   - `shared_networks`: `[{"network", "projects"}]`, other compose projects (or container names
     without a project) on the user-defined networks of these containers, except `<project>_default`.
+
+### `retag --dry-run` (diun-update.py, since 0.11.0)
+
+The `plan` of the container (above) with `target_version`, `jump` and `jump_unknown` for the new tag,
+plus:
+
+```json
+"retag": {"tag": "5", "from_tag": "5.0.2", "image": "ghcr.io/formbricks/formbricks:5",
+          "choice": "line", "level": null, "newest": "5.4.5",
+          "possible": true, "reason": null, "detail": null, "variable": null,
+          "changes": [{"file": "/opt/formbricks/docker-compose.yml", "line": 105,
+                       "old": "    image: ghcr.io/formbricks/formbricks:5.0.2",
+                       "new": "    image: ghcr.io/formbricks/formbricks:5",
+                       "service": "formbricks", "sha256": "…"}],
+          "git": null}
+```
+
+- `choice`: under which the radar offers the tag for the installed version (`versions[…].choices`):
+  `pin`, `newer` (with `level`), `line` (with `newest`, whose version is `target_version`) or
+  `floating` (`target_version` `null`, `jump_unknown` true).
+- `changes`: every line that would change, 1-based, before and after, with the file's sha256 at
+  planning time. Nothing is written. Where the tag is found, in the text of the files (no YAML
+  library, no round trip, so comments, quotes, order and line endings stay):
+  - `image: repo:tag` as a direct key of a service: that line, for every service of the image
+    (one-off jobs such as `migrate` too), in whichever compose file it is.
+  - `image: repo:${VAR}` or `image: ${VAR}`: the variable's line in the `.env` file (label
+    `…environment_file`), when it is set there exactly once and used nowhere else; `service` is `null`
+    and `variable` names it.
+- `git`: the git repository the project directory lies in, as a hint (nothing is committed).
+- `reason` when `possible` is false, `detail` names the file:line, service or variable:
+
+| `reason` | Meaning |
+|---|---|
+| a `plan` reason | not updatable at all (`not-compose`, `digest-pinned`, …) |
+| `same-tag` | the configured tag itself |
+| `no-choices` | the radar has no choices for the installed version (unknown version, no scheme, data before 0.11.0) |
+| `not-offered` | not among the choices: older, a pre-release, another flavour |
+| `db-major` | a database image to another major version, or to a floating tag that can bring one (stage 5) |
+| `major-skip` | Nextcloud more than one major ahead, or to a floating tag |
+| `anchors` | the image line sits under a YAML anchor or outside a service |
+| `not-found` | no `image:` line with this reference for a service (e.g. `include:` or a generated file) |
+| `variable-complex` | a variable that is not in the `.env` file, set twice, only a default, or a reference built from several variables |
+| `variable-shared` | the variable is also used elsewhere |
+| `unreadable` | a compose file is no regular UTF-8 file of at most 1 MiB |
 
 ### `@@RESULT` (last line of `update` / `rollback` / `cleanup`)
 
@@ -379,7 +425,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, waiting for health, `stream` |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, `.env` variables, anchors, refusals, nothing written), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |

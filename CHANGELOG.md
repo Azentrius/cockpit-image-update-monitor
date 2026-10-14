@@ -13,9 +13,20 @@ Stage 2, first part: the radar collects what a version selection field can offer
   of `apache`) and `v`-prefixed twins are left out, and so is a line without a released version in
   it (Valkey's `9.2` before `9.2.0`). The running version's own lines always stay, even next to many
   newer ones (ClickHouse `24.3-alpine`). The page does not use the list yet.
+- **Plan of a tag change.** `diun-update.py retag <container> <tag> --dry-run` (read-only) says what
+  the radar offers the tag as, the version it brings and every line that would change, before and
+  after: the `image:` line of each service of the image (migration jobs too) or the variable's line in
+  the `.env` file. The files are read as text, so comments, quotes and line endings would stay. It
+  refuses a tag the radar does not offer, a database to another major, Nextcloud more than one major
+  ahead, an image under a YAML anchor and variables that are set twice, only have a default or are
+  used elsewhere. Tried read-only on the reference host: every compose file there writes the tag in
+  the `image:` line, and GlitchTip's web, worker and migration job change together.
 - **Tests:** the choices with tag lists modelled on Formbricks, Nextcloud, PostgreSQL, Valkey and
   ClickHouse (lines, levels, flavours, caps, no pin when the registry lacks the running version's
-  tag) and in the radar run; the fixtures carry choices for five images.
+  tag) and in the radar run; the fixtures carry choices for five images. The tag change with compose
+  and `.env` files on disk: direct tags (CRLF, quotes, comments), two services and a job, anchors,
+  variables (tag or whole reference, shared, set twice, default only, missing), database and
+  Nextcloud majors, the refusals, and that nothing is written.
 
 ## 0.10.0 – 2026-10-14
 
