@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.12.0 – 2026-10-16
+
+Packages: the add-on comes as `cockpit-image-updates` (`.deb` and `.rpm`) from the Azentrius package
+repository, packages.azentrius.de, and Cockpit lists it under Applications. `install.sh` is gone; the
+package takes over its installations.
+
+- **Packages:** every release has `cockpit-image-updates_VERSION-1_all.deb` and
+  `cockpit-image-updates-VERSION-1.noarch.rpm` next to the source archive, in `SHA256SUMS` and with a
+  signed build provenance. They need `cockpit-bridge` and `python3`; Docker, Diun and skopeo are set up
+  from the page as before. The builds are reproducible: CI builds them twice and compares the bytes,
+  then installs them on Debian 13 and Fedora 43.
+- **Cockpit's Applications page:** the packages carry AppStream data (`de.azentrius.image_updates`,
+  English and German). With the package repository set up (one package, `azentrius-repository`),
+  Cockpit lists Image updates under Applications and installs it with a click, and the system's updates
+  keep it current. The repository takes a package only after checking that this repository's release
+  workflow built it.
+- **New places:** the page moves from `/usr/share/cockpit/diun` to `/usr/share/cockpit/image-updates`
+  (its address in Cockpit ends in `/image-updates` now), the root helpers from
+  `/usr/local/lib/diun-radar` to `/usr/lib/cockpit-image-updates`. The units `diun-radar` and
+  `diun-cleanup` come with the package in `/usr/lib/systemd/system` and stay off until they are set up;
+  *Install* for the radar and the cleanup in the page now switches them on (`systemctl enable --now`),
+  and the requirements check asks systemd whether they are on. Data, dumps, backups and
+  `/etc/image-updates.conf` stay where they are.
+- **Taking over `install.sh`:** the first package install removes the old page, the old helpers and the
+  copies of the units in `/etc/systemd/system` that point to them. The `backup-*` folders of
+  `install.sh` and all data stay, and timers that were on keep running. CI installs the package over
+  what `install.sh` left behind and checks exactly that.
+- **Updates and removal:** after every install the package starts a radar run if the radar is set up.
+  Removing it stops the timers and removes the page, the helpers and the units; data, dumps, rollback
+  images and the Diun stack stay.
+- **Other distributions:** `sudo make install` installs the same files to the same places and takes over
+  an `install.sh` installation the same way; `sudo make uninstall` removes them.
+
 ## 0.11.0 – 2026-10-15
 
 Stage 2: the version of a container can be changed in the page. The radar collects what can be

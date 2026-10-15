@@ -153,7 +153,9 @@ make install DESTDIR=/tmp/stage               # the installed files, staged
 ## Putting it on a server
 
 1. `cd test && ./run-all.sh` green.
-2. On the server: take the `.deb` of the release and `SHA256SUMS`, check
+2. On the server: `sudo apt update && sudo apt install cockpit-image-updates` from
+   packages.azentrius.de (set up once with `azentrius-repository`, see the README; the repository
+   takes a release within an hour). Without the repository: the `.deb` of the release, checked with
    `sha256sum --ignore-missing -c SHA256SUMS`, then `sudo apt install ./cockpit-image-updates_*.deb`.
    The first package install takes over an `install.sh` installation (`packaging/scripts/configure`).
 3. After every install the package starts a radar run if the radar is set up. Check the result with
