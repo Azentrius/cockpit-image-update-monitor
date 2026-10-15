@@ -103,6 +103,38 @@ const cells = (tr) => [...tr.querySelectorAll("td")];
     assert(!d.getElementById("dm-legend").hidden, "legend visible");
     console.log("legend:", d.getElementById("dm-legend").textContent.replace(/\s+/g, " ").trim());
 
+    // No registry shows the image (built or tagged on the server, 2026-10-16), or
+    // a registry error without earlier data: said so, and with nothing compared
+    // the status is never "up to date" (the inventory still has a digest).
+    const DENIED = 'level=fatal msg="Error listing repository tags: fetching tags list: requested access to the resource is denied"';
+    const local = JSON.parse(JSON.stringify(radar));
+    for (const [image, status, error] of [["onlyoffice/documentserver", "unlisted", DENIED],
+                                          ["crazymax/diun", "error", "registry timeout"]]) {
+        const r = local.images.find((x) => x.image === image);
+        ["versions", "by_tag", "newest"].forEach((k) => delete r[k]);
+        Object.assign(r, { status, error });
+    }
+    assert.strictEqual(cells(row(d, "onlyoffice-ds"))[5].textContent.trim(), "Aktuell", "compared: up to date");
+    const u = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": local });
+    await sleep(60);
+    c = cells(row(u, "onlyoffice-ds"));
+    console.log("onlyoffice-ds unlisted:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
+    assert.deepStrictEqual(c.slice(3, 6).map((x) => x.textContent.trim()), ["9.4.0.1", "nicht in einer Registry", "Unbekannt"]);
+    let tip = c[4].querySelector(".dm-muted").title;
+    assert(tip.startsWith("Keine Registry zeigt onlyoffice/documentserver: Es wurde auf diesem Server gebaut"), tip);
+    assert(tip.endsWith("\n" + DENIED), tip);
+    c = cells(row(u, "diun"));
+    console.log("diun registry error:", c.slice(4, 6).map((x) => x.textContent.trim()).join(" | "));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Registry-Fehler", "Unbekannt"]);
+    assert(c[4].querySelector(".dm-muted").title.endsWith("der nächste Lauf versucht es erneut.\nregistry timeout"));
+    const ue = boot("en", { ...FILES, "/var/lib/diun-radar/versions.json": local });
+    await sleep(60);
+    c = cells(row(ue, "onlyoffice-ds"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["not in a registry", "Unknown"]);
+    tip = c[4].querySelector(".dm-muted").title;
+    assert(tip.startsWith("No registry shows onlyoffice/documentserver: it was built or tagged on this server"), tip);
+    assert(cells(row(ue, "diun"))[4].querySelector(".dm-muted").title.startsWith("The registry did not answer properly"));
+
     // English
     const e = boot("en", FILES);
     await sleep(60);

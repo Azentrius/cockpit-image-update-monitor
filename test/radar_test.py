@@ -306,5 +306,45 @@ merged = R.keep_last_good([err], [gl])[0]
 check("stale merge keeps the last tag_now too",
       (merged.get("stale"), merged["versions"]["6.1.8"]["minor"], merged["tag_now"]["digest"]), (True, "6.2.0", "sha256:now-latest"))
 
+
+# a repository no registry shows: built or tagged on the server, or private
+# (skopeo's answers on a real host, 2026-10-15, and of other registries)
+def refuse(stderr):
+    def list_tags(repo):
+        raise R.subprocess.CalledProcessError(1, ["skopeo", "list-tags"], "", stderr)
+    return list_tags
+
+
+DENIED = ('time="2026-10-15T23:35:49Z" level=fatal msg="Error listing repository tags: fetching tags list: '
+          'requested access to the resource is denied"')
+LOCAL = (("hibiscus-server", "2.12.4"), {"containers": ["hibiscus-server"], "images": {"idh": img()}})
+R.list_tags = refuse(DENIED)
+hib = R.analyse(LOCAL, {}, now)
+check("Docker Hub denies a name it does not have: unlisted, the tag still names the installed version",
+      (hib["status"], hib["error"], hib["installed"]["idh"]["version"], "versions" in hib), ("unlisted", DENIED, "2.12.4", False))
+ANSWERS = {
+    "ghcr.io, private": ("fetching tags list: unauthorized: authentication required", "unlisted"),
+    "registry without the name": ("fetching tags list: name unknown: repository name not known to registry", "unlisted"),
+    "rate limit": ("toomanyrequests: You have reached your pull rate limit", "error"),
+    "server error": ("fetching tags list: received unexpected HTTP status: 503 Service Unavailable", "error"),
+    "no DNS": ("pinging container registry: dial tcp: lookup registry-1.docker.io: no such host", "error"),
+}
+got = {}
+for label, (stderr, _) in ANSWERS.items():
+    R.list_tags = refuse(stderr)
+    got[label] = R.analyse(LOCAL, {}, now)["status"]
+check("skopeo's answer decides: not in a registry, or a registry error",
+      got, {label: want for label, (_, want) in ANSWERS.items()})
+R.list_tags = lambda repo: (_ for _ in ()).throw(R.subprocess.TimeoutExpired(["skopeo"], R.TIMEOUT))
+check("a timeout is a registry error", R.analyse(LOCAL, {}, now)["status"], "error")
+check("unlisted without an earlier result stays as it is", R.keep_last_good([hib], [])[0], hib)
+R.list_tags = refuse(DENIED)
+gone = R.keep_last_good([R.analyse((("glitchtip/glitchtip", "latest"), groups[("glitchtip/glitchtip", "latest")]),
+                                   {}, now)], [gl])[0]
+check("a repository the registry no longer shows keeps its last good result, marked stale",
+      (gone["status"], gone.get("stale"), gone["error"], gone["versions"]["6.1.8"]["minor"]), ("major", True, DENIED, "6.2.0"))
+check("unlisted sorts after registry errors", sorted(["unlisted", "error", "current"], key=R.ORDER.get),
+      ["current", "error", "unlisted"])
+
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

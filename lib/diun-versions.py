@@ -40,6 +40,11 @@ Database images are flagged ("db": true): the plugin shows their major
 updates as grey info, because a DB major means a migration (dump/restore,
 pg_upgrade), never a plain image swap.
 
+An image no registry shows gets the status "unlisted" instead of "error": it
+was built or tagged on this server (hibiscus-server:2.12.4 means
+docker.io/library/hibiscus-server, which does not exist), or it is private
+and the radar has no login. There is nothing newer to find for it.
+
 Lives outside /var/lib/diun on purpose: that directory is writable from the
 Diun container, and anything Cockpit or systemd runs as root must not be.
 
@@ -84,9 +89,16 @@ CHOICES_LINES = 12         # version lines (5, 5.4, 16-alpine)
 # never ends up in a Docker Hub URL.
 HUB_PATH_RE = re.compile(r"^[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?:/[a-z0-9]+(?:[._-]+[a-z0-9]+)*)+$")
 TAG_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
+# What skopeo says when the registry shows no repository by that name. Docker
+# Hub answers "requested access to the resource is denied" both for a name that
+# does not exist and for a private one, ghcr.io and quay.io "unauthorized",
+# other registries "name unknown". Timeouts, rate limits and server errors stay
+# registry errors: the next run tries again.
+UNLISTED_RE = re.compile(r"requested access to the resource is denied|unauthorized|authentication required"
+                         r"|name unknown|repository name not known", re.I)
 RETRY_MISS = timedelta(days=7)
 LEVELS = ("patch", "minor", "major")
-ORDER = {"major": 0, "minor": 1, "patch": 2, "current": 3, "unknown": 4, "error": 5}
+ORDER = {"major": 0, "minor": 1, "patch": 2, "current": 3, "unknown": 4, "error": 5, "unlisted": 6}
 
 
 def run(cmd, binary=False):
@@ -394,11 +406,12 @@ def analyse(item, cache, now, tag_cache=None):
     (repo, tag), group = item
     rec = {"image": repo, "tag": tag, "containers": sorted(group["containers"]),
            "db": bool(DB_RE.search(norm(repo).lower())), "reach": reachable(tag)}
-    tags, error = [], None
+    tags, error, unlisted = [], None, False
     try:
         tags = list_tags(repo)
     except subprocess.CalledProcessError as e:
         error = (e.stderr or str(e)).strip()[-300:]
+        unlisted = bool(UNLISTED_RE.search(e.stderr or ""))
     except Exception as e:  # timeout, bad JSON, ...
         error = str(e)[-300:]
     tagset = set(tags)
@@ -411,7 +424,7 @@ def analyse(item, cache, now, tag_cache=None):
             installed[iid] = {"version": None, "src": None, "error": str(e)[-200:]}
     rec["installed"] = installed
     if error:
-        rec["status"], rec["error"] = "error", error
+        rec["status"], rec["error"] = "unlisted" if unlisted else "error", error
         return rec
 
     # A floating tag: which version it points to right now.
@@ -472,12 +485,14 @@ def tag_now_cache(prev):
 
 def keep_last_good(recs, prev):
     """A registry hiccup must not wipe known results: for every record that
-    failed this run, reuse the previous good result and mark it stale."""
+    failed this run, reuse the previous good result and mark it stale. That
+    holds for a repository the registry suddenly no longer shows, too."""
     prev = {(r.get("image"), r.get("tag")): r for r in prev if isinstance(r, dict)}
     out = []
     for r in recs:
         old = prev.get((r["image"], r["tag"]))
-        if r["status"] == "error" and old and old.get("status") not in (None, "error"):
+        failed = ("error", "unlisted")
+        if r["status"] in failed and old and old.get("status") not in (None, *failed):
             merged = dict(old)
             merged.update(containers=r["containers"], db=r["db"], reach=r["reach"], stale=True,
                           error=r["error"], checked=old.get("checked"),
@@ -557,8 +572,9 @@ def main():
     if args.output:
         write_atomic(args.output, {"generated": iso(now), "images": recs})
         errors = sum(1 for r in recs if r["status"] == "error" or r.get("stale"))
+        unlisted = sum(1 for r in recs if r["status"] == "unlisted")
         unknown = sum(1 for r in recs for x in (r.get("installed") or {}).values() if not x.get("version"))
-        print(f"{len(recs)} images checked, {errors} with registry errors, "
+        print(f"{len(recs)} images checked, {errors} with registry errors, {unlisted} not in a registry, "
               f"{unknown} without a known version -> {args.output}")
     elif args.table:
         table(recs)

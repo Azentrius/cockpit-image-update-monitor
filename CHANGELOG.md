@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.2 – 2026-10-16
+
+Images that no registry shows are named as such, and nothing is called up to date without a comparison.
+
+- **Fix:** an image built or tagged on the server (`build:` in the compose file, `docker build -t`)
+  showed “Registry error” and the status “Up to date”. No registry has it: `hibiscus-server:2.12.4`
+  means `docker.io/library/hibiscus-server`, which Docker Hub answers with “requested access to the
+  resource is denied”, as it does for private repositories. The radar now gives such images the status
+  `unlisted` (also for `unauthorized` and `name unknown`), and the page shows “not in a registry” with
+  the reason in the tooltip. Timeouts, rate limits and server errors stay registry errors, now with an
+  explanation in the tooltip too. Found on a host with two images built there.
+- **Fix:** the status said “Up to date” whenever Diun had reported nothing, even when the radar had
+  compared nothing; Docker gives images built locally a digest too. Without a comparison the status is
+  now “Unknown”.
+
 ## 0.12.1 – 2026-10-16
 
 - **Fix:** taking over an `install.sh` installation left the copies of the timers in
