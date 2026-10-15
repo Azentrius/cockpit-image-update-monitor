@@ -80,6 +80,11 @@ PAIRS = [
     ("alert border info", "status-info", ["bg-card", "bg-page"], 3.0),
     ("alert icon warning", "status-warning", ["bg-card"], 3.0),
     ("callout line warning", "status-warning", ["bg-floating"], 3.0),
+    ("chip as a button: focus ring", "focus", ["bg-card", "bg-hover"], 3.0),
+    ("version field: text", "text", ["bg-control"], 4.5),
+    ("diff line removed", "on-tint-danger", ["tint-danger"], 4.5),
+    ("diff line added", "on-tint-success", ["tint-success"], 4.5),
+    ("diff file and line", "text-subtle", ["bg-floating"], 4.5),
     ("spinner arc", "signature", ["bg-card"], 3.0),
     ("signature dot", "signature", ["bg-page"], 3.0),
 ]

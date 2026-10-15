@@ -40,8 +40,10 @@ def main():
                  "radar": {"state": "active", "running": False},
                  "cleanup": {"state": "active", "can_install": True}},
         "plans": preview["plans"],
+        "retag": preview["retag"],
         "backups": preview["backups"],
         "log": preview["log"],
+        "retagLog": preview["retag_log"],
     }
     shutil.rmtree(OUT, ignore_errors=True)
     os.makedirs(os.path.join(OUT, "base1"))

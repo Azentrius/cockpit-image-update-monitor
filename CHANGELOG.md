@@ -2,8 +2,9 @@
 
 ## 0.11.0 – 2026-10-15
 
-Stage 2, first parts: the radar collects what a version selection field can offer, and the helper
-plans and makes a tag change with a byte-exact backup. The page does not offer it yet.
+Stage 2: the version of a container can be changed in the page. The radar collects what can be
+chosen, the helper shows the lines it will change and makes exactly that change with a byte-exact
+backup, and *Change version* offers it with a selection field.
 
 - **Choices per installed version.** Next to the newest patch, minor and major, `versions.json` now
   keeps a short list for every installed version, in its scheme and never older than what runs: the
@@ -13,7 +14,7 @@ plans and makes a tag change with a byte-exact backup. The page does not offer i
   `production` in the image's flavour (`stable-apache`). Pre-releases, other flavours (`fpm` instead
   of `apache`) and `v`-prefixed twins are left out, and so is a line without a released version in
   it (Valkey's `9.2` before `9.2.0`). The running version's own lines always stay, even next to many
-  newer ones (ClickHouse `24.3-alpine`). The page does not use the list yet.
+  newer ones (ClickHouse `24.3-alpine`).
 - **Plan of a tag change.** `diun-update.py retag <container> <tag> --dry-run` (read-only) says what
   the radar offers the tag as, the version it brings and every line that would change, before and
   after: the `image:` line of each service of the image (migration jobs too) or the variable's line in
@@ -31,6 +32,16 @@ plans and makes a tag change with a byte-exact backup. The page does not offer i
   the files back before any container changes (exit 5). After that it is an update with the new tag;
   the containers are always recreated, so they carry it. The history records it as a tag change with
   its lines, and the rollback puts the files back, unless one was edited after the change.
+- **Change version in the page.** Rows of compose containers whose installed version has choices get
+  *Change version* (⇄), and an outlined chip such as “Patch v2.1.5” opens it with its tag. The
+  selection field starts on the configured tag and groups the rest: pin the running version, version
+  lines (“5, currently 5.4.5”), patch, minor and major versions, and the tags that follow every
+  release. Database majors and Nextcloud jumps over more than one major are listed but locked, with
+  the reason. Each choice is planned at once: the lines before and after with file and line number,
+  hints for a `.env` variable and a git repository, then the plan of an update; a major and a tag that
+  follows every release each need a tick box, and a refusal names its reason. *Change version* sends
+  the preview's fingerprint, the live output and the rollback work as for an update, and the history
+  shows “Tag changed: 5.0.2 → 5”. A rollback that finds an edited file says that nothing changed.
 - **Tests:** the choices with tag lists modelled on Formbricks, Nextcloud, PostgreSQL, Valkey and
   ClickHouse (lines, levels, flavours, caps, no pin when the registry lacks the running version's
   tag) and in the radar run; the fixtures carry choices for five images. The tag change with compose
@@ -39,8 +50,12 @@ plans and makes a tag change with a byte-exact backup. The page does not offer i
   Nextcloud majors, the refusals, and that nothing is written. The change itself: fingerprint, the
   written lines (CRLF, quotes, comment, owner, mode), backup, failed check and failed pull restoring
   the files, rollback restoring them byte-exact, an edited file stopping the rollback, the `.env`
-  variant. End to end on a Docker host: a tag change in the compose file and one through `.env`, each
-  with its rollback, and the refusals for a shared variable and an anchor.
+  variant, an override file. The page under jsdom: the button and the chips, the groups and locked
+  entries, the preview, tick boxes, the last choice winning, refusals, the change with the preview's
+  fingerprint, failure and rollback, the history, English without German; the preview builds a
+  screenshot of the dialog and checks it on a phone. End to end on a Docker host: a tag change in the
+  compose file, one through `.env` and one in an override file, each with its rollback, and the
+  refusals for a shared variable and an anchor.
 
 ## 0.10.0 – 2026-10-14
 

@@ -1124,6 +1124,25 @@ write("anchor.yml", "services:\n  app:\n    build: .\n    image: acme/other:2\n"
 check("retag: no line with this image (include:, generated files) -> refused", why("anchor-app", "1.0.1"), ["not-found"])
 del D.containers["anchor-app"]
 
+# An override file: the line that gives the service its running image changes,
+# in whichever file it is; an older line it overrides stays.
+ov_base = write("ov.yml", "services:\n  app:\n    image: acme/app:0.9.0\n    restart: always\n")
+ov_over = write("ov.override.yml", "services:\n  app:\n    image: acme/app:1.0.0\n    ports:\n      - 8080:80\n")
+D.add(ctn("ov-app", "acme/app:1.0.0", "sha256:app", project="ov", service="app", files=ov_base + "," + ov_over))
+D.cfg = {"services": {"app": {"image": "acme/app:1.0.0"}}}
+check("retag: the image set in an override file -> its line, the base file's older line stays",
+      edits(retag("ov-app", "1.0.1")["retag"]),
+      [("ov.override.yml", 3, "    image: acme/app:1.0.0", "    image: acme/app:1.0.1", "app")])
+write("ov.yml", "services:\n  app:\n    image: acme/app:1.0.0\n    restart: always\n")
+write("ov.override.yml", "services:\n  app:\n    ports:\n      - 8080:80\n")
+check("retag: an override file without an image -> the base file's line",
+      edits(retag("ov-app", "1.0.1")["retag"]),
+      [("ov.yml", 3, "    image: acme/app:1.0.0", "    image: acme/app:1.0.1", "app")])
+write("ov.override.yml", "services:\n  app:\n    image: acme/app:1.0.0\n")
+check("retag: the same image in both files -> both lines",
+      [(c[0], c[1]) for c in edits(retag("ov-app", "1.0.1")["retag"])], [("ov.yml", 3), ("ov.override.yml", 3)])
+del D.containers["ov-app"]
+
 # The tag in a variable of the .env file.
 pl_env = write("pl.env", "# Plausible\nBASE_URL=https://stats.example.org\nPLAUSIBLE_VERSION=v2.1.4  # keep with the db\n")
 pl_file = write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
@@ -1349,6 +1368,28 @@ with as_uid(0):
 release_lock()
 check("retag via .env: rollback restores the .env byte-identical",
       (rc, raw(pl_env) == ENV_BEFORE, D.containers["plausible"]["Image"]), (0, True, "sha256:pl"))
+del D.containers["plausible"]
+
+# An override file: only it changes, the base file stays; the rollback puts it back.
+ov_base = write("ovx.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:v2.0.0\n"
+                           "    restart: always\n")
+ov_over = write("ovx.override.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:v2.1.4\n")
+BASE_BEFORE, OVER_BEFORE = raw(ov_base), raw(ov_over)
+D.add(ctn("plausible", PL + ":v2.1.4", "sha256:pl", project="ovx", service="plausible", files=ov_base + "," + ov_over))
+D.images_from = compose_images([ov_base, ov_over])
+fp = retag("plausible", "v2.1.5")["retag"]["fingerprint"]
+rc, res, out = apply("plausible", "v2.1.5", fp)
+check("retag with an override file: only its line changes, the container runs the new tag",
+      (rc, raw(ov_base) == BASE_BEFORE, raw(ov_over), D.containers["plausible"]["Config"]["Image"],
+       [os.path.basename(x["path"]) for x in ops()[res["op"]]["backup_files"]]),
+      (0, True, b"services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:v2.1.5\n", PL + ":v2.1.5",
+       ["ovx.override.yml"]))
+with as_uid(0):
+    rc, out = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+check("retag with an override file: rollback restores it byte-identical",
+      (rc, raw(ov_over) == OVER_BEFORE, raw(ov_base) == BASE_BEFORE, D.containers["plausible"]["Image"]),
+      (0, True, True, "sha256:pl"))
 del D.containers["plausible"]
 D.images_from = None
 os.unlink(U.VERSIONS)

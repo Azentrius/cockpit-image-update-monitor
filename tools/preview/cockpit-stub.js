@@ -30,6 +30,24 @@
         return p;
     }
 
+    // `retag <container> <tag> --dry-run`: the plan of the fixture with the one
+    // image line changed to the tag; containers without a fixture are refused.
+    function retagPlan(name, tag) {
+        const fx = FX.retag[name];
+        if (!fx) {
+            return { container: name, updatable: true, retag: { tag, possible: false, reason: "not-found",
+                                                               detail: name, changes: [] } };
+        }
+        const [target, jump, choice] = fx.targets[tag] || [null, null, "newer"];
+        const old = fx.line.old;
+        const neu = old.slice(0, old.lastIndexOf(":") + 1) + tag;
+        return { ...fx.plan, target_version: target, jump, jump_unknown: target === null,
+                 retag: { tag, from_tag: fx.plan.image.split(":").pop(), image: neu.trim().replace(/^image:\s*/, ""),
+                          choice, level: choice === "newer" ? jump : null, possible: true, reason: null, detail: null,
+                          variable: null, changes: [{ ...fx.line, new: neu, sha256: "0".repeat(64) }],
+                          git: null, fingerprint: "f".repeat(64) } };
+    }
+
     window.cockpit = {
         language: "en",
         locale(po) {
@@ -51,6 +69,10 @@
                 return fakeProcess(JSON.stringify(FX.plans[argv[2]] || FX.plans["*"]), []);
             }
             if (tool === "diun-update.py" && verb === "backups") return fakeProcess(JSON.stringify(FX.backups), []);
+            if (tool === "diun-update.py" && verb === "retag" && argv[4] === "--dry-run") {
+                return fakeProcess(JSON.stringify(retagPlan(argv[2], argv[3])), []);
+            }
+            if (tool === "diun-update.py" && verb === "retag") return fakeProcess("", FX.retagLog);
             if (tool === "diun-update.py" && verb.indexOf("delete-") === 0) return fakeProcess("", ["Deleted.\n"]);
             if (tool === "diun-update.py" && verb === "radar") return fakeProcess("", ["Version radar running …\n", "Version radar finished.\n"]);
             if (tool === "diun-update.py" && verb === "cleanup") {
