@@ -17,7 +17,7 @@ const files = {
     "/var/lib/diun-radar/versions.json": JSON.parse(fs.readFileSync(path.join(FIX, "versions2.json"), "utf8")),
     "/var/lib/diun/dismissed.json": null,
 };
-const UPDATE = "/usr/local/lib/diun-radar/diun-update.py";
+const UPDATE = "/usr/lib/cockpit-image-updates/diun-update.py";
 const deps = (over) => JSON.stringify(Object.assign({
     root: true, docker: { state: "ok", compose: true }, diun: { state: "running", events: true },
     skopeo: { state: "ok" }, radar: { state: "active", running: false, can_install: true },

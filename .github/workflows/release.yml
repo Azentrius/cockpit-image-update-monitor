@@ -1,7 +1,7 @@
 # Makes a release on request: Actions › release › Run workflow (on main).
-# Checks the version, runs the tests, packs the source and creates the tag
-# vVERSION with a GitHub release (tarball, SHA256SUMS, notes from CHANGELOG.md)
-# and a signed build provenance for the tarball.
+# Checks the version, runs the tests, builds the .deb and .rpm packages and the source
+# archive and creates the tag vVERSION with a GitHub release (packages, archive, SHA256SUMS,
+# signed build provenance, notes from CHANGELOG.md).
 name: release
 
 on:
@@ -67,47 +67,43 @@ jobs:
           python-version: "3.12"
 
       - name: Tests
-        run: |
-          cd test
-          npm ci
-          bash run-all.sh
+        run: make check
 
-      - name: Package
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
+      - name: Packages (.deb, .rpm) and source archive
         run: |
-          name=cockpit-image-update-monitor-$VERSION
-          git archive --format=tar.gz --prefix="$name/" -o "$name.tar.gz" HEAD
-          sha256sum "$name.tar.gz" > SHA256SUMS
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
+          make packages
+          make dist
+          { sha256sum cockpit-image-update-monitor-*.tar.gz; (cd dist && sha256sum *.deb *.rpm); } > SHA256SUMS
 
-      - name: Build provenance for the tarball
+      - name: Build provenance for the packages and the archive
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: cockpit-image-update-monitor-${{ steps.version.outputs.version }}.tar.gz
+          subject-path: |
+            cockpit-image-update-monitor-${{ steps.version.outputs.version }}.tar.gz
+            dist/*.deb
+            dist/*.rpm
 
       - name: Release notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           sh tools/release-notes.sh "$VERSION" > notes.md
-          name=cockpit-image-update-monitor-$VERSION
+          deb=cockpit-image-updates_$(printf '%s' "$VERSION" | tr '-' '~')-1_all.deb
+          rpm=cockpit-image-updates-$(printf '%s' "$VERSION" | tr '-' '~')-1.noarch.rpm
           {
             echo
             echo "### Install"
             echo
+            echo "Debian and Ubuntu: \`sudo apt install ./$deb\`. Fedora, RHEL and openSUSE: \`sudo dnf install ./$rpm\`."
+            echo "The package takes over an installation made with install.sh (up to 0.11)."
+            echo
+            echo "Check the download against \`SHA256SUMS\`, and that it was built by this repository's release workflow:"
+            echo
             echo '```sh'
-            echo "curl -LO https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/$name.tar.gz"
-            echo "curl -LO https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/SHA256SUMS"
             echo "sha256sum --ignore-missing -c SHA256SUMS"
-            echo "tar -xzf $name.tar.gz && cd $name"
-            echo "sudo ./install.sh --dry-run"
-            echo "sudo ./install.sh"
-            echo '```'
-            echo
-            echo "Check that the tarball was built by this repository's release workflow:"
-            echo
-            echo '```sh'
-            echo "gh attestation verify $name.tar.gz --repo $GITHUB_REPOSITORY"
+            echo "gh attestation verify <file> --repo $GITHUB_REPOSITORY"
             echo '```'
           } >> notes.md
 
@@ -121,4 +117,4 @@ jobs:
           if [ "$PRERELEASE" = "true" ]; then
             set -- "$@" --prerelease
           fi
-          gh release create "v$VERSION" "cockpit-image-update-monitor-$VERSION.tar.gz" SHA256SUMS "$@"
+          gh release create "v$VERSION" dist/*.deb dist/*.rpm "cockpit-image-update-monitor-$VERSION.tar.gz" SHA256SUMS "$@"

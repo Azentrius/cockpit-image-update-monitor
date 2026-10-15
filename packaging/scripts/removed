@@ -1,0 +1,6 @@
+# shellcheck shell=sh
+# After cockpit-image-updates was removed (as root; also `make uninstall`): forget its units.
+# SPDX-License-Identifier: Apache-2.0
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi

@@ -14,8 +14,8 @@
  *                                                    backups / delete
  *
  * The radar file is written every 6h by diun-radar.timer
- * (/usr/local/lib/diun-radar/diun-versions.py). Everything Cockpit executes
- * as root lives in /usr/local/lib/diun-radar, never in /var/lib/diun, which
+ * (/usr/lib/cockpit-image-updates/diun-versions.py). Everything Cockpit executes
+ * as root lives in /usr/lib/cockpit-image-updates, never in /var/lib/diun, which
  * is writable from inside the Diun container (2026-10-12).
  *
  * Updates ("stage 1"): same tag only: pull + recreate the compose services
@@ -41,7 +41,7 @@
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
     const VERSION = "0.11.0";
-    const LIB = "/usr/local/lib/diun-radar/";
+    const LIB = "/usr/lib/cockpit-image-updates/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
     const VERSIONS_PATH = "/var/lib/diun-radar/versions.json";

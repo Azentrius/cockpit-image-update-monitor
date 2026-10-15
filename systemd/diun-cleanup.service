@@ -1,12 +1,12 @@
 [Unit]
 Description=Cleanup for the Cockpit Image-Updates plugin (old dumps, unused rollback images)
-Documentation=file:///usr/local/lib/diun-radar/diun-update.py
+Documentation=file:///usr/lib/cockpit-image-updates/diun-update.py
 After=docker.service
 
 [Service]
 Type=oneshot
 # Rules: /etc/image-updates.conf (KEEP_DUMPS, ROLLBACK_IMAGE_DAYS).
-ExecStart=/usr/bin/python3 /usr/local/lib/diun-radar/diun-update.py cleanup
+ExecStart=/usr/bin/python3 /usr/lib/cockpit-image-updates/diun-update.py cleanup
 Environment=DIUN_LANG=en
 # 75 = an update or rollback holds the lock; the next run catches up.
 SuccessExitStatus=75

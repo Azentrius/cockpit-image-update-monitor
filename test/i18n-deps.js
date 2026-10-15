@@ -123,7 +123,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     const call = b.calls.find((c) => c.cmd[1] === "install");
     console.log("spawn  :", JSON.stringify(call.cmd), JSON.stringify(call.opts));
     // (arrays come from the jsdom realm, so compare their JSON)
-    assert.strictEqual(JSON.stringify(call.cmd), JSON.stringify(["/usr/local/lib/diun-radar/diun-deps.sh", "install", "skopeo"]));
+    assert.strictEqual(JSON.stringify(call.cmd), JSON.stringify(["/usr/lib/cockpit-image-updates/diun-deps.sh", "install", "skopeo"]));
     assert.strictEqual(call.opts.superuser, "require");
     assert.strictEqual(JSON.stringify(call.opts.environ), JSON.stringify(["DIUN_LANG=de"]));
     assert(b.d.getElementById("dm-dialog-cancel").disabled, "cancel locked while running");

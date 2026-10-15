@@ -6,7 +6,7 @@
 # container, compose file, volume or dump is touched; everything created here
 # is removed on exit.
 #
-# Needs: root, the helpers installed in /usr/local/lib/diun-radar, docker
+# Needs: root, the helpers installed in /usr/lib/cockpit-image-updates, docker
 # compose, and two DIFFERENT builds of the same postgres major:
 #   OLD_IMAGE  (default postgres:16.14-alpine)  -> "installed"
 #   NEW_IMAGE  (default postgres:16.15-alpine)  -> "pulled, not rolled out"
@@ -28,7 +28,7 @@
 # (SC2034 is off for the whole file: the check '…' strings run through eval,
 # so shellcheck cannot see that the variables they read are used.)
 set -u
-LIB=${E2E_LIB:-/usr/local/lib/diun-radar}
+LIB=${E2E_LIB:-/usr/lib/cockpit-image-updates}
 H=$LIB/diun-update.py
 INV=$LIB/diun-inventory.py
 VERSIONS=/var/lib/diun-radar/versions.json

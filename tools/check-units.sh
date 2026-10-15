@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks the unit templates in systemd/ with systemd-analyze verify. The test
+# Checks the units in systemd/ with systemd-analyze verify. The test
 # workflow runs it with the other lint steps.
 #   sh tools/check-units.sh
 # systemd-analyze verify exits 0 even for unknown keys, so any output counts as

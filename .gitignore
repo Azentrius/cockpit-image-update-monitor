@@ -4,3 +4,8 @@ __pycache__/
 .ruff_cache/
 tools/preview/out/
 test/shots/
+build/
+dist/
+first.sha256
+*.tar.gz
+SHA256SUMS

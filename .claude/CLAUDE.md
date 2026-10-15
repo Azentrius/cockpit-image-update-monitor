@@ -58,28 +58,32 @@ The same in every Azentrius repository; keep it when changing the repository or 
 - **Licensing.** Apache-2.0: `LICENSE` in the root, an SPDX header in every source file, `NOTICE`
   for third-party material.
 
-Here: check tools in `test/requirements.txt` (pip) and `test/package.json` (npm); lint is
-`shellcheck --severity=warning`, `ruff check` (Python 3.8 syntax, `ruff.toml`) and
-`tools/check-units.sh` (`systemd-analyze verify`); the artifact is
-`git archive` of the repository minus `export-ignore` (`.gitattributes`).
+Here: check tools in `test/requirements.txt` (pip) and `test/package.json` (npm); lint is `make lint`
+(`shellcheck --severity=warning`, `ruff check` with Python 3.8 syntax and `ruff.toml`,
+`tools/check-units.sh` with `systemd-analyze verify`); the artifacts are the `.deb` and `.rpm`
+(`make packages`, built by `tools/build-packages.sh` from `packaging/`; `test` installs them on Debian
+and Fedora) and the source archive (`git archive` minus `export-ignore` in `.gitattributes`).
 
 ## Layout
 
 ```
-plugin/   the Cockpit package, installed to /usr/share/cockpit/diun/   (vanilla JS, NO build step)
+plugin/   the Cockpit package, installed to /usr/share/cockpit/image-updates/ (vanilla JS, NO build step)
           azentrius.*, icons.js, DMSans/DMSerifDisplay-Regular.woff2, OFL.txt: shared design files,
           byte-identical copies of src/ in Azentrius/cockpit-cronjobs (tools/design-files.sha256);
           never edit them here – copy the new versions and update the list
           DMSerifDisplay-Italic.woff2: only the letters of "monitor" (see "Useful knowledge")
-lib/      root helpers, installed to /usr/local/lib/diun-radar/
+lib/      root helpers, installed to /usr/lib/cockpit-image-updates/
           diunlib.py          shared logic (tag scheme, version variables, reach)
           diun-inventory.py   inventory (on every load of the plugin)
           diun-versions.py    version radar (systemd timer every 6 h) -> /var/lib/diun-radar/versions.json
           diun-update.py      plan / update / rollback / backups / delete-* / cleanup / radar
           diun-deps.sh        check / install skopeo|diun|radar|cleanup / start diun (also holds the Diun stack)
-systemd/  unit templates (diun-radar, diun-cleanup), installed to /usr/local/lib/diun-radar/systemd/;
-          diun-deps.sh copies them to /etc/systemd/system/ and never replaces existing units
-install.sh                    installer (DESTDIR, --dry-run, backs up the previous version)
+systemd/  units (diun-radar, diun-cleanup), installed to /usr/lib/systemd/system/, off until
+          diun-deps.sh install radar|cleanup enables the timer
+packaging/                    package.conf, AppStream metainfo, scripts/ the packages run (configure
+                              takes over an install.sh installation; remove, removed)
+Makefile                      install (fixed paths, DESTDIR stages), check, lint, stage, packages, dist
+tools/build-packages.sh       .deb and .rpm from a staged tree; the same file in every Azentrius add-on
 test/                         offline tests + e2e-server.sh
 tools/preview/                the plugin in a browser with test data, screenshots
 tools/check-version.sh        version in diun.js = ?v= in index.html = section in CHANGELOG.md
@@ -92,18 +96,18 @@ tools/check-design-files.sh   shared design files = tools/design-files.sha256 (p
 ## Commands
 
 ```bash
-cd test && npm ci && ./run-all.sh              # all offline tests (Python + jsdom), must be green
+make check                                     # all offline tests (Python + jsdom), must be green
 pip install -r test/requirements.txt           # pinned check tools: shellcheck, ruff, playwright
-shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh && ruff check .   # lint, as in CI
-sh tools/check-units.sh                        # systemd-analyze verify for systemd/, as in CI
+make lint                                      # shellcheck, ruff, systemd-analyze verify, as in CI
+make packages                                  # dist/*.deb and dist/*.rpm (needs dpkg-deb and rpmbuild)
 python3 tools/preview/build.py                 # preview: tools/preview/out/diun/index.html?lang=de
 python3 tools/preview/shoot.py /tmp/shots      # screenshots light, dark, phone (English UI; default docs/img), checks JS errors + phone width
-DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging directory
+make install DESTDIR=/tmp/stage               # the installed files, staged
 ```
 
 ## Rules (not negotiable)
 
-1. **Root code only in `lib/`**, installed only to `/usr/local/lib/diun-radar` (root-owned).
+1. **Root code only in `lib/`**, installed only to `/usr/lib/cockpit-image-updates` (root-owned).
    - Never run or import anything from `/var/lib/diun`: the Diun container can write there.
 2. **Fixed verbs.** The plugin calls helpers only with fixed commands. Every new argument is checked
    in the helper by regex (container names, paths with `realpath`, tags). New verbs also go into
@@ -140,8 +144,8 @@ DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging 
   `CHANGELOG.md` has a section for the version.
 - Release: raise `VERSION` and every `?v=` in `plugin/index.html`, add a section to `CHANGELOG.md`,
   merge, then Actions › release › Run workflow on `main`. The workflow checks the version, runs the
-  tests, packs the source as `cockpit-image-update-monitor-<version>.tar.gz` with `SHA256SUMS` and
-  creates tag and release.
+  tests, builds the `.deb`, the `.rpm` and the source archive with `SHA256SUMS` and creates tag and
+  release.
 - Before SemVer the versions were numbered v1–v6; they are 0.1.0–0.6.0 in `CHANGELOG.md`.
 - From Claude sessions the GitHub API cannot create tags or releases, delete branches or change
   settings; starting the release workflow works.
@@ -149,11 +153,10 @@ DESTDIR=/tmp/stage ./install.sh                # installer, dry, into a staging 
 ## Putting it on a server
 
 1. `cd test && ./run-all.sh` green.
-2. On the server: take the release tarball and `SHA256SUMS` and check
-   `sha256sum --ignore-missing -c SHA256SUMS` (or update the git checkout), then
-   `sudo ./install.sh --dry-run` and `sudo ./install.sh`. The previous version goes to
-   `/usr/local/lib/diun-radar/backup-<stamp>/`.
-3. If the radar format changed, `install.sh` starts the radar itself. Check the result with
+2. On the server: take the `.deb` of the release and `SHA256SUMS`, check
+   `sha256sum --ignore-missing -c SHA256SUMS`, then `sudo apt install ./cockpit-image-updates_*.deb`.
+   The first package install takes over an `install.sh` installation (`packaging/scripts/configure`).
+3. After every install the package starts a radar run if the radar is set up. Check the result with
    `journalctl -u diun-radar.service -n 5`.
 4. Reload Cockpit in the browser.
 

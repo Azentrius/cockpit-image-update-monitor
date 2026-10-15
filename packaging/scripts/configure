@@ -1,0 +1,38 @@
+# shellcheck shell=sh
+# After every install and upgrade of cockpit-image-updates (as root; also `make install`).
+# SPDX-License-Identifier: Apache-2.0
+#
+# Up to 0.11, install.sh put the page into /usr/share/cockpit/diun, the helpers into
+# /usr/local/lib/diun-radar and copies of the units into /etc/systemd/system. Those copies would
+# hide the units of the package, so they go, and so do the old page and helpers. Backups that
+# install.sh made (/usr/local/lib/diun-radar/backup-*) and all data stay.
+old=/usr/local/lib/diun-radar
+for unit in diun-radar.service diun-radar.timer diun-cleanup.service diun-cleanup.timer; do
+    if [ -f "/etc/systemd/system/$unit" ] && grep -q "$old/" "/etc/systemd/system/$unit"; then
+        rm -f "/etc/systemd/system/$unit"
+    fi
+done
+if [ -f /usr/share/cockpit/diun/diun.js ]; then
+    rm -rf /usr/share/cockpit/diun
+fi
+if [ -d "$old" ]; then
+    rm -rf "${old:?}/systemd" "${old:?}/__pycache__"
+    for f in diun-inventory.py diun-versions.py diun-update.py diun-deps.sh diunlib.py; do
+        rm -f "${old:?}/$f"
+    done
+    rmdir "$old" 2> /dev/null || true
+fi
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    for timer in diun-radar.timer diun-cleanup.timer; do
+        # A timer that was on keeps running, now from the unit of the package.
+        if [ -L "/etc/systemd/system/timers.target.wants/$timer" ]; then
+            systemctl reenable "$timer" > /dev/null 2>&1 || true
+            systemctl restart "$timer" || true
+        fi
+    done
+    # A new version may change the format of the radar's data: refresh it.
+    if systemctl is-enabled --quiet diun-radar.timer 2> /dev/null; then
+        systemctl start --no-block diun-radar.service || true
+    fi
+fi
