@@ -40,7 +40,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.12.1";
+    const VERSION = "0.12.2";
     const LIB = "/usr/lib/cockpit-image-updates/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -109,6 +109,9 @@
             "ver.noRadar": "The version radar has no data yet",
             "ver.notCovered": "Not covered by the radar yet (runs every 6 h)",
             "ver.registryError": "Registry error",
+            "ver.registryErrorTip": "The registry did not answer properly in this run (unreachable, rate limit, server error); the next run tries again.",
+            "ver.unlisted": "not in a registry",
+            "ver.unlistedTip": "No registry shows {image}: it was built or tagged on this server, or it is private and the radar has no login. The radar cannot find newer versions; update it where it is built.",
             "ver.upToDateTip": "Installed = newest version (same tag scheme).",
             "ver.newestOnly": "newest: {v}",
             "ver.newestOnlyTip": "Installed version unknown – no comparison possible.",
@@ -394,6 +397,9 @@
             "ver.noRadar": "Versions-Radar hat noch keine Daten",
             "ver.notCovered": "Noch nicht vom Radar erfasst (nächster Lauf alle 6 h)",
             "ver.registryError": "Registry-Fehler",
+            "ver.registryErrorTip": "Die Registry hat bei diesem Lauf nicht richtig geantwortet (nicht erreichbar, Rate-Limit, Serverfehler); der nächste Lauf versucht es erneut.",
+            "ver.unlisted": "nicht in einer Registry",
+            "ver.unlistedTip": "Keine Registry zeigt {image}: Es wurde auf diesem Server gebaut oder getaggt, oder es ist privat und der Radar hat keine Anmeldung. Neuere Versionen kann der Radar nicht finden; aktualisieren Sie es dort, wo es gebaut wird.",
             "ver.upToDateTip": "Installiert = neueste Version (gleiches Tag-Schema).",
             "ver.newestOnly": "neueste: {v}",
             "ver.newestOnlyTip": "Installierte Version unbekannt – kein Vergleich möglich.",
@@ -887,9 +893,12 @@
         return out;
     }
 
-    // "Newest version" column. Returns { html, news }:
+    // "Newest version" column. Returns { html, news, compared }:
     //   news = an actionable newer version exists (patch/minor, or a major
     //          on a non-database image). A database major alone is grey info.
+    //   compared = the radar compared the installed version (or the tag) with
+    //          the registry's tags; not for an image no registry shows
+    //          ("unlisted") or a registry error without earlier data.
     // Chips are compared with the INSTALLED version; filled = the configured
     // tag delivers it via the Update button, outlined = needs a new tag. An
     // outlined chip whose tag the selection field offers (pick) is a button
@@ -904,7 +913,9 @@
         let cmp = inst.v && rec.versions ? rec.versions[inst.v] : null;
         if (!cmp || cmp.status === "unknown") cmp = rec.by_tag || null;   // pg17 -> pg18
         if (!cmp) {
-            if (rec.status === "error") return muted(t("ver.registryError"), rec.error || "");
+            const detail = (key, vars) => [t(key, vars), rec.error].filter(Boolean).join("\n");
+            if (rec.status === "unlisted") return muted(t("ver.unlisted"), detail("ver.unlistedTip", { image: ctn.image }));
+            if (rec.status === "error") return muted(t("ver.registryError"), detail("ver.registryErrorTip"));
             if (rec.newest) return muted(t("ver.newestOnly", { v: rec.newest }), t("ver.newestOnlyTip"));
             return muted("—", t("ver.notCovered"));
         }
@@ -931,9 +942,9 @@
         });
         if (!chips.length) {
             return { html: `<span class="dm-uptodate" title="${esc(t("ver.upToDateTip"))}">✓` +
-                           `${inst.v ? " " + esc(inst.v) : ""}</span>${stale}`, news: false };
+                           `${inst.v ? " " + esc(inst.v) : ""}</span>${stale}`, news: false, compared: true };
         }
-        return { html: `<span class="dm-chips">${chips.join("")}</span>${stale}`, news };
+        return { html: `<span class="dm-chips">${chips.join("")}</span>${stale}`, news, compared: true };
     }
 
     // Failed builds from the history: image ref -> the newest update of that
@@ -994,8 +1005,11 @@
         if (pick.size) retagInfo.set(ctn.name, { ctn, inst, options });
         const ver = versionCell(ctn, rec, inst, radarOk, pick);
         if ((kind === "ok" || kind === "unknown") && ver.news) kind = "newver";
-        // Without a known installed version "up to date" would be a guess.
-        if (kind === "ok" && radarOk && rec && !inst.v) kind = "unknown";
+        // Without a known installed version, or when the radar compared
+        // nothing (no registry shows the image, a registry error), "up to
+        // date" would be a guess: Docker gives locally built images a digest
+        // too, and Diun reports nothing for them.
+        if (kind === "ok" && radarOk && rec && (!inst.v || !ver.compared)) kind = "unknown";
         const failedBuild = kind === "update" ? sameFailedBuild(ctn, ev) : null;
         rowFailed.set(ctn.name, failedBuild);
         const note = failedBuild

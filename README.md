@@ -61,7 +61,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 |---|---|
 | Configured | The tag as written in the compose file or with `docker run`, e.g. `latest`, `16-alpine`, `v2.1.4`. For tags without a full version it adds what the tag points to in the registry right now: `latest = 6.0.2`. |
 | Installed | The version that really runs, e.g. `0.30.11`. The tooltip names the source (see below) and the digest. `16.14 → 16.15` means: 16.15 is already on the server but does not run yet. `?` means: cannot be determined, or not covered by the radar yet. |
-| Newest version | Newer versions relative to the **installed** version, as patch / minor / major chips. `✓ 6.2.0` = the installed version is the newest. `newest: 6.0.2` appears when the installed version is unknown. |
+| Newest version | Newer versions relative to the **installed** version, as patch / minor / major chips. `✓ 6.2.0` = the installed version is the newest. `newest: 6.0.2` appears when the installed version is unknown. `not in a registry`: no registry shows the image, because it was built or tagged on the server or is private; there is nothing newer to find. |
 | Status | see the next table |
 
 **Status**
@@ -71,8 +71,8 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | ⓘ Update available | Diun reported a new build of **the same tag**. | Update, Dismiss (✓) |
 | ⓘ Roll-out pending | The newer image is already local, the container still runs the old one. | Roll out |
 | ⓘ New version | The radar knows a newer version. The chip style shows whether the Update button delivers it. | – |
-| ✓ Up to date | Nothing newer known. | – |
-| ⊘ Unknown | Installed version cannot be determined (e.g. `latest` from a development build). | – |
+| ✓ Up to date | The radar compared the installed version with the registry and knows nothing newer. | – |
+| ⊘ Unknown | Installed version cannot be determined (e.g. `latest` from a development build), or the radar could not compare it: the image is in no registry, or the registry did not answer and there is no earlier result. | – |
 
 The labels use the shared status language: a hint in violet with `info-circle`, good in green with
 `check-circle`, unknown without judgement with `ban`. Gold is never a status.
@@ -464,7 +464,8 @@ tail -n 5 /var/lib/diun/events.jsonl
 | Column *Installed* shows `?` after an update | Label/digest come from the radar, which starts after every update and takes a few minutes. *Run radar now* or `diun-update.py radar` runs it again. |
 | “Cleanup rules: … not understood” | Fix the line in `/etc/image-updates.conf` (only `KEEP_DUMPS` and `ROLLBACK_IMAGE_DAYS`, numbers) or make it root-only (`chown root:root`, `chmod 644`). Until then nothing is deleted. |
 | “Radar: no data yet” / “(outdated)” | Timer missing or not running: *Missing requirements* panel or `systemctl status diun-radar.timer`. |
-| “Registry error”, “(older data)” | Registry unreachable or rate limit; the last good result stays visible. |
+| “Registry error”, “(older data)” | Registry unreachable, rate limit or server error; the last good result stays visible and the next run tries again. |
+| “not in a registry”, status “Unknown” | No registry shows the image: it was built or tagged on the server (`build:` in the compose file, `docker build -t`), or it is private. The radar cannot find newer versions; update the image where it is built. |
 | Update failed, box “Most likely cause” | The line comes from the container's log (or its health check). Roll back, fix the cause (e.g. a setting a new major version needs), then update again. |
 | Update stops with “dump … failed” | Nothing was changed. Check the database logs; if need be, untick “Create database dump first” (a deliberate decision). |
 | Rollback image cannot be deleted | A container still uses the image; first update all containers on the old build. |
@@ -586,7 +587,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 ## Known limits
 
 - **Docker with Compose v2 only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated.
-- **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “Registry error”.
+- **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “not in a registry”, like images built on the server.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Database majors** are manual (dump, new instance, restore), see stage 5.
 - **Tag changes** the add-on cannot make safely (YAML anchors, `include:`, a variable used elsewhere or built from several) stay manual; the dialog names the reason.

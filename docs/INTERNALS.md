@@ -132,8 +132,9 @@ Inputs are checked by regex:
 | `reach` | levels the configured tag delivers with the Update button. |
 | `newest` | highest plain version tag. Shown when the installed version is unknown. |
 | `tag_now` | (since 0.10.0) only for floating tags (fewer than two version blocks: `latest`, `16-alpine`, `5`): the digest the tag has in the registry right now (Docker Hub API or `skopeo inspect --raw`, no pull) and the version tag with the same digest (`version` / `tag`, `null` if none). Reused while the digest stays the same; missing when the lookup failed. |
-| `status` | `major`, `minor`, `patch`, `current`, `unknown` or `error`, for sorting and for the table. |
+| `status` | `major`, `minor`, `patch`, `current`, `unknown`, `error` or `unlisted`, for sorting and for the table. |
 | `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. |
+| `status: "unlisted"` | (since 0.12.2) no registry shows the repository; skopeo answers `requested access to the resource is denied` (Docker Hub, for names it does not have and for private ones), `unauthorized` or `name unknown`. The image was built or tagged on the server (`hibiscus-server:2.12.4` means `docker.io/library/hibiscus-server`), or it is private and the radar has no login. Only `installed` and `error` are set. With a good earlier run the entry is kept like a registry error (`stale`). Timeouts, rate limits and server errors stay `error`. |
 
 How the plugin computes:
 
@@ -141,6 +142,8 @@ How the plugin computes:
 installed = inventory.version  ||  versions.installed[imgid].version
 compare   = versions.versions[installed]  (if missing or "unknown": by_tag)
 newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+major = grey
+status    = "Unknown" instead of "Up to date" when nothing was compared: installed version
+            unknown, "unlisted", or a registry error without an earlier result
 ```
 
 ### `plan` (diun-update.py)
