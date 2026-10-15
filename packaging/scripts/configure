@@ -8,8 +8,13 @@
 # install.sh made (/usr/local/lib/diun-radar/backup-*) and all data stay.
 old=/usr/local/lib/diun-radar
 for unit in diun-radar.service diun-radar.timer diun-cleanup.service diun-cleanup.timer; do
-    if [ -f "/etc/systemd/system/$unit" ] && grep -q "$old/" "/etc/systemd/system/$unit"; then
-        rm -f "/etc/systemd/system/$unit"
+    copy=/etc/systemd/system/$unit
+    [ -f "$copy" ] || continue
+    # A copy that runs the old helpers would fail; a copy that is the same as the package's unit
+    # (the timers have no path in them) adds nothing and would hide its later changes. A timer
+    # copy changed by hand stays: it only names its service and keeps working as an override.
+    if grep -q "$old/" "$copy" || cmp -s "$copy" "/usr/lib/systemd/system/$unit"; then
+        rm -f "$copy"
     fi
 done
 if [ -f /usr/share/cockpit/diun/diun.js ]; then

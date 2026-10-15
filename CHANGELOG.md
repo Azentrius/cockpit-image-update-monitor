@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.1 – 2026-10-16
+
+- **Fix:** taking over an `install.sh` installation left the copies of the timers in
+  `/etc/systemd/system` in place, because only copies that name the old helpers were removed and a
+  timer names none. Such a copy hides the package's timer, so later changes to it would not arrive.
+  A copy that is the same as the package's unit now goes as well, also on hosts already on 0.12.0;
+  a timer changed by hand stays and keeps working as an override. Found when switching the
+  reference host; CI now installs over a radar timer copy and a changed cleanup timer copy.
+
 ## 0.12.0 – 2026-10-16
 
 Packages: the add-on comes as `cockpit-image-updates` (`.deb` and `.rpm`) from the Azentrius package

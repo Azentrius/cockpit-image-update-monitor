@@ -402,7 +402,7 @@ sha256sum --ignore-missing -c SHA256SUMS                     # check a download
 gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor   # built by the release workflow
 ```
 
-The package puts the page into `/usr/share/cockpit/image-updates/`, the root helpers into `/usr/lib/cockpit-image-updates/` and the units `diun-radar` and `diun-cleanup` into `/usr/lib/systemd/system/` (off until you set them up). After an update it starts a radar run if the radar is set up. It also takes over an installation made with `install.sh` (up to 0.11): the old page in `/usr/share/cockpit/diun`, the old helpers in `/usr/local/lib/diun-radar` and the copies of the units in `/etc/systemd/system` go, the `backup-*` folders of `install.sh` and all data stay, and timers that were on keep running.
+The package puts the page into `/usr/share/cockpit/image-updates/`, the root helpers into `/usr/lib/cockpit-image-updates/` and the units `diun-radar` and `diun-cleanup` into `/usr/lib/systemd/system/` (off until you set them up). After an update it starts a radar run if the radar is set up. It also takes over an installation made with `install.sh` (up to 0.11): the old page in `/usr/share/cockpit/diun`, the old helpers in `/usr/local/lib/diun-radar` and the copies of the units in `/etc/systemd/system` go (a timer changed by hand stays and keeps overriding the package's), the `backup-*` folders of `install.sh` and all data stay, and timers that were on keep running.
 
 **From the source.** `git clone` this repository, then `sudo make install`. It installs the same files to the same places and takes over an `install.sh` installation the same way; `sudo make uninstall` removes them again.
 
