@@ -129,7 +129,7 @@ const BASE_SCRIPT = {
     await sleep(60);
     const up = b.last("update");
     console.log("spawn :", JSON.stringify(up.cmd), up.opts.superuser);
-    assert.strictEqual(JSON.stringify(up.cmd), JSON.stringify(["/usr/local/lib/diun-radar/diun-update.py", "update", "ollama"]));
+    assert.strictEqual(JSON.stringify(up.cmd), JSON.stringify(["/usr/lib/cockpit-image-updates/diun-update.py", "update", "ollama"]));
     const log = b.d.getElementById("dm-dialog-log").textContent;
     console.log("log   :", JSON.stringify(log));
     assert(!log.includes("@@RESULT"));

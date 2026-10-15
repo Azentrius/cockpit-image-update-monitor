@@ -7,12 +7,13 @@
 #   diun-deps.sh install skopeo   install skopeo with apt-get or dnf
 #   diun-deps.sh install diun     deploy Diun + read-only socket proxy to /opt/diun
 #   diun-deps.sh start diun       start the existing /opt/diun stack
-#   diun-deps.sh install radar    install and enable diun-radar.service/.timer
-#   diun-deps.sh install cleanup  install and enable diun-cleanup.service/.timer
+#   diun-deps.sh install radar    enable diun-radar.timer and run the radar once
+#   diun-deps.sh install cleanup  enable diun-cleanup.timer
 # Everything else is rejected. Existing files are never overwritten.
 #
-# Lives in /usr/local/lib/diun-radar (root-owned, never mounted into a
-# container), like everything else Cockpit executes as root for this plugin.
+# Lives in /usr/lib/cockpit-image-updates (root-owned, from the package
+# cockpit-image-updates, never mounted into a container), like everything else
+# Cockpit executes as root for this plugin. The units come with the package.
 #
 # Environment:
 #   DIUN_LANG=de|en           language of this script's own messages
@@ -24,13 +25,12 @@ set -eu
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-LIB=/usr/local/lib/diun-radar
-UNIT_SRC=$LIB/systemd        # unit files, installed by install.sh from systemd/
+LIB=/usr/lib/cockpit-image-updates
 DIUN_DIR=/opt/diun
 DIUN_DATA=/var/lib/diun
 DIUN_IMAGE=crazymax/diun:4.33.0
 PROXY_IMAGE=ghcr.io/tecnativa/docker-socket-proxy:v0.4.1
-UNIT_DIR=/etc/systemd/system
+UNIT_DIR=/usr/lib/systemd/system    # the units of the package
 
 DRY=${DIUN_DEPS_DRYRUN:-0}
 ROOT=""                      # write prefix; a temp dir in dry-run mode
@@ -107,8 +107,9 @@ do_check() {
         sk_install=1
     fi
 
+    # Set up = the timer of the package is enabled.
     ra_state=missing; ra_running=0; ra_install=0
-    if [ -f "$UNIT_DIR/diun-radar.timer" ]; then
+    if [ "$(systemctl is-enabled diun-radar.timer 2>/dev/null || true)" = enabled ]; then
         if [ "$(systemctl is-active diun-radar.timer 2>/dev/null || true)" = active ]; then
             ra_state=active
         else
@@ -119,20 +120,20 @@ do_check() {
     if [ "$(systemctl is-active diun-radar.service 2>/dev/null || true)" = activating ]; then
         ra_running=1
     fi
-    if [ -f "$LIB/diun-versions.py" ] && [ -f "$UNIT_SRC/diun-radar.service" ] \
+    if [ -f "$LIB/diun-versions.py" ] && [ -f "$UNIT_DIR/diun-radar.timer" ] \
        && command -v python3 >/dev/null 2>&1; then
         ra_install=1
     fi
 
     cl_state=missing; cl_install=0
-    if [ -f "$UNIT_DIR/diun-cleanup.timer" ]; then
+    if [ "$(systemctl is-enabled diun-cleanup.timer 2>/dev/null || true)" = enabled ]; then
         if [ "$(systemctl is-active diun-cleanup.timer 2>/dev/null || true)" = active ]; then
             cl_state=active
         else
             cl_state=inactive
         fi
     fi
-    if [ -f "$LIB/diun-update.py" ] && [ -f "$UNIT_SRC/diun-cleanup.service" ] \
+    if [ -f "$LIB/diun-update.py" ] && [ -f "$UNIT_DIR/diun-cleanup.timer" ] \
        && command -v python3 >/dev/null 2>&1; then
         cl_install=1
     fi
@@ -322,16 +323,11 @@ start_diun() {
     msg "Diun gestartet." "Diun started."
 }
 
-# install_unit NAME: copy $UNIT_SRC/NAME to $UNIT_DIR unless it exists there.
-install_unit() {
-    if [ -f "$UNIT_DIR/$1" ]; then
-        msg "$1 existiert bereits – unverändert." "$1 already exists – left unchanged."
-        return 0
-    fi
-    [ -f "$UNIT_SRC/$1" ] || die 2 \
-        "Unit-Vorlage $UNIT_SRC/$1 fehlt (install.sh erneut ausführen)." \
-        "Unit template $UNIT_SRC/$1 is missing (run install.sh again)."
-    write_file "$UNIT_DIR/$1" 644 < "$UNIT_SRC/$1"
+# need_unit NAME: the unit must come with the package.
+need_unit() {
+    [ -f "$UNIT_DIR/$1" ] || die 2 \
+        "Unit $UNIT_DIR/$1 fehlt (Paket cockpit-image-updates neu installieren)." \
+        "Unit $UNIT_DIR/$1 is missing (reinstall the package cockpit-image-updates)."
 }
 
 install_radar() {
@@ -342,9 +338,8 @@ install_radar() {
         "Hinweis: skopeo fehlt noch – der Radar meldet bis dahin Registry-Fehler." \
         "Note: skopeo is still missing – the radar reports registry errors until it is installed."
 
-    install_unit diun-radar.service
-    install_unit diun-radar.timer
-    run systemctl daemon-reload
+    need_unit diun-radar.service
+    need_unit diun-radar.timer
     run systemctl enable --now diun-radar.timer
     msg "Erster Radar-Lauf …" "First radar run …"
     run systemctl start diun-radar.service
@@ -355,9 +350,8 @@ install_cleanup() {
     [ -f "$LIB/diun-update.py" ] || die 2 \
         "$LIB/diun-update.py fehlt." "$LIB/diun-update.py is missing."
     command -v python3 >/dev/null 2>&1 || die 2 "python3 fehlt." "python3 is missing."
-    install_unit diun-cleanup.service
-    install_unit diun-cleanup.timer
-    run systemctl daemon-reload
+    need_unit diun-cleanup.service
+    need_unit diun-cleanup.timer
     run systemctl enable --now diun-cleanup.timer
     msg "Tägliches Aufräumen eingerichtet. Regeln: /etc/image-updates.conf (ohne Datei die Standardwerte)." \
         "Daily cleanup set up. Rules: /etc/image-updates.conf (defaults without the file)."

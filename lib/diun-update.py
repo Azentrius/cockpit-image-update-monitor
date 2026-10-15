@@ -56,7 +56,7 @@ Everything the addon writes lives in /var/backups/image-updates (root only):
 The machine-readable result of update/rollback/cleanup is the last line:
   @@RESULT {"op": "...", "status": "ok|nochange|failed", ...}
 
-Lives in /usr/local/lib/diun-radar (root-owned, not mounted into any
+Lives in /usr/lib/cockpit-image-updates (root-owned, not mounted into any
 container). DIUN_LANG=de|en selects the language of the log messages.
 """
 

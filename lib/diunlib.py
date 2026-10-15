@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Shared helpers of the Image-Updates monitor (inventory + version radar).
 
-Lives in /usr/local/lib/diun-radar next to the scripts that import it
+Lives in /usr/lib/cockpit-image-updates next to the scripts that import it
 (root-owned, not mounted into any container). No side effects on import.
 
 Version vocabulary used everywhere:

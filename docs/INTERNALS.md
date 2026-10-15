@@ -8,17 +8,16 @@ together.
 
 | Path | Content | Owner / mode |
 |---|---|---|
-| `/usr/share/cockpit/diun/` | plugin | root, 644 |
-| `/usr/local/lib/diun-radar/` | helpers (`*.py`, `*.sh` 755, `diunlib.py` 644), backups made by `install.sh` (`backup-*`, 700) | root |
-| `/usr/local/lib/diun-radar/systemd/` | unit templates from `systemd/`, copied by `diun-deps.sh install radar\|cleanup` | root, 644 |
+| `/usr/share/cockpit/image-updates/` | plugin (package `cockpit-image-updates`) | root, 644 |
+| `/usr/lib/cockpit-image-updates/` | helpers (`*.py`, `*.sh` 755, `diunlib.py` 644) | root |
 | `/var/lib/diun-radar/versions.json` | result of the version radar | root, 644 (StateDirectory) |
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
 | `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log`, `compose/<project>/<stamp>/<n>_<file>` (the compose / `.env` files a tag change wrote, byte-exact as they were) | root, 700 / 600 |
 | `/etc/image-updates.conf` | cleanup rules (optional, see below) | root, not writable by others |
 | `/opt/diun/` | Diun stack (`docker-compose.yml`, `diun.yml`), from `diun-deps.sh install diun` | root |
-| `/etc/systemd/system/diun-radar.{service,timer}` | radar every 6 h (`*-*-* 00/6:17:00`) | root |
-| `/etc/systemd/system/diun-cleanup.{service,timer}` | cleanup daily (`04:40` + up to 20 min) | root |
+| `/usr/lib/systemd/system/diun-radar.{service,timer}` | radar every 6 h (`*-*-* 00/6:17:00`); from the package, `diun-deps.sh install radar` enables the timer | root, 644 |
+| `/usr/lib/systemd/system/diun-cleanup.{service,timer}` | cleanup daily (`04:40` + up to 20 min); from the package, `diun-deps.sh install cleanup` enables the timer | root, 644 |
 | `/run/lock/diun-{inventory,update,deps}.lock` | `flock` locks (`diun-update.lock` also for `cleanup`) | root |
 
 ## Calls from the plugin
@@ -494,7 +493,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `tools/check-design-files.sh` | the shared design files match `tools/design-files.sha256` |
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
-| `tools/check-units.sh` | `systemd-analyze verify` for the unit templates (CI lint step, next to shellcheck and ruff) |
+| `tools/check-units.sh` | `systemd-analyze verify` for the units (CI lint step, next to shellcheck and ruff) |
 | `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again). `E2E_LIB=<folder>` runs helpers that are not installed yet. |
 
 The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds

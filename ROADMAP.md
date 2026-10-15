@@ -5,7 +5,7 @@ is the recommendation.
 
 **Guardrails for every stage** (they keep applying unchanged):
 
-- **Place:** root code only in `/usr/local/lib/diun-radar`, fixed verbs only, arguments checked by regex.
+- **Place:** root code only in `/usr/lib/cockpit-image-updates`, fixed verbs only, arguments checked by regex.
 - **Show first:** every changing action shows a plan first, then the live output, then the result.
 - **Stop before the change:** anything that can go wrong stops before something changes (dump, space,
   validation).
@@ -248,9 +248,9 @@ and tested.
 
 ## Stage 6 – Distribution and reach
 
-- **Debian package** (`.deb`) with plugin, helpers and units, attached to the GitHub releases (which
-  the release workflow makes today as source tarballs). The package then replaces `install.sh` for end
-  users.
+- ✅ **Packages** (`.deb` and `.rpm`, `cockpit-image-updates`) with plugin, helpers and units, attached
+  to the GitHub releases; they replace `install.sh` and take over its installations. Next: the
+  Azentrius package repository, so that Cockpit lists the add-on under Applications.
 - **Private registries:** credentials in a separate root-only file that the radar may read despite its
   hardening (`LoadCredential=` or `ReadOnlyPaths=`); `skopeo --authfile`.
 - **Podman** (`podman compose`, Quadlets) as a second runtime.
@@ -264,17 +264,14 @@ and tested.
 | Topic | Proposal |
 |---|---|
 | `plugin/diun.js` has ~1,550 lines in one file | split into ES modules (`<script type="module">` works under Cockpit's CSP without a build step): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
-| Package name `diun` (URL `/cockpit/@host/diun`) no longer fits the scope | rename to `image-updates`, `install.sh` removes the old directory; bookmarks change; the units (`diun-radar`, `diun-cleanup`) and `/usr/local/lib/diun-radar` would follow |
-| Changed unit templates do not reach existing installations | `install.sh` only reports the difference; an opt-in `diun-deps.sh update units` with a backup |
 | Documentation of the JSON formats | update `docs/INTERNALS.md` and the fixtures in `test/fixtures/` with every format change |
 
 ---
 
 ## Open decisions
 
-1. Rename the package (`diun` → `image-updates`)? If yes, early, while there are few installations.
-2. Should automatic updates (stage 4) come at all, or does every update stay a deliberate click?
-3. Roll back automatically when the containers do not come up after an update started by hand? Only
+1. Should automatic updates (stage 4) come at all, or does every update stay a deliberate click?
+2. Roll back automatically when the containers do not come up after an update started by hand? Only
    as an option: if the new version has migrated its database already, the old program no longer fits
    the data.
 

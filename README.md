@@ -260,7 +260,7 @@ If the project lies in a git repository, the dialog says so; the add-on never co
 
 - **Never deleted:** the dumps of each project's last update, rollback images a container (running or stopped) still uses, files in the dump folder that the add-on did not name.
 - **When:** after every successful update, for that project's dumps and that image's rollback copies only; daily for everything once `diun-cleanup.timer` is set up (button in the tab, or `diun-deps.sh install cleanup`); on **“Clean up now”** in the tab.
-- **Preview:** the tab names the rules and marks every dump and image the next run would delete. On the console: `sudo /usr/local/lib/diun-radar/diun-update.py cleanup --dry-run`.
+- **Preview:** the tab names the rules and marks every dump and image the next run would delete. On the console: `sudo /usr/lib/cockpit-image-updates/diun-update.py cleanup --dry-run`.
 - **The file** is optional, root-owned and not writable by others, with plain `KEY=VALUE` lines:
 
   ```bash
@@ -295,7 +295,7 @@ flowchart LR
     subgraph B["Browser"]
         P["Cockpit plugin<br/>plugin/diun.js"]
     end
-    subgraph H["Server - root helpers in /usr/local/lib/diun-radar"]
+    subgraph H["Server - root helpers in /usr/lib/cockpit-image-updates"]
         INV["diun-inventory.py<br/>on every load"]
         UPD["diun-update.py<br/>plan / update / rollback / backups"]
         DEP["diun-deps.sh<br/>check / install"]
@@ -330,15 +330,14 @@ flowchart LR
 
 | Part | Installed to | Job |
 |---|---|---|
-| `plugin/` | `/usr/share/cockpit/diun/` | user interface (vanilla JS, no build step), EN/DE |
-| `lib/diun-inventory.py` | `/usr/local/lib/diun-radar/` | running containers: tag, version (tag/variable), digest, compose mapping, “pulled, not rolled out” |
-| `lib/diun-versions.py` | `/usr/local/lib/diun-radar/` | version radar: installed version (label/digest), newer versions → `versions.json` |
-| `lib/diun-update.py` | `/usr/local/lib/diun-radar/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run |
-| `lib/diun-deps.sh` | `/usr/local/lib/diun-radar/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
-| `lib/diunlib.py` | `/usr/local/lib/diun-radar/` | shared functions (tag scheme, version variables, reach) |
-| `systemd/*` | `/usr/local/lib/diun-radar/systemd/` | unit templates; `diun-deps.sh` copies them to `/etc/systemd/system/` |
-| `diun-radar.service/.timer` | `/etc/systemd/system/` | created by `diun-deps.sh install radar`; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
-| `diun-cleanup.service/.timer` | `/etc/systemd/system/` | created by `diun-deps.sh install cleanup`; runs daily (04:40) |
+| `plugin/` | `/usr/share/cockpit/image-updates/` | user interface (vanilla JS, no build step), EN/DE |
+| `lib/diun-inventory.py` | `/usr/lib/cockpit-image-updates/` | running containers: tag, version (tag/variable), digest, compose mapping, “pulled, not rolled out” |
+| `lib/diun-versions.py` | `/usr/lib/cockpit-image-updates/` | version radar: installed version (label/digest), newer versions → `versions.json` |
+| `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run |
+| `lib/diun-deps.sh` | `/usr/lib/cockpit-image-updates/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
+| `lib/diunlib.py` | `/usr/lib/cockpit-image-updates/` | shared functions (tag scheme, version variables, reach) |
+| `systemd/diun-radar.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install radar` enables the timer; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
+| `systemd/diun-cleanup.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install cleanup` enables the timer; runs daily (04:40) |
 | Diun stack | `/opt/diun/`, data `/var/lib/diun/` | created by `diun-deps.sh install diun`: Diun 4.33.0 + `docker-socket-proxy` (read-only), the script notifier writes JSON lines |
 
 The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INTERNALS.md).
@@ -347,7 +346,7 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 
 ## Security model
 
-- **Root code in one place only.** Everything Cockpit or systemd runs as root lives in `/usr/local/lib/diun-radar` (root-owned). `/var/lib/diun` is **writable from the Diun container**; nothing is ever run from there.
+- **Root code in one place only.** Everything Cockpit or systemd runs as root lives in `/usr/lib/cockpit-image-updates` (root-owned, from the package). `/var/lib/diun` is **writable from the Diun container**; nothing is ever run from there.
 - **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run` and `retag … --expect <fingerprint>`).
   - Container names, operation IDs, dump paths, rollback tags, target tags and fingerprints are checked by regex. Path tricks (`../`) are refused. A target tag must also be one of the versions the radar offers.
 - **Your compose files.** Only a tag change writes to them, and only the lines its preview showed: it makes the plan again and stops if the result differs from what was shown (a fingerprint). Before writing it keeps byte-exact copies under `/var/backups/image-updates/compose/` (root only), writes atomically with the original owner and mode, and checks the result with `docker compose config`; a failed check puts the files back before any container changes. A rollback restores them, unless they were edited afterwards.
@@ -358,7 +357,7 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 - **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords are read only inside the database container from its environment, never stored or logged.
 - **No network from the browser.** No CDNs and no external fonts (the fonts ship with the add-on); Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries.
 - **Concurrency.** `flock` for inventory and update (exit 75 for “already running”). The plugin never starts two loads in parallel.
-- **Overwrite nothing.** `diun-deps.sh` stops if target files or a Diun container exist already. `install.sh` backs up the previous version before replacing it.
+- **Overwrite nothing.** `diun-deps.sh` stops if target files or a Diun container exist already. The package replaces only its own files.
 
 ---
 
@@ -374,36 +373,31 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 
 ## Install, update, uninstall
 
-**Install / update from a release** (recommended; `X.Y.Z` is the version from the [releases page](https://github.com/Azentrius/cockpit-image-update-monitor/releases))
+**Install / update** the package from the [releases page](https://github.com/Azentrius/cockpit-image-update-monitor/releases) (`X.Y.Z` is the version there):
 
 ```bash
-curl -LO https://github.com/Azentrius/cockpit-image-update-monitor/releases/download/vX.Y.Z/cockpit-image-update-monitor-X.Y.Z.tar.gz
-curl -LO https://github.com/Azentrius/cockpit-image-update-monitor/releases/download/vX.Y.Z/SHA256SUMS
-sha256sum --ignore-missing -c SHA256SUMS
-tar -xzf cockpit-image-update-monitor-X.Y.Z.tar.gz && cd cockpit-image-update-monitor-X.Y.Z
-sudo ./install.sh --dry-run   # only shows what would happen
-sudo ./install.sh
+# Debian, Ubuntu
+curl -LO https://github.com/Azentrius/cockpit-image-update-monitor/releases/download/vX.Y.Z/cockpit-image-updates_X.Y.Z-1_all.deb
+sudo apt install ./cockpit-image-updates_X.Y.Z-1_all.deb
+# Fedora, RHEL, openSUSE
+curl -LO https://github.com/Azentrius/cockpit-image-update-monitor/releases/download/vX.Y.Z/cockpit-image-updates-X.Y.Z-1.noarch.rpm
+sudo dnf install ./cockpit-image-updates-X.Y.Z-1.noarch.rpm
 ```
 
-**Install / update from source**
+To check a download: `curl -LO …/vX.Y.Z/SHA256SUMS && sha256sum --ignore-missing -c SHA256SUMS`, and optionally `gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor` (it was built by this repository's release workflow).
 
-```bash
-git clone https://github.com/Azentrius/cockpit-image-update-monitor.git
-cd cockpit-image-update-monitor
-sudo ./install.sh --dry-run   # only shows what would happen
-sudo ./install.sh
-```
+The package puts the page into `/usr/share/cockpit/image-updates/`, the root helpers into `/usr/lib/cockpit-image-updates/` and the units `diun-radar` and `diun-cleanup` into `/usr/lib/systemd/system/` (off until you set them up). After an update it starts a radar run if the radar is set up. It also takes over an installation made with `install.sh` (up to 0.11): the old page in `/usr/share/cockpit/diun`, the old helpers in `/usr/local/lib/diun-radar` and the copies of the units in `/etc/systemd/system` go, the `backup-*` folders of `install.sh` and all data stay, and timers that were on keep running.
 
-`install.sh` copies `plugin/` to `/usr/share/cockpit/diun/`, `lib/` to `/usr/local/lib/diun-radar/` and the unit templates from `systemd/` to `/usr/local/lib/diun-radar/systemd/`, owned by root. It backs up an existing installation to `/usr/local/lib/diun-radar/backup-<timestamp>/` first and starts a radar run if the timer is set up already. Units already in `/etc/systemd/system/` stay untouched; `install.sh` says when one differs from its template.
+**From source** (other distributions): `git clone` this repository, then `sudo make install`. It installs the same files to the same places and takes over an `install.sh` installation the same way; `sudo make uninstall` removes them again.
 
 Then open **“Image updates”** in Cockpit (switch on administrative access). If something is missing, the add-on shows the *Missing requirements* panel right under the tabs, with install buttons. Alternatively on the console:
 
 ```bash
-sudo /usr/local/lib/diun-radar/diun-deps.sh check
-sudo /usr/local/lib/diun-radar/diun-deps.sh install skopeo
-sudo /usr/local/lib/diun-radar/diun-deps.sh install diun     # creates /opt/diun and starts the stack
-sudo /usr/local/lib/diun-radar/diun-deps.sh install radar    # diun-radar.service + .timer
-sudo /usr/local/lib/diun-radar/diun-deps.sh install cleanup  # diun-cleanup.service + .timer (optional)
+sudo /usr/lib/cockpit-image-updates/diun-deps.sh check
+sudo /usr/lib/cockpit-image-updates/diun-deps.sh install skopeo
+sudo /usr/lib/cockpit-image-updates/diun-deps.sh install diun     # creates /opt/diun and starts the stack
+sudo /usr/lib/cockpit-image-updates/diun-deps.sh install radar    # diun-radar.service + .timer
+sudo /usr/lib/cockpit-image-updates/diun-deps.sh install cleanup  # diun-cleanup.service + .timer (optional)
 # dry run without changes: DIUN_DEPS_DRYRUN=1 … install diun
 ```
 
@@ -412,16 +406,15 @@ sudo /usr/local/lib/diun-radar/diun-deps.sh install cleanup  # diun-cleanup.serv
 **Uninstall**
 
 ```bash
-sudo systemctl disable --now diun-radar.timer diun-cleanup.timer
-sudo rm -f /etc/systemd/system/diun-radar.service /etc/systemd/system/diun-radar.timer \
-           /etc/systemd/system/diun-cleanup.service /etc/systemd/system/diun-cleanup.timer
-sudo systemctl daemon-reload
-sudo rm -r /usr/share/cockpit/diun
-sudo rm -r /usr/local/lib/diun-radar        # also holds the install.sh backups
+sudo apt remove cockpit-image-updates      # or: sudo dnf remove cockpit-image-updates
+```
+
+This stops the timers and removes the page, the helpers and the units. On purpose it keeps the radar data (`/var/lib/diun-radar`), the dumps (`/var/backups/image-updates`), `/etc/image-updates.conf`, the rollback images and the Diun stack:
+
+```bash
 sudo rm -r /var/lib/diun-radar
-# Optional - Diun stack:     cd /opt/diun && sudo docker compose down && sudo rm -r /opt/diun /var/lib/diun
-# Deliberately NOT automatic: /var/backups/image-updates (dumps), /etc/image-updates.conf and rollback images
-#   docker image ls --format '{{.Repository}}:{{.Tag}}' | grep ':rollback-'
+docker image ls --format '{{.Repository}}:{{.Tag}}' | grep ':rollback-'      # rollback images
+cd /opt/diun && sudo docker compose down && sudo rm -r /opt/diun /var/lib/diun   # the Diun stack
 ```
 
 ---
@@ -430,19 +423,19 @@ sudo rm -r /var/lib/diun-radar
 
 ```bash
 # Run the radar now (same as the button) and look at the result
-sudo /usr/local/lib/diun-radar/diun-update.py radar
+sudo /usr/lib/cockpit-image-updates/diun-update.py radar
 journalctl -u diun-radar.service -n 20
-sudo python3 /usr/local/lib/diun-radar/diun-versions.py --table     # table, writes nothing
+sudo python3 /usr/lib/cockpit-image-updates/diun-versions.py --table     # table, writes nothing
 
 # What does the plugin see?
-sudo /usr/local/lib/diun-radar/diun-inventory.py                    # one JSON line per container
-sudo /usr/local/lib/diun-radar/diun-update.py plan <container>      # plan, changes nothing
-sudo /usr/local/lib/diun-radar/diun-update.py retag <container> <tag> --dry-run   # tag change: lines before/after + fingerprint, changes nothing
-sudo /usr/local/lib/diun-radar/diun-update.py retag <container> <tag> --expect <fingerprint>   # the tag change itself (rollback: rollback <op-id>)
-sudo /usr/local/lib/diun-radar/diun-update.py backups               # dumps, rollback images, history, cleanup preview
-sudo /usr/local/lib/diun-radar/diun-update.py cleanup --dry-run     # what the cleanup rules would delete
+sudo /usr/lib/cockpit-image-updates/diun-inventory.py                    # one JSON line per container
+sudo /usr/lib/cockpit-image-updates/diun-update.py plan <container>      # plan, changes nothing
+sudo /usr/lib/cockpit-image-updates/diun-update.py retag <container> <tag> --dry-run   # tag change: lines before/after + fingerprint, changes nothing
+sudo /usr/lib/cockpit-image-updates/diun-update.py retag <container> <tag> --expect <fingerprint>   # the tag change itself (rollback: rollback <op-id>)
+sudo /usr/lib/cockpit-image-updates/diun-update.py backups               # dumps, rollback images, history, cleanup preview
+sudo /usr/lib/cockpit-image-updates/diun-update.py cleanup --dry-run     # what the cleanup rules would delete
 journalctl -u diun-cleanup.service -n 20                            # last daily cleanup
-sudo /usr/local/lib/diun-radar/diun-deps.sh check
+sudo /usr/lib/cockpit-image-updates/diun-deps.sh check
 
 # Diun
 docker logs diun --tail 50
@@ -481,15 +474,17 @@ tail -n 5 /var/lib/diun/events.jsonl
 ```
 plugin/            Cockpit package (manifest, index.html, diun.js, diun.css, menu translation) and
                    the shared design files (azentrius.css, azentrius-theme.js, icons.js, fonts)
-lib/               root helpers (Python 3 / POSIX sh), installed to /usr/local/lib/diun-radar
-systemd/           unit templates (radar, cleanup), installed to /usr/local/lib/diun-radar/systemd
-install.sh         installer (DESTDIR, --dry-run, backup of the previous version)
+lib/               root helpers (Python 3 / POSIX sh), installed to /usr/lib/cockpit-image-updates
+systemd/           units (radar, cleanup), installed to /usr/lib/systemd/system
+packaging/         package.conf, AppStream metainfo, scripts the packages run (configure, remove)
+Makefile           install, check, lint, packages (.deb and .rpm in dist/)
 test/              offline tests (Python + jsdom) and the end-to-end test for a real Docker host
 tools/preview/     the plugin in a normal browser with test data + screenshots (Playwright)
 tools/probe-versions.py   diagnosis: which version sources a host offers (read-only)
 tools/check-version.sh    version in diun.js, index.html and CHANGELOG.md agree
 tools/release-notes.sh    release notes from CHANGELOG.md
-tools/check-units.sh      systemd-analyze verify for the unit templates
+tools/check-units.sh      systemd-analyze verify for the units
+tools/build-packages.sh   .deb and .rpm from a staged tree; the same file in every Azentrius add-on
 tools/check-design-files.sh  the shared design files match tools/design-files.sha256
 docs/              INTERNALS.md (interfaces, formats), images
 ```
@@ -497,16 +492,20 @@ docs/              INTERNALS.md (interfaces, formats), images
 **Tests** (no Docker, no root, no network; the `test` workflow runs them on every push and pull request):
 
 ```bash
-cd test && npm ci && ./run-all.sh
+make check          # = cd test && npm ci && ./run-all.sh
 ```
 
 **Lint** (the `test` workflow runs it too; the tools are pinned in `test/requirements.txt`):
 
 ```bash
 pip install -r test/requirements.txt
-shellcheck --severity=warning lib/*.sh install.sh test/*.sh tools/*.sh
-ruff check .
-sh tools/check-units.sh      # unit templates (needs systemd)
+make lint           # shellcheck, ruff, systemd-analyze verify for the units (needs systemd)
+```
+
+**Packages** (needs `dpkg-deb` and `rpmbuild`; the `test` workflow builds them twice to the same bytes and installs them on Debian and Fedora):
+
+```bash
+make packages       # dist/cockpit-image-updates_X.Y.Z-1_all.deb, dist/cockpit-image-updates-X.Y.Z-1.noarch.rpm
 ```
 
 Covered by the tests, among other things:
@@ -563,7 +562,7 @@ The changes are in [CHANGELOG.md](CHANGELOG.md).
 Versions follow [Semantic Versioning](https://semver.org/). The version lives in `const VERSION` in `plugin/diun.js`; `plugin/index.html` loads every script and stylesheet of the add-on (the shared design files too) with `?v=<version>`, so browsers fetch the new files after an update.
 
 1. Raise `VERSION` and every `?v=` in `plugin/index.html` (`tools/check-version.sh` finds any it misses), add a section `## X.Y.Z – YYYY-MM-DD` to `CHANGELOG.md`, merge.
-2. Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, packs `cockpit-image-update-monitor-X.Y.Z.tar.gz` with `SHA256SUMS` and creates the tag `vX.Y.Z` with a release whose notes come from `CHANGELOG.md`. It also signs a build provenance for the tarball; for releases after 0.6.1, `gh attestation verify cockpit-image-update-monitor-X.Y.Z.tar.gz --repo Azentrius/cockpit-image-update-monitor` shows that it was built by this workflow from this repository.
+2. Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, builds the `.deb` and `.rpm` and the source archive `cockpit-image-update-monitor-X.Y.Z.tar.gz` with `SHA256SUMS` and creates the tag `vX.Y.Z` with a release whose notes come from `CHANGELOG.md`. It also signs a build provenance for each file; `gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor` shows that it was built by this workflow from this repository.
 
 ---
 

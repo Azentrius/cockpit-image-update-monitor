@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<!-- AppStream data: Cockpit lists the page under Applications and opens it from there. -->
+<component type="addon">
+  <id>de.azentrius.image_updates</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>Image updates</name>
+  <name xml:lang="de">Image-Updates</name>
+  <summary>Configured, running and newest version of every Docker container</summary>
+  <summary xml:lang="de">Konfigurierte, laufende und neueste Version jedes Docker-Containers</summary>
+  <description>
+    <p>
+      For every running Docker container the page shows what the compose file asks for, which
+      version actually runs and which version is the newest. Updates run right from Cockpit, with
+      a database dump first, a rollback copy of the old image and a rollback at the push of a
+      button. Diun and a version radar find new versions.
+    </p>
+    <p xml:lang="de">
+      Die Seite zeigt für jeden laufenden Docker-Container, was die Compose-Datei vorgibt, welche
+      Version wirklich läuft und welche die neueste ist. Updates laufen direkt aus Cockpit, mit
+      Datenbank-Dump vorab, Rollback-Kopie des alten Images und Rollback auf Knopfdruck. Diun und
+      ein Versionsradar finden neue Versionen.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">image-updates</launchable>
+  <url type="homepage">https://github.com/Azentrius/cockpit-image-update-monitor</url>
+  <url type="bugtracker">https://github.com/Azentrius/cockpit-image-update-monitor/issues</url>
+  <developer id="de.azentrius">
+    <name>Azentrius</name>
+  </developer>
+</component>
