@@ -474,5 +474,30 @@ check "retag: the image under a YAML anchor -> refused, file unchanged" \
     '[ "$REF" = "(False, '"'"'anchors'"'"')" ] && [ "$(sum_of "$D/docker-compose.yml")" = "$SUM2" ]'
 write_compose "sleep infinity"
 
+echo "=== 16. Tag change in an override file, then rollback ==="
+# The override file gives db and app their image; the base file's older lines
+# are overridden and must stay as they are.
+sed -i 's|image: imgupd-test/pg:16$|image: imgupd-test/pg:base|' "$D/docker-compose.yml"
+printf 'services:\n  db:\n    image: imgupd-test/pg:16\n  app:\n    image: imgupd-test/pg:16\n' > "$D/docker-compose.override.yml"
+docker compose -p "$P" -f "$D/docker-compose.yml" -f "$D/docker-compose.override.yml" up -d --force-recreate --wait 2>&1 | tail -n 2
+SUMB=$(sum_of "$D/docker-compose.yml")
+SUMO=$(sum_of "$D/docker-compose.override.yml")
+offer 16.15
+DRY=$(python3 $H retag imgupd-test-db 16.15 --dry-run)
+FP=$(jget "$DRY" 'd["retag"]["fingerprint"]')
+OV=$(jget "$DRY" '(d["retag"]["possible"], sorted({c["file"].rsplit("/", 1)[1] for c in d["retag"]["changes"]}), len(d["retag"]["changes"]))')
+check "retag --dry-run with an override file: its two lines, none of the base file" \
+    '[ "$OV" = "(True, ['"'"'docker-compose.override.yml'"'"'], 2)" ]'
+python3 $H retag imgupd-test-db 16.15 --expect "$FP" --no-dump > /tmp/e2e-17.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-17.log
+OP8=$(jget "$(result_of /tmp/e2e-17.log)" 'd["op"]')
+check "retag with an override file: exit 0, its lines changed, the base file not, the new tag runs" \
+    '[ $RC = 0 ] && [ "$(grep -c "image: imgupd-test/pg:16.15$" "$D/docker-compose.override.yml")" = 2 ] && [ "$(sum_of "$D/docker-compose.yml")" = "$SUMB" ] && [ "$(cfg_image imgupd-test-db)" = imgupd-test/pg:16.15 ] && [ "$(cfg_image imgupd-test-app)" = imgupd-test/pg:16.15 ]'
+python3 $H rollback "$OP8" > /tmp/e2e-18.log 2>&1; RC=$?
+check "retag with an override file, rollback: the override byte-identical, containers on the old tag" \
+    '[ $RC = 0 ] && [ "$(sum_of "$D/docker-compose.override.yml")" = "$SUMO" ] && [ "$(sum_of "$D/docker-compose.yml")" = "$SUMB" ] && [ "$(cfg_image imgupd-test-db)" = imgupd-test/pg:16 ]'
+rm -f "$D/docker-compose.override.yml"
+write_compose "sleep infinity"
+
 echo
 [ $FAIL = 0 ] && echo "E2E: ALL CHECKS PASSED" || echo "E2E: FAILURES"

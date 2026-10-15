@@ -42,7 +42,7 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `cleanup` | action (also `diun-cleanup.service`) | text + `@@RESULT {…}` |
 | | `cleanup --dry-run` | read (console) | text |
 | | `radar` | action, no dialog | text; waits for the radar run (`systemctl start diun-radar.service`) |
-| | `retag <container> <tag> --dry-run` | read (since 0.11.0; the page uses it from stage 2's selection field on) | one JSON object: the `plan` plus `retag`, see below |
+| | `retag <container> <tag> --dry-run` | read (since 0.11.0; the preview in “Change version”) | one JSON object: the `plan` plus `retag`, see below |
 | | `retag <container> <tag> --expect <fingerprint> [--no-dump]` | action (since 0.11.0) | text + `@@RESULT {…}` |
 | `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – |
 
@@ -422,7 +422,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 - **Loading:** `safeLoad()` never loads twice; a request during a load is repeated once afterwards.
   - `cockpit.file().watch()` triggers a reload only on a **changed** tag.
   - Background: on 2026-10-12 a watch/read loop started hundreds of inventory processes.
-- **Dialog:** one `<dialog>` for everything (install, update, rollback, delete). Flow: `dlg.open` →
+- **Dialog:** one `<dialog>` for everything (install, update, version change, rollback, delete). Flow: `dlg.open` →
   `confirmAndRun` → `dlg.run` → `onDone`.
   - A plan that arrives after the dialog was closed is dropped (`planSeq`).
   - `jump_unknown` in the plan: the warning comes first in the body. A build that failed before (see
@@ -440,6 +440,28 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 - **Plan groups:** recreated (`containers` without `jobs`), one-off jobs, waits for (`depends_on`),
   watched afterwards (`dependents`); `job_order` as a warning, `shared_networks` as a hint. Neither
   needs a tick box.
+- **Change version** (since 0.11.0): rows of compose containers whose installed version has
+  `choices` get the icon button `exchange-alt`; an outlined chip whose tag is among them is a button
+  (`data-retag`, `data-tag`) that opens the same dialog with that tag chosen.
+  - The field (`#dm-retag-select`): the configured tag first (“configured now”, nothing to do), then
+    the groups pin, lines (“currently <newest>”), patch, minor, major and the floating tags. The
+    configured tag itself is left out of the groups.
+  - Listed but locked (`disabled`, the reason in the entry): on a database (`db`) every target in
+    another major and every floating tag; on Nextcloud (`(^|/)nextcloud$`) more than one major ahead
+    and every floating tag. The helper refuses the same (`db-major`, `major-skip`). The major is the
+    first number of the tag (`v3.2.1` → 3, `18-alpine` → 18).
+  - Each choice runs `retag … --dry-run` (`superuser: "try"`); an answer for an earlier choice is
+    dropped. `#dm-retag-preview` shows the changed lines (file:line, `-` before, `+` after, wrapped,
+    never scrolled sideways), `variable` and `git` as hints, then the plan of an update. A floating tag
+    (`jump_unknown`) has its own warning and tick box; a major the one of an update. A refusal names
+    `reason.<reason>`, an unknown reason as it is.
+  - Confirming runs `retag <c> <tag> --expect <fingerprint>` (`--no-dump` without the dump box) with
+    the fingerprint of the preview shown. From the start of a run the field and the tick boxes are
+    locked (every run of the dialog). Exit 4 offers the rollback as an update does; exit 5 means
+    stopped before any change.
+  - History: kind `retag` gets “Tag changed: <from_tag> → <to_tag>” under the image; its rollback
+    dialog names the files it puts back (`changes[].file`). A rollback that stops with exit 2 or 5
+    says that nothing changed. Failed builds count only kind `update`.
 - **Failed builds:** from the history, the newest update of each image counts; if it failed, its
   `new_digests` mark the build. A row with Diun's `digest` among them gets a note under the status. The
   history loads after the table, so the rows are drawn again when the marks change.
@@ -459,11 +481,12 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
 | `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, output button, a build that failed before (row note, second tick box), “together with” in the rows, plan groups and dependencies, delete |
+| `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
@@ -472,7 +495,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
 | `tools/check-units.sh` | `systemd-analyze verify` for the unit templates (CI lint step, next to shellcheck and ruff) |
-| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL); since 0.11.0 also the tag change in the compose file and through `.env` with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again). `E2E_LIB=<folder>` runs helpers that are not installed yet. |
+| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again). `E2E_LIB=<folder>` runs helpers that are not installed yet. |
 
 The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds
 `inventory3.jsonl` and `versions2.json` from `inventory2.jsonl`.

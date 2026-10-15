@@ -22,6 +22,11 @@
  * that use the image, after a database dump and with a rollback copy of the
  * old image. Dumps and rollback copies are listed on the "Backups" tab.
  *
+ * Version changes ("stage 2"): a selection field with what the radar offers
+ * for the installed version (versions[v].choices); the helper shows the
+ * change of the compose file first (retag --dry-run) and makes exactly that
+ * change (retag --expect <fingerprint>), with a byte-exact copy of the files.
+ *
  * Language: Cockpit's session language (cockpit.language, set by
  * ../base1/po.js). German -> DE, anything else -> EN.
  *
@@ -112,6 +117,7 @@
             "ver.reachYes": "The tag {tag} delivers this with the Update button.",
             "ver.reachNo": "Needs a different tag in the compose file (currently {tag}).",
             "ver.dbMajor": "Database major: requires a migration (dump/restore or pg_upgrade), not just an image swap",
+            "ver.clickRetag": "Click to change the tag to {tag}.",
             "legend.filled": "reachable with the Update button",
             "legend.outlined": "needs a different tag in the compose file",
             "legend.dashed": "database major – needs a migration",
@@ -208,6 +214,16 @@
             "reason.digest-pinned": "the image is pinned by digest (@sha256) – updating means editing the compose file.",
             "reason.built-locally": "the image is built locally (build:) – rebuild it in the project.",
             "reason.compose-config-error": "docker compose config fails: {detail}",
+            "reason.same-tag": "{tag} is the tag configured now.",
+            "reason.no-choices": "the radar has no versions to offer for the installed version (it is unknown, follows no version scheme, or the radar data is older than 0.11.0).",
+            "reason.not-offered": "the radar does not offer {tag} for the installed version: it is older, a pre-release or another flavour.",
+            "reason.db-major": "a new major version of a database needs a migration (dump and restore or pg_upgrade); the add-on cannot do that yet.",
+            "reason.major-skip": "Nextcloud can only be upgraded one major version per step.",
+            "reason.anchors": "the image line sits under a YAML anchor or outside a service ({detail}). Please change the tag by hand.",
+            "reason.not-found": "no image line with this reference was found for {detail}, for example because of include: or a generated file. Please change the tag by hand.",
+            "reason.variable-complex": "the tag comes from a variable that cannot be changed safely ({detail}): it is not in the .env file, set more than once, only has a default, or the reference is built from several variables.",
+            "reason.variable-shared": "the variable {detail} is used elsewhere too; changing it would change more than this image.",
+            "reason.unreadable": "{detail} is not a regular UTF-8 file of at most 1 MiB.",
             "upd.ok": "Update successful. Rollback copy: {rb}",
             "upd.okVersions": "Update successful: {from} → {to}. Rollback copy: {rb}",
             "upd.nochange": "No newer image available – nothing changed.",
@@ -224,6 +240,32 @@
             "upd.failedBuild": "The update to exactly this build failed on {date}. Try again only if the cause is fixed, for example a setting in the compose file.",
             "upd.retryConfirm": "Try this build again anyway.",
             "row.failedBuild": "The update to this build failed on {date}.",
+            "btn.retag": "Change version",
+            "rt.title": "Change the version of {name}?",
+            "rt.desc": "Changes the tag in the compose file and rolls out the version it names. As with an update, a database dump and a rollback copy come first; the files are copied byte for byte, and a rollback puts them back.",
+            "rt.select": "Tag in the compose file",
+            "rt.help": "Installed: {v}. Only versions of the same scheme are offered, none older; going back works with a rollback.",
+            "rt.optConfigured": "{tag} (configured now)",
+            "rt.optPin": "{tag} (runs now)",
+            "rt.optLine": "{tag} (currently {v})",
+            "rt.optDbMajor": "{tag} – database major, needs a migration",
+            "rt.optSkip": "{tag} – Nextcloud: one major version per step",
+            "rt.grp.pin": "Pin the running version",
+            "rt.grp.lines": "Version lines: updates within the line",
+            "rt.grp.patch": "Patch versions",
+            "rt.grp.minor": "Minor versions",
+            "rt.grp.major": "Major versions",
+            "rt.grp.floating": "Follows every release",
+            "rt.checking": "Checking the change …",
+            "rt.diff": "What changes in the files",
+            "rt.variable": "The tag comes from the variable {name}; it changes where it is set.",
+            "rt.git": "The project lies in the git repository {path}. The add-on does not commit; commit the change there if you want it in the history.",
+            "rt.floating": "{tag} follows every new release, new major versions included: which version it brings shows only after the pull, and every later update can bring a new major version. Check the release notes first.",
+            "rt.floatingConfirm": "I know that {tag} follows every new release.",
+            "rt.ok": "Version changed: the compose file now names {tag}. Rollback copy: {rb}",
+            "rt.okVersions": "Version changed: {from} → {to}, the compose file now names {tag}. Rollback copy: {rb}",
+            "rt.failed": "Tag change failed – the containers do not run stably. Rolling back puts the files and the previous image back.",
+            "op.retag": "Tag changed: {from} → {to}",
             "btn.showLog": "Show output",
             "log.title": "Output: {name}",
             "log.desc": "{when} · {image}",
@@ -232,8 +274,10 @@
             "rb.button": "Roll back",
             "rb.title": "Roll back {name}?",
             "rb.desc": "Points {image} back to {rb} and recreates {services}. Databases are not reset – if migrations cause trouble, restore the dump.",
+            "rb.descRetag": "Puts back {files} as they were before the tag change, points {image} back to {rb} and recreates {services}. Databases are not reset – if migrations cause trouble, restore the dump.",
             "rb.ok": "Rollback successful.",
             "rb.failed": "Rollback failed – see output.",
+            "rb.aborted": "Rollback stopped before anything was changed – see output.",
             "bk.summary": "{dumps} · {images} · {free} free in {dir}",
             "bk.dumpsN": { one: "{n} dump ({size})", other: "{n} dumps ({size})" },
             "bk.imagesN": { one: "{n} rollback image", other: "{n} rollback images" },
@@ -358,6 +402,7 @@
             "ver.reachYes": "Der Tag {tag} liefert das per Update-Knopf.",
             "ver.reachNo": "Erfordert einen anderen Tag in der Compose-Datei (derzeit {tag}).",
             "ver.dbMajor": "Datenbank-Major: braucht eine Migration (Dump/Restore bzw. pg_upgrade), kein reiner Image-Tausch",
+            "ver.clickRetag": "Klicken, um den Tag auf {tag} zu ändern.",
             "legend.filled": "per Update-Knopf erreichbar",
             "legend.outlined": "braucht einen anderen Tag in der Compose-Datei",
             "legend.dashed": "Datenbank-Major – braucht eine Migration",
@@ -454,6 +499,16 @@
             "reason.digest-pinned": "Das Image ist per Digest festgelegt (@sha256) – ein Update heißt hier, die Compose-Datei zu ändern.",
             "reason.built-locally": "Das Image wird lokal gebaut (build:) – bitte im Projekt neu bauen.",
             "reason.compose-config-error": "docker compose config schlägt fehl: {detail}",
+            "reason.same-tag": "{tag} ist der Tag, der jetzt konfiguriert ist.",
+            "reason.no-choices": "Der Radar hat für die installierte Version keine Versionen anzubieten (sie ist unbekannt, folgt keinem Versionsschema, oder die Radar-Daten sind älter als 0.11.0).",
+            "reason.not-offered": "Der Radar bietet {tag} für die installierte Version nicht an: Er ist älter, eine Vorabversion oder eine andere Variante.",
+            "reason.db-major": "Eine neue Hauptversion einer Datenbank braucht eine Migration (Dump und Restore bzw. pg_upgrade); das kann das Addon noch nicht.",
+            "reason.major-skip": "Nextcloud lässt sich nur um eine Hauptversion pro Schritt aktualisieren.",
+            "reason.anchors": "Die Image-Zeile steht unter einem YAML-Anker oder außerhalb eines Service ({detail}). Bitte ändern Sie den Tag von Hand.",
+            "reason.not-found": "Für {detail} wurde keine Image-Zeile mit dieser Referenz gefunden, etwa wegen include: oder einer erzeugten Datei. Bitte ändern Sie den Tag von Hand.",
+            "reason.variable-complex": "Der Tag kommt aus einer Variable, die sich nicht sicher ändern lässt ({detail}): Sie steht nicht in der .env-Datei, ist mehrfach gesetzt, hat nur einen Standardwert, oder die Referenz setzt sich aus mehreren Variablen zusammen.",
+            "reason.variable-shared": "Die Variable {detail} wird auch anderswo verwendet; sie zu ändern, würde mehr als dieses Image ändern.",
+            "reason.unreadable": "{detail} ist keine reguläre UTF-8-Datei von höchstens 1 MiB.",
             "upd.ok": "Update erfolgreich. Rollback-Kopie: {rb}",
             "upd.okVersions": "Update erfolgreich: {from} → {to}. Rollback-Kopie: {rb}",
             "upd.nochange": "Kein neueres Image verfügbar – nichts geändert.",
@@ -470,6 +525,32 @@
             "upd.failedBuild": "Das Update auf genau diesen Build ist am {date} gescheitert. Versuchen Sie es nur erneut, wenn die Ursache behoben ist, etwa eine Einstellung in der Compose-Datei.",
             "upd.retryConfirm": "Diesen Build trotzdem erneut versuchen.",
             "row.failedBuild": "Das Update auf diesen Build ist am {date} gescheitert.",
+            "btn.retag": "Version ändern",
+            "rt.title": "Version von {name} ändern?",
+            "rt.desc": "Ändert den Tag in der Compose-Datei und rollt die Version aus, die er nennt. Wie beim Update kommen vorher ein Datenbank-Dump und eine Rollback-Kopie; die Dateien werden byte-genau gesichert, und ein Rollback stellt sie wieder her.",
+            "rt.select": "Tag in der Compose-Datei",
+            "rt.help": "Installiert: {v}. Angeboten werden nur Versionen im selben Schema und keine älteren; zurück geht es per Rollback.",
+            "rt.optConfigured": "{tag} (jetzt konfiguriert)",
+            "rt.optPin": "{tag} (läuft jetzt)",
+            "rt.optLine": "{tag} (derzeit {v})",
+            "rt.optDbMajor": "{tag} – Datenbank-Major, braucht eine Migration",
+            "rt.optSkip": "{tag} – Nextcloud: nur eine Hauptversion pro Schritt",
+            "rt.grp.pin": "Laufende Version festsetzen",
+            "rt.grp.lines": "Versionslinien: Updates innerhalb der Linie",
+            "rt.grp.patch": "Patch-Versionen",
+            "rt.grp.minor": "Minor-Versionen",
+            "rt.grp.major": "Major-Versionen",
+            "rt.grp.floating": "Folgt jeder neuen Version",
+            "rt.checking": "Prüfe die Änderung …",
+            "rt.diff": "Was sich in den Dateien ändert",
+            "rt.variable": "Der Tag kommt aus der Variable {name}; sie wird dort geändert, wo sie gesetzt ist.",
+            "rt.git": "Das Projekt liegt im Git-Repository {path}. Das Addon committet nicht; übernehmen Sie die Änderung dort, wenn sie in die Historie soll.",
+            "rt.floating": "{tag} folgt jeder neuen Version, auch neuen Hauptversionen: Welche Version er bringt, zeigt sich erst nach dem Pull, und jedes spätere Update kann eine neue Hauptversion bringen. Prüfen Sie vorher die Release-Notes.",
+            "rt.floatingConfirm": "Mir ist bewusst, dass {tag} jeder neuen Version folgt.",
+            "rt.ok": "Version geändert: Die Compose-Datei nennt jetzt {tag}. Rollback-Kopie: {rb}",
+            "rt.okVersions": "Version geändert: {from} → {to}, die Compose-Datei nennt jetzt {tag}. Rollback-Kopie: {rb}",
+            "rt.failed": "Tag-Wechsel fehlgeschlagen – die Container laufen nicht stabil. Zurückrollen stellt die Dateien und das vorherige Image wieder her.",
+            "op.retag": "Tag geändert: {from} → {to}",
             "btn.showLog": "Ausgabe anzeigen",
             "log.title": "Ausgabe: {name}",
             "log.desc": "{when} · {image}",
@@ -478,8 +559,10 @@
             "rb.button": "Zurückrollen",
             "rb.title": "{name} zurückrollen?",
             "rb.desc": "Setzt {image} wieder auf {rb} und erstellt {services} neu. Datenbanken werden nicht zurückgesetzt – bei Migrationsproblemen den Dump einspielen.",
+            "rb.descRetag": "Stellt {files} wieder her, wie sie vor dem Tag-Wechsel waren, setzt {image} wieder auf {rb} und erstellt {services} neu. Datenbanken werden nicht zurückgesetzt – bei Migrationsproblemen den Dump einspielen.",
             "rb.ok": "Rollback erfolgreich.",
             "rb.failed": "Rollback fehlgeschlagen – siehe Ausgabe.",
+            "rb.aborted": "Rollback abgebrochen, bevor etwas geändert wurde – siehe Ausgabe.",
             "bk.summary": "{dumps} · {images} · {free} frei in {dir}",
             "bk.dumpsN": { one: "{n} Dump ({size})", other: "{n} Dumps ({size})" },
             "bk.imagesN": { one: "{n} Rollback-Image", other: "{n} Rollback-Images" },
@@ -763,12 +846,55 @@
         return ` <span class="dm-tagnow" title="${esc(t("cfg.tagNow", { tag: ctn.tag, v }))}">= ${esc(v)}</span>`;
     }
 
+    // What the selection field of "Change version" offers: the radar's
+    // versions[installed].choices (since 0.11.0), in the field's order, as
+    // [{ group, tag, text, disabled }]. Database majors and Nextcloud jumps
+    // over more than one major are listed but cannot be chosen; the helper
+    // refuses them as well (db-major, major-skip). The configured tag is the
+    // field's first entry and is left out here.
+    const NEXTCLOUD_RE = /(^|\/)nextcloud$/;
+
+    function majorOf(v) {
+        const m = /\d+/.exec(String(v || ""));
+        return m ? Number(m[0]) : null;
+    }
+
+    function retagOptions(ctn, rec, inst) {
+        const vr = inst.v && rec && rec.versions ? rec.versions[inst.v] : null;
+        const ch = vr && vr.choices;
+        if (!ch) return [];
+        const cur = majorOf(inst.v);
+        const nextcloud = NEXTCLOUD_RE.test(repoKey(ctn.image));
+        const blocked = (target) => {      // the version the tag brings; null: follows every release
+            const m = target == null ? null : majorOf(target);
+            if (rec.db && m !== cur) return "rt.optDbMajor";
+            if (nextcloud && (m == null || m - cur > 1)) return "rt.optSkip";
+            return null;
+        };
+        const out = [];
+        const add = (group, tag, key, target, vars) => {
+            if (!tag || tag === ctn.tag || out.some((o) => o.tag === tag)) return;
+            const why = blocked(target);
+            out.push({ group, tag, disabled: !!why,
+                       text: why ? t(why, { tag }) : key ? t(key, { ...vars, tag }) : tag });
+        };
+        add("rt.grp.pin", ch.pin, "rt.optPin", inst.v);
+        (ch.lines || []).forEach((l) => add("rt.grp.lines", l.tag, "rt.optLine", l.newest, { v: l.newest }));
+        LEVELS.forEach(([lvl]) => (ch.newer || []).forEach((x) => {
+            if (x.level === lvl) add("rt.grp." + lvl, x.tag, null, x.tag);
+        }));
+        (ch.floating || []).forEach((f) => add("rt.grp.floating", f, null, null));
+        return out;
+    }
+
     // "Newest version" column. Returns { html, news }:
     //   news = an actionable newer version exists (patch/minor, or a major
     //          on a non-database image). A database major alone is grey info.
     // Chips are compared with the INSTALLED version; filled = the configured
-    // tag delivers it via the Update button, outlined = needs a new tag.
-    function versionCell(ctn, rec, inst, radarOk) {
+    // tag delivers it via the Update button, outlined = needs a new tag. An
+    // outlined chip whose tag the selection field offers (pick) is a button
+    // that opens "Change version" with that tag.
+    function versionCell(ctn, rec, inst, radarOk, pick) {
         const muted = (text, title) => ({
             html: `<span class="dm-muted"${title ? ` title="${esc(title)}"` : ""}>${esc(text)}</span>`,
             news: false
@@ -793,10 +919,15 @@
             if (!info) news = true;
             const can = reach.indexOf(lvl) > -1;
             const cls = info ? "dm-chip-info" : "dm-chip-" + lvl + (can ? "" : " dm-chip-manual");
+            const tag = !info && !can && pick && pick.has(cmp[lvl]) ? cmp[lvl] : null;
             const title = [info ? t("ver.dbMajor") : t("ver.levelTip", { level: label }),
-                           t(can ? "ver.reachYes" : "ver.reachNo", { tag: ctn.tag })].join("\n");
-            chips.push(`<span class="dm-chip ${cls}" title="${esc(title)}">` +
-                       `${label} <span class="dm-ver">${esc(cmp[lvl])}</span></span>`);
+                           t(can ? "ver.reachYes" : "ver.reachNo", { tag: ctn.tag })]
+                .concat(tag ? [t("ver.clickRetag", { tag })] : []).join("\n");
+            const text = `${label} <span class="dm-ver">${esc(cmp[lvl])}</span>`;
+            chips.push(tag
+                ? `<button type="button" class="dm-chip ${cls}" title="${esc(title)}" ` +
+                  `data-retag="${esc(ctn.name)}" data-tag="${esc(tag)}">${text}</button>`
+                : `<span class="dm-chip ${cls}" title="${esc(title)}">${text}</span>`);
         });
         if (!chips.length) {
             return { html: `<span class="dm-uptodate" title="${esc(t("ver.upToDateTip"))}">✓` +
@@ -811,6 +942,7 @@
     let failedBuilds = new Map();
     const rowFailed = new Map();        // container name -> failed update op
     const siblings = new Map();         // container name -> others an update recreates with it
+    const retagInfo = new Map();        // container name -> { ctn, inst, options } for "Change version"
     let lastRender = null;
 
     function failedBuildsOf(ops) {
@@ -857,7 +989,10 @@
         }
         const rec = versionsMap.get(verKey(ctn.image, ctn.tag));
         const inst = installedOf(ctn, rec);
-        const ver = versionCell(ctn, rec, inst, radarOk);
+        const options = ctn.managed ? retagOptions(ctn, rec, inst) : [];
+        const pick = new Set(options.filter((o) => !o.disabled).map((o) => o.tag));
+        if (pick.size) retagInfo.set(ctn.name, { ctn, inst, options });
+        const ver = versionCell(ctn, rec, inst, radarOk, pick);
         if ((kind === "ok" || kind === "unknown") && ver.news) kind = "newver";
         // Without a known installed version "up to date" would be a guess.
         if (kind === "ok" && radarOk && rec && !inst.v) kind = "unknown";
@@ -879,6 +1014,7 @@
                 actions.push(`<span class="dm-muted dm-small" title="${esc(t("row.manualOnlyTip"))}">${esc(t("row.manualOnly"))}</span>`);
             }
         }
+        if (pick.size) actions.push(iconButton("exchange-alt", t("btn.retag"), `data-retag="${esc(ctn.name)}"`));
         if (kind === "update") {
             actions.push(iconButton("check", t("btn.dismiss"), `data-key="${esc(evKey(ev))}"`));
         }
@@ -913,6 +1049,7 @@
     function render(containers, eventsMap, radarDoc) {
         lastRender = [containers, eventsMap, radarDoc];
         rowFailed.clear();
+        retagInfo.clear();
         // An update recreates every service of the project with the same image.
         siblings.clear();
         const groups = new Map();
@@ -965,6 +1102,10 @@
         });
         rows.querySelectorAll("button[data-update]").forEach((btn) => {
             btn.addEventListener("click", () => startUpdate(btn.dataset.update, btn.dataset.kind));
+        });
+        // The row's "Change version" and the outlined chips (with their tag).
+        rows.querySelectorAll("button[data-retag]").forEach((btn) => {
+            btn.addEventListener("click", () => startRetag(btn.dataset.retag, btn.dataset.tag || ""));
         });
     }
 
@@ -1176,6 +1317,8 @@
             this.btn("dm-dialog-confirm", t("dialog.running"), { visible: true, busy: true });
             this.btn("dm-dialog-extra", "", { visible: false });
             $("dm-dialog-cancel").disabled = true;
+            // What was chosen for this run is fixed now (tick boxes, the version field).
+            $("dm-dialog-body").querySelectorAll("input, select").forEach((x) => { x.disabled = true; });
             this.reason(null);
             if (runningLabel) this.result(runningLabel, null);
             let result = null;
@@ -1262,7 +1405,9 @@
     }
 
     // --- Update ------------------------------------------------------------
-    function planBody(plan, failed) {
+    // The plan of an update; with rt (`retag --dry-run`) the plan of a version
+    // change, whose unknown jump comes from a tag that follows every release.
+    function planBody(plan, failed, rt) {
         const li = (label, value) =>
             `<li><span class="dm-kv-k">${esc(label)}</span><span class="dm-kv-v">${value}</span></li>`;
         const code = (s) => `<code>${esc(s)}</code>`;
@@ -1284,7 +1429,9 @@
         const gate = (warning, id, confirm) =>
             `<div class="dm-gate-group"><p class="dm-callout dm-callout-warn">${warning}</p>` +
             `<label class="dm-check"><input type="checkbox" class="dm-gate" id="${id}"> ${esc(confirm)}</label></div>`;
-        if (plan.jump_unknown) {
+        if (plan.jump_unknown && rt) {
+            html += gate(esc(t("rt.floating", { tag: rt.tag })), "dm-jump-check", t("rt.floatingConfirm", { tag: rt.tag }));
+        } else if (plan.jump_unknown) {
             html += gate(esc(t("upd.jumpUnknown", { tag })) +
                          (plan.target_version ? " " + esc(t("upd.jumpTarget", { tag, v: plan.target_version })) : ""),
                          "dm-jump-check", t("upd.jumpConfirm"));
@@ -1414,21 +1561,27 @@
         return t("upd.reasonNone");
     }
 
+    // Exit 2 and 5 stop a rollback before anything changed: the rollback
+    // image is gone, or a file of a tag change was edited since (or its copy
+    // is damaged).
     function offerRollback(op, name) {
         dlg.btn("dm-dialog-extra", t("rb.button"), { visible: true });
         dlg.onExtra = () => {
             dlg.run([UPDATE_CMD, "rollback", op]).then((o) => {
                 if (!o.ok) dlg.reason((o.result || {}).reason);
-                dlg.result(o.ok ? t("rb.ok") : (o.noAdmin ? t("dialog.noAdmin") : t("rb.failed")), !!o.ok);
+                dlg.result(o.ok ? t("rb.ok") : o.noAdmin ? t("dialog.noAdmin")
+                    : o.exit === 2 || o.exit === 5 ? t("rb.aborted") : t("rb.failed"), !!o.ok);
                 safeLoad();
             });
         };
     }
 
     function startRollback(op) {
+        const vars = { image: op.image, rb: op.rollback, services: (op.services || []).join(", "),
+                       files: [...new Set((op.changes || []).map((c) => c.file))].join(", ") };
         confirmAndRun({
             title: t("rb.title", { name: op.container }),
-            desc: t("rb.desc", { image: op.image, rb: op.rollback, services: (op.services || []).join(", ") }),
+            desc: t(op.kind === "retag" ? "rb.descRetag" : "rb.desc", vars),
             confirm: { label: t("rb.button"), argv: () => [UPDATE_CMD, "rollback", op.id] },
             onDone: (o) => {
                 if (o.ok) { dlg.result(t("rb.ok"), true); return true; }
@@ -1437,9 +1590,138 @@
                     dlg.result(t("rb.failed"), false);
                     return true;
                 }
+                if (o.exit === 2 || o.exit === 5) { dlg.result(t("rb.aborted"), false); return true; }
                 return false;
             },
         });
+    }
+
+    // --- Change version (stage 2) --------------------------------------------
+    // The selection field first; each choice is planned by the helper
+    // (`retag … --dry-run`, read-only) and shown as the lines that change plus
+    // the plan of an update. Confirming passes the plan's fingerprint, so the
+    // helper changes exactly what was shown or nothing (exit 5).
+    function retagField(ctn, inst, options) {
+        const groups = [];
+        options.forEach((o) => {
+            let g = groups.find((x) => x.key === o.group);
+            if (!g) groups.push(g = { key: o.group, items: [] });
+            g.items.push(o);
+        });
+        return `<div class="az-field">` +
+            `<label class="az-field__label" for="dm-retag-select">${esc(t("rt.select"))}</label>` +
+            `<select id="dm-retag-select" class="az-input">` +
+              `<option value="">${esc(t("rt.optConfigured", { tag: ctn.tag }))}</option>` +
+              groups.map((g) => `<optgroup label="${esc(t(g.key))}">` + g.items.map((o) =>
+                  `<option value="${esc(o.tag)}"${o.disabled ? " disabled" : ""}>${esc(o.text)}</option>`).join("") +
+                  `</optgroup>`).join("") +
+            `</select>` +
+            `<p class="az-field__help">${esc(t("rt.help", { v: inst.v }))}</p></div>` +
+            `<div id="dm-retag-preview" class="dm-retag-preview"></div>`;
+    }
+
+    // Every line before and after, with file and line number, as the helper
+    // will write it.
+    function retagDiff(rt) {
+        return `<div class="dm-diff-group"><p class="dm-diff-title">${esc(t("rt.diff"))}</p>` +
+            (rt.changes || []).map((c) =>
+                `<div class="dm-diff"><div class="dm-diff-file">${esc(c.file)}:${esc(c.line)}` +
+                (c.service ? ` <span class="dm-muted">(${esc(c.service)})</span>` : "") + `</div>` +
+                `<div class="dm-diff-lines"><div class="dm-diff-old">- ${esc(c.old)}</div>` +
+                `<div class="dm-diff-new">+ ${esc(c.new)}</div></div></div>`).join("") +
+            `</div>` +
+            (rt.variable ? `<p class="dm-callout">${esc(t("rt.variable", { name: rt.variable }))}</p>` : "") +
+            (rt.git ? `<p class="dm-callout">${esc(t("rt.git", { path: rt.git }))}</p>` : "");
+    }
+
+    function retagReason(plan) {
+        const rt = plan.retag || {};
+        const key = "reason." + rt.reason;
+        const text = t(key, { tag: rt.tag, detail: rt.detail || "", files: (plan.missing || []).join(", ") });
+        return text === key ? rt.reason + (rt.detail ? ` (${rt.detail})` : "") : text;
+    }
+
+    // preset: the tag of a clicked chip; "" opens the field on the configured tag.
+    function startRetag(name, preset) {
+        const info = retagInfo.get(name);
+        if (!info) return;
+        const ticket = ++planSeq;
+        const label = t("btn.retag");
+        const shown = { tag: null, fp: null };      // the change the preview shows
+        const ready = (on) => dlg.btn("dm-dialog-confirm", label, { visible: true, disabled: !on });
+        confirmAndRun({
+            title: t("rt.title", { name }), desc: t("rt.desc"),
+            body: retagField(info.ctn, info.inst, info.options),
+            confirm: {
+                label, disabled: true,
+                argv: () => {
+                    const box = $("dm-dump-check");
+                    const dump = box && box.checked && !box.disabled;
+                    return [UPDATE_CMD, "retag", name, shown.tag, "--expect", shown.fp].concat(dump ? [] : ["--no-dump"]);
+                },
+            },
+            onDone: (o) => retagOutcome(o, name, shown.tag),
+        });
+        const sel = $("dm-retag-select");
+        const box = $("dm-retag-preview");
+        let seq = 0;
+        const preview = () => {
+            const tag = sel.value;
+            const mine = ++seq;
+            // A plan that arrives after another choice, after the dialog was
+            // closed or reopened, or after the run started, is dropped.
+            const stale = () => mine !== seq || ticket !== planSeq || !$("dm-dialog").hasAttribute("open") || dlg.running;
+            shown.tag = shown.fp = null;
+            ready(false);
+            box.innerHTML = tag ? `<p class="dm-dialog-note">${esc(t("rt.checking"))}</p>` : "";
+            if (!tag) return;
+            Promise.resolve().then(() => spawnHelper([UPDATE_CMD, "retag", name, tag, "--dry-run"], "try"))
+                .then((out) => {
+                    if (stale()) return;
+                    let plan;
+                    try { plan = JSON.parse(out); } catch (_) { throw new Error("bad plan output"); }
+                    const rt = plan.retag || {};
+                    if (!rt.possible) {
+                        box.innerHTML = `<p class="dm-callout dm-callout-warn">${esc(t("upd.notPossible", { reason: retagReason(plan) }))}</p>`;
+                        return;
+                    }
+                    box.innerHTML = retagDiff(rt) + planBody(plan, null, rt);
+                    shown.tag = tag;
+                    shown.fp = rt.fingerprint;
+                    const gates = [...box.querySelectorAll(".dm-gate")];
+                    const check = () => ready(gates.every((g) => g.checked));
+                    gates.forEach((g) => g.addEventListener("change", check));
+                    check();
+                })
+                .catch((ex) => {
+                    if (stale()) return;
+                    box.innerHTML = `<p class="dm-callout dm-callout-warn">${esc(isNoAdmin(ex) ? t("dialog.noAdmin")
+                        : t("dialog.error", { msg: (ex && (ex.message || ex.problem)) || ex }))}</p>`;
+                });
+        };
+        sel.addEventListener("change", preview);
+        if (preset && info.options.some((o) => o.tag === preset && !o.disabled)) {
+            sel.value = preset;
+            preview();
+        }
+    }
+
+    function retagOutcome(o, name, tag) {
+        const r = o.result || {};
+        if (o.ok) {
+            const vers = r.from_version && r.to_version && r.from_version !== r.to_version;
+            dlg.result(t(vers ? "rt.okVersions" : "rt.ok", { tag: r.image ? tagSplit(r.image).tag : tag,
+                from: r.from_version, to: r.to_version, rb: r.rollback || "" }), true);
+            return true;
+        }
+        if (o.exit === 4 && r.op) {
+            dlg.reason(r.reason);
+            dlg.result(t("rt.failed"), false);
+            offerRollback(r.op, name);
+            return true;
+        }
+        if (o.exit === 5) { dlg.result(t("upd.aborted"), false); return true; }
+        return false;
     }
 
     // --- Backups tab -------------------------------------------------------
@@ -1591,7 +1873,9 @@
             `<tr>` +
             `<td class="az-nowrap" data-label="${L("col.when")}"><span class="dm-cell">${esc(fmtDate(new Date(o.ts)))}</span></td>` +
             `<td class="az-nowrap" data-label="${L("col.container")}"><span class="dm-cell">${esc(o.container || "")}</span></td>` +
-            `<td data-label="${L("col.image")}"><span class="dm-cell az-mono">${esc(o.image || "")}</span></td>` +
+            `<td data-label="${L("col.image")}"><span class="dm-cell"><span class="az-mono">${esc(o.image || "")}</span>` +
+              (o.kind === "retag" ? `<span class="dm-row-note">${esc(t("op.retag", { from: o.from_tag, to: o.to_tag }))}</span>` : "") +
+            `</span></td>` +
             `<td data-label="${L("col.version")}"><span class="dm-cell">${opVersions(o)}</span></td>` +
             `<td data-label="${L("col.result")}"><span class="dm-cell">${opResult(o)}${opReason(o)}</span></td>` +
             `<td data-label="${L("col.dumps")}"><span class="dm-cell">${(o.dumps || []).length}</span></td>` +

@@ -126,7 +126,16 @@ installed version was unknown and the jump invisible.
 
 ---
 
-## Stage 2 – Version jumps (change the tag in the compose file)
+## Stage 2 – Version jumps (change the tag in the compose file) ✅
+
+Done in 0.11.0 (see [CHANGELOG](CHANGELOG.md)): the radar's choices per installed version,
+`retag --dry-run` (the lines before and after, plan, fingerprint), `retag --expect` (the change with
+byte-exact copies, rollback restoring them) and *Change version* in the page (row button, outlined
+chips, selection field, preview, tick boxes). Where it differs from the plan below:
+- Several lines of one image (e.g. `web`, `worker`, `migrate`) change together, as an update recreates
+  all of them; only anchors, `include:` and shared or composed variables stop it.
+- A git repository is named as a hint; the add-on does not commit.
+- The pointer to the release notes comes with stage 3.
 
 **Goal:** the version of a container can be changed in the page, safely: a click on an *outlined* chip
 (e.g. “Patch v2.1.5” with `v2.1.4` configured), or a selection field with the versions the registry

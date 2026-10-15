@@ -2,6 +2,7 @@
 
 A [Cockpit](https://cockpit-project.org/) add-on that shows three things for every running Docker container: what the compose file says, which version actually runs and which version is the newest.
 Updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button.
+A different version (another tag in the compose file) is chosen from a list; the add-on shows the lines it will change, keeps byte-exact copies of the files and puts them back on rollback.
 Everything that runs as root for this is a small, fixed set of helper scripts. The browser makes no external requests, and Diun sees Docker only through a read-only socket proxy.
 
 | Light | Dark |
@@ -15,6 +16,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 - [How the installed version is determined](#how-the-installed-version-is-determined)
 - [How newer versions are found](#how-newer-versions-are-found)
 - [Update and rollback (stage 1)](#update-and-rollback-stage-1)
+- [Change version (stage 2)](#change-version-stage-2)
 - [Backups & dumps](#backups--dumps)
 - [Architecture](#architecture)
 - [Security model](#security-model)
@@ -36,6 +38,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | **Overview** | All running containers with *Configured* (tag from compose), *Installed* (real version), *Newest version* (patch / minor / major) and status. Sorted by urgency. |
 | **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**” in the card. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
 | **Update / roll out** | One click first shows a plan (containers recreated with it, one-off jobs, compose project, databases, what the services wait for and what waits for them, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If nobody can tell how big the jump is (unknown version, tag `latest`), the plan says so and asks for an extra confirmation. If the containers do not come up, the most likely cause from their log stands next to the rollback button. |
+| **Change version** | A list of the versions the registry offers for the installed one: pin the running version, a version line such as `5`, an exact patch / minor / major version, or `latest`. The dialog shows every line of the compose file (or `.env`) before and after, then the same plan and flow as an update; the rollback puts the files back byte for byte. Database majors and Nextcloud jumps over more than one major are listed but locked. |
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
 | **Use** | The shared Azentrius page frame (header, tabs, signature), light or dark following Cockpit's style, English and German following Cockpit's language (fallback English), loading indicator, rows as blocks on phones, no external resources (strict Cockpit CSP). |
@@ -75,13 +78,14 @@ The labels use the shared status language: a hint in violet with `info-circle`, 
 `check-circle`, unknown without judgement with `ban`. Gold is never a status.
 
 Update buttons exist only for containers started with **docker compose** (“manual only” otherwise).
+Such rows also get **Change version** (⇄) when the installed version is known and the radar has versions to offer for it.
 
 **Chips in “Newest version”**
 
 | Style | Meaning |
 |---|---|
 | filled | The configured tag delivers this version **with the Update button** (e.g. `latest` → everything, `16-alpine` → 16.x). |
-| outlined | Reachable only by **changing the tag in the compose file** (e.g. `v2.1.4` → `v2.1.5`). That is [stage 2](ROADMAP.md#stage-2--version-jumps-change-the-tag-in-the-compose-file). |
+| outlined | Reachable only by **changing the tag in the compose file** (e.g. `v2.1.4` → `v2.1.5`). A click on the chip opens [*Change version*](#change-version-stage-2) with that tag. |
 | dashed, grey | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. |
 | colour | patch green, minor neutral with bronze (light) or gold (dark) text, major red |
 
@@ -138,7 +142,7 @@ v2.1.4             -> "v"  3 ""
 
 ## Update and rollback (stage 1)
 
-Stage 1 **never** changes the compose file. It fetches the current image of **the same tag** and recreates the containers. Version jumps via a different tag are [stage 2](ROADMAP.md).
+Stage 1 **never** changes the compose file. It fetches the current image of **the same tag** and recreates the containers. Version jumps via a different tag are [stage 2](#change-version-stage-2).
 
 ```mermaid
 sequenceDiagram
@@ -204,6 +208,35 @@ update dialog repeats the cause and enables *Update* only after a tick box. A ne
 
 ---
 
+## Change version (stage 2)
+
+Another tag in the compose file, chosen in the page: **Change version** (⇄) in the row, or a click on an outlined chip.
+
+| Group in the field | Example | What the tag does |
+|---|---|---|
+| (first entry) | `5.0.2 (configured now)` | nothing; the field starts here |
+| Pin the running version | `6.1.8 (runs now)` for GlitchTip on `latest` | names exactly what runs now: no surprise on the next update |
+| Version lines | `5 (currently 5.4.5)` | patch and minor updates within the line, never the next major |
+| Patch / minor / major versions | `5.0.3`, `5.4.5`, `6.0.2` | exactly this version |
+| Follows every release | `latest` | every new release, majors included (a tick box confirms it) |
+
+Only versions in the scheme of the installed version are offered and none older: going back is the rollback's job. Database majors (a migration, [stage 5](ROADMAP.md)) and Nextcloud jumps over more than one major are listed but locked, with the reason.
+
+**Show first.** For each choice the helper plans the change and writes nothing (`retag … --dry-run`): every line before and after, with file and line number, then the plan of an update (what is recreated, dumps, dependencies, what the tag brings). Where the tag is written:
+- `image: repo:5.0.2` → that line, for every service of the image, in whichever compose file (override files too);
+- `image: repo:${FB_VERSION}` → the variable's line in the `.env` file, if it is set there once and used for this image only;
+- anchors, `include:`, shared or composed variables → not done; the dialog names the reason, the tag has to be changed by hand.
+
+If the project lies in a git repository, the dialog says so; the add-on never commits.
+
+**Then act.** Confirming sends the preview's fingerprint along: the helper plans again and stops before any change if a file differs from what was shown. Then: database dump → rollback copy → byte-exact copy of the files → the planned lines written (owner, mode and line endings kept) → check with `docker compose config` → pull → restart → wait for healthy. A failed check or pull puts the files back before any container changes.
+
+**Rollback** puts the files back byte for byte and points the old tag to the rollback copy. If a file was edited after the tag change, it stops without touching anything. The history shows “Tag changed: 5.0.2 → 5”.
+
+![Change version: a version line chosen, the line that changes, the plan](docs/img/version-dialog.png)
+
+---
+
 ## Backups & dumps
 
 | What | Where | Rights |
@@ -212,6 +245,7 @@ update dialog repeats the cause and enables *Update* only after a tick box. A ne
 | Update history | `/var/backups/image-updates/operations.jsonl` | 0600 |
 | Output of each update and rollback | `/var/backups/image-updates/logs/<op-id>.log` (`.rollback.log`) | 0600 |
 | Rollback images | local Docker tags `<repo>:rollback-<YYYYMMDD-HHMMSS>` | – |
+| Copies of files a tag change wrote | `/var/backups/image-updates/compose/<project>/<YYYYMMDD-HHMMSS>/<n>_<file>` | file 0600, folder 0700 |
 
 - **Output:** *Show output* in the history opens what an update and its rollback printed.
 - **Delete** in the *Backups & dumps* tab. A rollback image still used by a container cannot be deleted. That is the case, for example, as long as other databases still run on the same old Postgres build.
@@ -538,7 +572,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Docker with Compose v2 only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated.
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “Registry error”.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
-- **Version jumps** via a different tag and **database majors** are manual (change the compose file).
+- **Database majors** are manual (dump, new instance, restore), see stage 5.
+- **Tag changes** the add-on cannot make safely (YAML anchors, `include:`, a variable used elsewhere or built from several) stay manual; the dialog names the reason.
 - **Floating tags:** what the tag points to is resolved through the registry only when a version tag has the same digest. Builds without a version tag (e.g. from the main branch) stay unknown; then the plan warns that the size of the jump is unknown.
 - **Dependent services are not restarted:** an update recreates only the services that use the image. A database or cache restarts under the running app, which has to reconnect by itself; the add-on watches it for about 15 seconds, not longer.
 - After updates of images whose version can only be determined by label/digest, `?` shows for a few minutes until the radar run started by the update is done.
@@ -554,7 +589,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
 | 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **in progress** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds, what is updated together, dependencies; 0.10.0: floating tags resolved) |
-| 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | planned |
+| 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | **done** (0.11.0) |
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
 | 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | idea |

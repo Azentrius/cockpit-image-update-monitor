@@ -10,7 +10,7 @@ Needs Playwright with Chromium:
     python3 tools/preview/shoot.py [output-dir]      (default: docs/img)
 
 Fails if the page throws a JavaScript error or scrolls horizontally on a
-phone-sized screen (in either theme).
+phone-sized screen (in either theme, and in the version dialog).
 """
 import os
 import sys
@@ -47,6 +47,13 @@ def main():
         pg.wait_for_timeout(1200)
         pg.screenshot(path=os.path.join(OUT, "update-done.png"))
 
+        # Change version: the field on a version line, its preview below
+        pg = page(1440, 900, "en")
+        pg.click('td.az-cell-actions button[data-retag="plausible"]')
+        pg.select_option("#dm-retag-select", "v2")
+        pg.wait_for_timeout(400)
+        pg.screenshot(path=os.path.join(OUT, "version-dialog.png"))
+
         pg = page(1440, 900, "en", "dark")
         pg.screenshot(path=os.path.join(OUT, "updates-dark.png"))
         pg.click('button[data-update="ollama"]')
@@ -66,6 +73,14 @@ def main():
             pg = page(390, 1400, "en", scheme)
             pg.screenshot(path=os.path.join(OUT, name))
             widths[scheme] = pg.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]")
+        # The version dialog on a phone: the changed lines wrap instead of scrolling sideways
+        pg = page(390, 844, "en")
+        pg.click('td.az-cell-actions button[data-retag="plausible"]')
+        pg.select_option("#dm-retag-select", "v3.2.1")
+        pg.wait_for_timeout(400)
+        pg.screenshot(path=os.path.join(OUT, "version-dialog-phone.png"))
+        widths["version dialog"] = pg.evaluate("() => { const d = document.getElementById('dm-dialog');"
+                                               " return [d.scrollWidth, d.clientWidth]; }")
         browser.close()
 
     print("Screenshots:", OUT)

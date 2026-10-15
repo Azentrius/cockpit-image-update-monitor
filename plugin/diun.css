@@ -94,6 +94,10 @@ html { background: var(--bg-page); }
 /* Database major: information, not an alarm (needs a planned migration). Its own
    card-coloured fill keeps the border at 3:1 on a highlighted row as well. */
 .dm-chip-info { background: var(--bg-card); border: 1px dashed var(--line-control); color: var(--text-subtle); }
+/* An outlined chip the version field offers: a button that opens it with its tag. */
+button.dm-chip { font: inherit; font-size: 12px; font-weight: 500; line-height: 1.5; cursor: pointer; }
+button.dm-chip:hover { text-decoration: underline; }
+button.dm-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .dm-legend {
     display: flex;
@@ -168,9 +172,26 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
 .dm-dialog-result.is-error { color: var(--danger-text); }
 
 /* Plan of an update: blocks one below the other with room between them;
-   a warning and its tick box stay closer together (.dm-gate-group). */
-.dm-dialog-body, .dm-gate-group { display: flex; flex-direction: column; gap: var(--space-md); }
-.dm-gate-group { gap: var(--space-sm); }
+   a warning and its tick box stay closer together (.dm-gate-group), as do
+   the changed lines of a version change (.dm-diff-group). */
+.dm-dialog-body, .dm-gate-group, .dm-diff-group, .dm-retag-preview { display: flex; flex-direction: column; gap: var(--space-md); }
+.dm-gate-group, .dm-diff-group { gap: var(--space-sm); }
+.dm-retag-preview:empty { display: none; }
+/* Version change: each line before (-) and after (+), as the helper writes it */
+.dm-diff-title { margin: 0; font-size: 14px; font-weight: 600; }
+.dm-diff { display: flex; flex-direction: column; gap: 2px; }
+.dm-diff-file { font-family: var(--az-font-code); font-size: 12px; color: var(--text-subtle); overflow-wrap: anywhere; }
+.dm-diff-lines {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-small);
+    font-family: var(--az-font-code);
+    font-size: 12px;
+    line-height: 1.6;
+}
+.dm-diff-lines > div { padding: 0 var(--space-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.dm-diff-old { background: var(--tint-danger); color: var(--on-tint-danger); }
+.dm-diff-new { background: var(--tint-success); color: var(--on-tint-success); }
 .dm-kv { list-style: none; margin: 0; padding: 0; font-size: 14px; line-height: 1.6; }
 .dm-kv li { display: flex; gap: var(--space-md); padding: var(--space-sm) 0; border-block-start: 1px solid var(--line); }
 .dm-kv li:first-child { border-block-start: 0; }
