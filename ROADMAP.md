@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-13. Each stage is cut so that it is useful on its own and brings its own tests. The order
+As of 2026-10-16. Each stage is cut so that it is useful on its own and brings its own tests. The order
 is the recommendation.
 
 **Guardrails for every stage** (they keep applying unchanged):
@@ -248,9 +248,13 @@ and tested.
 
 ## Stage 6 – Distribution and reach
 
+Packages and Cockpit's Applications page are done in 0.12.0 (see [CHANGELOG](CHANGELOG.md)), marked ✅.
+
 - ✅ **Packages** (`.deb` and `.rpm`, `cockpit-image-updates`) with plugin, helpers and units, attached
-  to the GitHub releases; they replace `install.sh` and take over its installations. Next: the
-  Azentrius package repository, so that Cockpit lists the add-on under Applications.
+  to the GitHub releases; they replace `install.sh` and take over its installations.
+- ✅ **Cockpit's Applications page:** AppStream data (`de.azentrius.image_updates`) in the packages, and
+  the Azentrius package repository, packages.azentrius.de, whose catalog Cockpit reads: the add-on is
+  found and installed from Cockpit itself.
 - **Private registries:** credentials in a separate root-only file that the radar may read despite its
   hardening (`LoadCredential=` or `ReadOnlyPaths=`); `skopeo --authfile`.
 - **Podman** (`podman compose`, Quadlets) as a second runtime.

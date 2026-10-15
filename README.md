@@ -373,22 +373,38 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 
 ## Install, update, uninstall
 
-**Install / update** the package from the [releases page](https://github.com/Azentrius/cockpit-image-update-monitor/releases) (`X.Y.Z` is the version there):
+**From the Azentrius package repository.** Set up [packages.azentrius.de](https://packages.azentrius.de)
+once:
 
 ```bash
-# Debian, Ubuntu
-curl -LO https://github.com/Azentrius/cockpit-image-update-monitor/releases/download/vX.Y.Z/cockpit-image-updates_X.Y.Z-1_all.deb
-sudo apt install ./cockpit-image-updates_X.Y.Z-1_all.deb
-# Fedora, RHEL, openSUSE
-curl -LO https://github.com/Azentrius/cockpit-image-update-monitor/releases/download/vX.Y.Z/cockpit-image-updates-X.Y.Z-1.noarch.rpm
-sudo dnf install ./cockpit-image-updates-X.Y.Z-1.noarch.rpm
+# Debian and Ubuntu
+curl -fsSLO https://packages.azentrius.de/azentrius-repository.deb
+sudo apt install ./azentrius-repository.deb
+sudo apt update
+
+# Fedora, RHEL and openSUSE
+sudo rpm --import https://packages.azentrius.de/azentrius.asc
+sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
 ```
 
-To check a download: `curl -LO …/vX.Y.Z/SHA256SUMS && sha256sum --ignore-missing -c SHA256SUMS`, and optionally `gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor` (it was built by this repository's release workflow).
+Then install **Image updates** in Cockpit under **Applications** (with administrative access), or on the
+console with `sudo apt install cockpit-image-updates` or `sudo dnf install cockpit-image-updates`. The
+system's updates keep it current. The repository takes a package only after checking that this
+repository's release workflow built it.
+
+**From a release.** Every [release](https://github.com/Azentrius/cockpit-image-update-monitor/releases) has the
+`.deb` and the `.rpm`, `SHA256SUMS` and a signed build provenance (`X.Y.Z` is the version):
+
+```bash
+sudo apt install ./cockpit-image-updates_X.Y.Z-1_all.deb     # Debian, Ubuntu
+sudo dnf install ./cockpit-image-updates-X.Y.Z-1.noarch.rpm  # Fedora, RHEL, openSUSE
+sha256sum --ignore-missing -c SHA256SUMS                     # check a download
+gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor   # built by the release workflow
+```
 
 The package puts the page into `/usr/share/cockpit/image-updates/`, the root helpers into `/usr/lib/cockpit-image-updates/` and the units `diun-radar` and `diun-cleanup` into `/usr/lib/systemd/system/` (off until you set them up). After an update it starts a radar run if the radar is set up. It also takes over an installation made with `install.sh` (up to 0.11): the old page in `/usr/share/cockpit/diun`, the old helpers in `/usr/local/lib/diun-radar` and the copies of the units in `/etc/systemd/system` go, the `backup-*` folders of `install.sh` and all data stay, and timers that were on keep running.
 
-**From source** (other distributions): `git clone` this repository, then `sudo make install`. It installs the same files to the same places and takes over an `install.sh` installation the same way; `sudo make uninstall` removes them again.
+**From the source.** `git clone` this repository, then `sudo make install`. It installs the same files to the same places and takes over an `install.sh` installation the same way; `sudo make uninstall` removes them again.
 
 Then open **“Image updates”** in Cockpit (switch on administrative access). If something is missing, the add-on shows the *Missing requirements* panel right under the tabs, with install buttons. Alternatively on the console:
 
@@ -563,6 +579,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 
 1. Raise `VERSION` and every `?v=` in `plugin/index.html` (`tools/check-version.sh` finds any it misses), add a section `## X.Y.Z – YYYY-MM-DD` to `CHANGELOG.md`, merge.
 2. Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, builds the `.deb` and `.rpm` and the source archive `cockpit-image-update-monitor-X.Y.Z.tar.gz` with `SHA256SUMS` and creates the tag `vX.Y.Z` with a release whose notes come from `CHANGELOG.md`. It also signs a build provenance for each file; `gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor` shows that it was built by this workflow from this repository.
+3. packages.azentrius.de takes the packages from the release within an hour ([Azentrius/packages](https://github.com/Azentrius/packages)).
 
 ---
 
@@ -592,7 +609,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 | 3 | Release notes / changelog links per version, hints on breaking changes | idea |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
 | 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | idea |
-| 6 | Distribution: Debian package, private registries, Podman, several hosts | idea |
+| 6 | Distribution: packages and Cockpit's Applications page, private registries, Podman, several hosts | **in progress** (0.12.0: packages, Applications page) |
 
 ---
 
