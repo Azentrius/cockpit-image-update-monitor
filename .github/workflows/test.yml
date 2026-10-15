@@ -36,14 +36,18 @@ jobs:
           (cd dist && sha256sum *.deb *.rpm) > first.sha256
           rm -rf dist && make packages > /dev/null
           (cd dist && sha256sum -c ../first.sha256)
-      # On Debian over what install.sh (up to 0.11) left behind: the package takes it over.
+      # On Debian over what install.sh (up to 0.11) left behind: the package takes it over. The
+      # copies of the units: the service runs the old helpers, the radar timer is the same as the
+      # package's (both go), the cleanup timer was changed by hand (it stays).
       - name: Install and remove the .deb on Debian and the .rpm on Fedora
         run: |
-          docker run --rm -v "$PWD/dist:/dist:ro" debian:13 sh -ec '
+          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/systemd:/units:ro" debian:13 sh -ec '
             mkdir -p /usr/local/lib/diun-radar/backup-1 /usr/share/cockpit/diun
             touch /usr/local/lib/diun-radar/diun-versions.py /usr/share/cockpit/diun/diun.js
             printf "[Service]\nExecStart=/usr/bin/python3 /usr/local/lib/diun-radar/diun-versions.py\n" \
               > /etc/systemd/system/diun-radar.service
+            cp /units/diun-radar.timer /etc/systemd/system/
+            sed "s/04:40/05:40/" /units/diun-cleanup.timer > /etc/systemd/system/diun-cleanup.timer
             apt-get update -qq
             apt-get install -y -qq /dist/*.deb > /dev/null
             test -x /usr/lib/cockpit-image-updates/diun-deps.sh
@@ -52,6 +56,8 @@ jobs:
             test -f /usr/share/metainfo/de.azentrius.image_updates.metainfo.xml
             test ! -e /usr/share/cockpit/diun
             test ! -e /etc/systemd/system/diun-radar.service
+            test ! -e /etc/systemd/system/diun-radar.timer
+            grep -q 05:40 /etc/systemd/system/diun-cleanup.timer
             test ! -e /usr/local/lib/diun-radar/diun-versions.py
             test -d /usr/local/lib/diun-radar/backup-1
             /usr/lib/cockpit-image-updates/diun-deps.sh check | python3 -c "import json, sys; json.load(sys.stdin)"
