@@ -54,6 +54,9 @@ for a phone, and clearer texts.
 - **Shared design files from Cron Jobs:** `azentrius.css` with `az-page-title--dot` and the
   project-page classes, `icons.js` with the full attribution, `tools/build-packages.sh` with `CONFLICTS`.
   The italic subset now holds the letters of "Monitor".
+- **Tables no longer widen the page:** the table wrapper is positioned (`position: relative` on
+  `.az-table-wrap`, from the shared `azentrius.css`), so the hidden helper texts in a table head stay inside
+  it when the table scrolls sideways.
 
 ## 0.12.2 – 2026-10-16
 
