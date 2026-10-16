@@ -6,6 +6,12 @@ The page follows the Azentrius design system where it did not yet: status never 
 never in gold, alerts instead of stripes at the edge, empty states that say why, targets large enough
 for a phone, and clearer texts.
 
+- **Fix: database dump skipped** for a MariaDB, MySQL or PostgreSQL container whose compose file
+  gives the server options only, as Nextcloud's example does (`command: --transaction-isolation=…
+  --log-bin=binlog`, or `-c max_connections=200`). The image's `docker-entrypoint.sh` starts the server
+  with them, but the add-on looked for the server's name in the command and did not count the
+  container as a database: the plan showed no dump, and an update ran without one. Found before a
+  Nextcloud major update on a test host. The end-to-end test's MariaDB now runs with such options.
 - **Newest version:** each level (patch, minor, major) is a label with the level as a word. A level the
   Update button brings is a hint (`info-circle`), one that needs a different tag is a label without
   judgement, a database major one with `ban`. The green, gold and red chips are gone; how a level is

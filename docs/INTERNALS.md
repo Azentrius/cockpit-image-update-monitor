@@ -164,7 +164,8 @@ status    = "Unknown" instead of "Up to date" when nothing was compared: install
   `built-locally` or `compose-config-error` (+`detail`).
 - `services`: all services of the project with the **same** image reference.
 - `dbs`: all database containers of the project.
-  - `kind`: `postgres` or `mysql` when the command starts the server; `unsupported` for
+  - `kind`: `postgres` or `mysql` when the command starts the server: it names the server, or it
+    is options only for the image's `docker-entrypoint.sh` (`--log-bin=binlog`, `-c …`); `unsupported` for
     redis/valkey/mongo/clickhouse … (no dump).
   - `size`: Postgres only, sum of `pg_database_size`.
 - `config_changed`: `docker compose config --hash` differs from the label
