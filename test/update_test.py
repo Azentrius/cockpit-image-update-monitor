@@ -306,6 +306,16 @@ check("kind: helper with the postgres image",
       k(ctn("a", "postgres:16", "x", entrypoint=["sh", "-c"], cmd=["pg_dump -h db app > /b/x.sql"])), None)
 check("kind: renamed image with PG_MAJOR", k(ctn("a", "acme/db:3", "x", env=["PG_MAJOR=16"], cmd=["postgres"])), "postgres")
 check("kind: mariadb", k(ctn("a", "mariadb:11", "x", cmd=["mariadbd"])), "mysql")
+# command: with options only, as Nextcloud's compose example has it (2026-10-16):
+# the image's docker-entrypoint.sh puts mariadbd / postgres in front of them
+check("kind: mariadb with options only",
+      k(ctn("a", "mariadb:11", "x", entrypoint=["docker-entrypoint.sh"],
+            cmd=["--transaction-isolation=READ-COMMITTED", "--log-bin=binlog", "--binlog-format=ROW"])), "mysql")
+check("kind: postgres with options only",
+      k(ctn("a", "postgres:16", "x", entrypoint=["/usr/local/bin/docker-entrypoint.sh"], cmd=["-c", "max_connections=200"])),
+      "postgres")
+check("kind: options for another entrypoint are no server",
+      k(ctn("a", "postgres:16", "x", entrypoint=["pg_basebackup"], cmd=["-h", "db", "-D", "/backup"])), None)
 check("kind: mysql 8", k(ctn("a", "mysql:8", "x", env=["MYSQL_MAJOR=8.4"], cmd=["mysqld"])), "mysql")
 check("kind: redis has no dump", k(ctn("a", "redis:7-alpine", "x", cmd=["redis-server"])), "unsupported")
 check("kind: nginx is no database", k(ctn("a", "nginx:1.27", "x", cmd=["nginx", "-g", "daemon off;"])), None)
