@@ -52,6 +52,8 @@ html { background: var(--bg-page); }
 /* ---------- table cells ---------- */
 
 .az-cell-actions .dm-cell { display: inline-flex; align-items: center; gap: var(--space-xs); }
+/* The place of an icon button a row does not have, so the buttons line up (iconSlot in diun.js). */
+.dm-slot { visibility: hidden; }
 .dm-ver { font-family: var(--az-font-code); font-size: 13px; }
 .dm-cfg, .dm-muted, .dm-digest, .dm-tagnow { color: var(--text-subtle); }
 .dm-tagnow { font-size: 12px; white-space: nowrap; }
@@ -222,6 +224,7 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
     .az-table--stack .dm-cell { min-width: 0; text-align: end; overflow-wrap: anywhere; }
     .az-table--stack .dm-levels { justify-content: flex-end; }
     .az-table--stack td.az-cell-actions .dm-cell { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-sm); }
+    .az-table--stack .dm-slot { display: none; }
     .dm-level-btn, .dm-check { min-block-size: 44px; }
     .dm-loading { padding: var(--space-lg) var(--space-md); }
     .dm-legend { flex-direction: column; padding-inline: var(--space-md); }

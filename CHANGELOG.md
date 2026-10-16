@@ -57,6 +57,14 @@ for a phone, and clearer texts.
 - **Tables no longer widen the page:** the table wrapper is positioned (`position: relative` on
   `.az-table-wrap`, from the shared `azentrius.css`), so the hidden helper texts in a table head stay inside
   it when the table scrolls sideways.
+- **Fix: buttons out of line.** A row without “Change version” (an image whose version is unknown)
+  had its Update button further right than the rows above and below, and a history entry with
+  “Roll back” but no kept output had its button further right too. A missing icon button now keeps its
+  place, invisible and as large as the button; on a phone, where the rows are blocks, the place goes.
+- **Fix: dump tick box without a database.** The plan of an update or a version change showed
+  “Create database dump first” greyed out when the project has no database to dump. The tick box now
+  only appears when there is one, and the run gets `--no-dump` only when it was unticked; before, a
+  project without a database got `--no-dump` and the output said the dump was skipped on request.
 
 ## 0.12.2 – 2026-10-16
 

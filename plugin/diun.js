@@ -875,6 +875,12 @@
         return `<button class="az-btn az-btn--plain az-btn--sm" type="button" aria-label="${esc(text)}" ` +
                `title="${esc(title || text)}" ${attrs}>${icon(iconName)}</button>`;
     }
+    // The place of an icon button a row does not have: as large as the button
+    // and invisible, so the buttons of all rows line up in the right-aligned
+    // actions cell. Gone on a phone, where the rows are blocks.
+    function iconSlot(button) {
+        return button || `<span class="az-btn az-btn--plain az-btn--sm dm-slot" aria-hidden="true"></span>`;
+    }
 
     const LEVELS = [["patch", "Patch"], ["minor", "Minor"], ["major", "Major"]];
     const LEVEL_NAMES = { patch: "Patch", minor: "Minor", major: "Major" };
@@ -1105,19 +1111,17 @@
             ? `<a href="${esc(ev.hub_link)}" target="_blank" rel="noopener">${esc(ctn.image)}</a>`
             : esc(ctn.image);
 
-        const actions = [];
+        // Three places: the update, "Change version", "Dismiss" (see iconSlot).
+        let main = "";
         if (kind === "update" || kind === "pulled") {
-            if (ctn.managed) {
-                actions.push(textButton("arrow-circle-up", t(kind === "pulled" ? "btn.rollout" : "btn.update"),
-                                        `data-update="${esc(ctn.name)}" data-kind="${kind}"`));
-            } else {
-                actions.push(`<span class="dm-muted dm-small" title="${esc(t("row.manualOnlyTip"))}">${esc(t("row.manualOnly"))}</span>`);
-            }
+            main = ctn.managed
+                ? textButton("arrow-circle-up", t(kind === "pulled" ? "btn.rollout" : "btn.update"),
+                             `data-update="${esc(ctn.name)}" data-kind="${kind}"`)
+                : `<span class="dm-muted dm-small" title="${esc(t("row.manualOnlyTip"))}">${esc(t("row.manualOnly"))}</span>`;
         }
-        if (pick.size) actions.push(iconButton("exchange-alt", t("btn.retag"), `data-retag="${esc(ctn.name)}"`));
-        if (kind === "update") {
-            actions.push(iconButton("check", t("btn.dismiss"), `data-key="${esc(evKey(ev))}"`));
-        }
+        const retag = pick.size ? iconButton("exchange-alt", t("btn.retag"), `data-retag="${esc(ctn.name)}"`) : "";
+        const dismissBtn = kind === "update" ? iconButton("check", t("btn.dismiss"), `data-key="${esc(evKey(ev))}"`) : "";
+        const actions = main || retag || dismissBtn ? [main, iconSlot(retag), iconSlot(dismissBtn)] : [];
 
         const sib = siblings.get(ctn.name) || [];
         const together = sib.length
@@ -1586,8 +1590,12 @@
             (deps.length ? li(t("upd.dependsOn"), deps.join(", ")) : "") +
             (watched.length ? li(t("upd.dependents"), watched.join(" ")) : "") +
             `</ul>`;
-        html += `<label class="dm-check"><input type="checkbox" id="dm-dump-check"${dumpable ? " checked" : " disabled"}> ` +
-                `${esc(t("upd.dumpCheck"))}</label>`;
+        // Only with a database the add-on can dump; without one the list above
+        // says so and there is nothing to choose (see dumpArgs).
+        if (dumpable) {
+            html += `<label class="dm-check"><input type="checkbox" id="dm-dump-check" checked> ` +
+                    `${esc(t("upd.dumpCheck"))}</label>`;
+        }
         if (plan.config_changed) html += alertBox("warning", t("upd.configChangedTitle"), esc(t("upd.configChanged")));
         (plan.job_order || []).forEach((o) => {
             html += alertBox("warning", t("upd.jobOrderTitle"), rich(t("upd.jobOrder", { job: o.job, services: o.services.join(", ") })));
@@ -1597,6 +1605,13 @@
         });
         html += alertBox("info", t("upd.dataTitle"), `${esc(t("upd.dataWarn"))} ${esc(t("upd.downtime"))}`);
         return html;
+    }
+
+    // --no-dump only when the dump was unticked. Without the tick box the
+    // project has no database to dump, and the helper says so itself.
+    function dumpArgs() {
+        const box = $("dm-dump-check");
+        return box && !box.checked ? ["--no-dump"] : [];
     }
 
     let planSeq = 0;
@@ -1627,11 +1642,7 @@
                     confirm: {
                         label,
                         disabled: !!plan.jump_unknown || !!failed || plan.jump === "major",
-                        argv: () => {
-                            const box = $("dm-dump-check");
-                            const dump = box && box.checked && !box.disabled;
-                            return [UPDATE_CMD, "update", name].concat(dump ? [] : ["--no-dump"]);
-                        },
+                        argv: () => [UPDATE_CMD, "update", name].concat(dumpArgs()),
                     },
                     onDone: (o) => updateOutcome(o, name),
                 });
@@ -1770,11 +1781,7 @@
             body: retagField(info.ctn, info.inst, info.options),
             confirm: {
                 label, disabled: true,
-                argv: () => {
-                    const box = $("dm-dump-check");
-                    const dump = box && box.checked && !box.disabled;
-                    return [UPDATE_CMD, "retag", name, shown.tag, "--expect", shown.fp].concat(dump ? [] : ["--no-dump"]);
-                },
+                argv: () => [UPDATE_CMD, "retag", name, shown.tag, "--expect", shown.fp].concat(dumpArgs()),
             },
             onDone: (o) => retagOutcome(o, name, shown.tag),
         });
@@ -1991,6 +1998,8 @@
         ["dm-ops-title", "dm-dumps-title", "dm-images-title"].forEach((id) => { $(id).closest(".az-card").hidden = !backups; });
 
         const ops = $("dm-ops");
+        const logButton = (o, i) => (o.log || o.rollback_log
+            ? iconButton("angle-right", t("btn.showLog"), `data-log="${i}"`) : "");
         ops.innerHTML = b.ops.map((o, i) =>
             `<tr>` +
             `<td class="az-nowrap" data-label="${L("col.when")}"><span class="dm-cell">${esc(fmtDate(new Date(o.ts)))}</span></td>` +
@@ -2002,8 +2011,8 @@
             `<td data-label="${L("col.result")}"><span class="dm-cell">${opResult(o)}${opReason(o)}</span></td>` +
             `<td data-label="${L("col.dumps")}"><span class="dm-cell">${(o.dumps || []).length}</span></td>` +
             `<td class="az-cell-actions"><span class="dm-cell">` +
-              (o.can_rollback ? textButton("history", t("rb.button"), `data-op="${i}"`) : "") +
-              (o.log || o.rollback_log ? iconButton("angle-right", t("btn.showLog"), `data-log="${i}"`) : "") +
+              (o.can_rollback ? textButton("history", t("rb.button"), `data-op="${i}"`) + iconSlot(logButton(o, i))
+                              : logButton(o, i)) +
             `</span></td></tr>`).join("");
         $("dm-ops-empty").hidden = b.ops.length > 0;
         $("dm-ops-table").hidden = b.ops.length === 0;
