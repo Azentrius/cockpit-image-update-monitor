@@ -54,6 +54,10 @@ for a phone, and clearer texts.
 - **Shared design files from Cron Jobs:** `azentrius.css` with `az-page-title--dot` and the
   project-page classes, `icons.js` with the full attribution, `tools/build-packages.sh` with `CONFLICTS`.
   The italic subset now holds the letters of "Monitor".
+- **Tables no longer widen the page:** a table wider than its card scrolls inside the card, and the
+  page itself no longer scrolls sideways. The hidden “Actions” column header stuck out of the
+  scrolling wrapper, because `az-table-wrap` was not positioned; the shared `azentrius.css` now
+  positions it.
 
 ## 0.12.2 – 2026-10-16
 

@@ -251,7 +251,9 @@ code, .az-mono { font-family: var(--az-font-code); font-size: 0.875rem; }
 }
 
 /* ---------- table ---------- */
-.az-table-wrap { overflow-x: auto; }
+/* position: relative keeps absolutely positioned helpers (.az-sr in the header, the hidden thead of the stacked view)
+   inside the scrolling wrapper. Without it they widen the page as soon as the table scrolls sideways. */
+.az-table-wrap { position: relative; overflow-x: auto; }
 .az-table { inline-size: 100%; border-collapse: collapse; font-size: 14px; }
 .az-table th, .az-table td {
   padding: var(--space-md);
