@@ -54,7 +54,9 @@ jobs:
             test -f /usr/lib/systemd/system/diun-radar.timer
             test -f /usr/share/cockpit/image-updates/manifest.json
             test -f /usr/share/metainfo/de.azentrius.image_updates.metainfo.xml
-            dpkg -L cockpit-image-updates | grep -qx /usr/share/doc/cockpit-image-updates/CC-BY-4.0-Font-Awesome.txt
+            dpkg -L cockpit-image-update-monitor | grep -qx /usr/share/doc/cockpit-image-update-monitor/CC-BY-4.0-Font-Awesome.txt
+            dpkg -L cockpit-image-update-monitor | grep -qx /usr/share/cockpit/image-updates/CC-BY-4.0-Font-Awesome.txt
+            dpkg -s cockpit-image-update-monitor | grep -qx "Conflicts: cockpit-image-updates"
             test ! -e /usr/share/cockpit/diun
             test ! -e /etc/systemd/system/diun-radar.service
             test ! -e /etc/systemd/system/diun-radar.timer
@@ -62,14 +64,15 @@ jobs:
             test ! -e /usr/local/lib/diun-radar/diun-versions.py
             test -d /usr/local/lib/diun-radar/backup-1
             /usr/lib/cockpit-image-updates/diun-deps.sh check | python3 -c "import json, sys; json.load(sys.stdin)"
-            apt-get remove -y -qq cockpit-image-updates > /dev/null
+            apt-get remove -y -qq cockpit-image-update-monitor > /dev/null
             test ! -e /usr/share/cockpit/image-updates'
           docker run --rm -v "$PWD/dist:/dist:ro" fedora:43 sh -ec '
             dnf install -y -q /dist/*.rpm
-            rpm -V cockpit-image-updates
+            rpm -V cockpit-image-update-monitor
+            rpm -q --conflicts cockpit-image-update-monitor | grep -qx cockpit-image-updates
             test -f /usr/share/cockpit/image-updates/manifest.json
-            rpm -ql cockpit-image-updates | grep -qx /usr/share/doc/cockpit-image-updates/CC-BY-4.0-Font-Awesome.txt
-            dnf remove -y -q cockpit-image-updates
+            rpm -ql cockpit-image-update-monitor | grep -qx /usr/share/doc/cockpit-image-update-monitor/CC-BY-4.0-Font-Awesome.txt
+            dnf remove -y -q cockpit-image-update-monitor
             test ! -e /usr/lib/cockpit-image-updates'
       - name: Browser for the preview
         run: python -m playwright install --with-deps chromium

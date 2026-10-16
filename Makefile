@@ -1,4 +1,4 @@
-# Image updates for Cockpit
+# Image Update Monitor, a Cockpit add-on for Docker image updates
 # SPDX-License-Identifier: Apache-2.0
 #
 # The paths are fixed (the page, the helpers and the units refer to each other by them);
@@ -55,11 +55,11 @@ stage:
 	$(MAKE) install DESTDIR=build/root
 	install -D -m 644 packaging/de.azentrius.image_updates.metainfo.xml \
 		build/root/usr/share/metainfo/de.azentrius.image_updates.metainfo.xml
-	install -D -m 644 NOTICE build/root/usr/share/doc/cockpit-image-updates/copyright
-	install -m 644 LICENSE build/root/usr/share/doc/cockpit-image-updates/LICENSE
-	install -m 644 LICENSES/CC-BY-4.0-Font-Awesome.txt build/root/usr/share/doc/cockpit-image-updates/
+	install -D -m 644 NOTICE build/root/usr/share/doc/cockpit-image-update-monitor/copyright
+	install -m 644 LICENSE build/root/usr/share/doc/cockpit-image-update-monitor/LICENSE
+	install -m 644 plugin/CC-BY-4.0-Font-Awesome.txt build/root/usr/share/doc/cockpit-image-update-monitor/
 
-# cockpit-image-updates_VERSION-1_all.deb and cockpit-image-updates-VERSION-1.noarch.rpm in
+# cockpit-image-update-monitor_VERSION-1_all.deb and cockpit-image-update-monitor-VERSION-1.noarch.rpm in
 # dist/ (needs dpkg-deb and rpmbuild), reproducible.
 packages: stage
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) sh tools/build-packages.sh build/root $(VERSION) dist

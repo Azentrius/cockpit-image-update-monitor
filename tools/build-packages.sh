@@ -9,6 +9,8 @@
 #   packaging/scripts/configure   after every install and upgrade
 #   packaging/scripts/remove      before the package is removed (not on upgrades)
 #   packaging/scripts/removed     after the package was removed (not on upgrades)
+# Optional in package.conf: CONFLICTS, one package per line that this package replaces under a new
+# name; installing it then removes those (Conflicts in both formats).
 # Reproducible: all times are SOURCE_DATE_EPOCH. Needs dpkg-deb and rpmbuild.
 # The same file in every Azentrius Cockpit add-on; change it in all of them together.
 # SPDX-License-Identifier: Apache-2.0
@@ -21,6 +23,7 @@ out=$(cd "$3" && pwd)
 epoch=${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH must be set}
 here=$(pwd)
 NAME='' SUMMARY='' DESCRIPTION='' HOMEPAGE='' MAINTAINER='' LICENSE='' DEB_DEPENDS='' RPM_REQUIRES='' FILES=''
+CONFLICTS=''
 # shellcheck source=/dev/null
 . "$here/packaging/package.conf"
 for var in NAME SUMMARY DESCRIPTION HOMEPAGE MAINTAINER LICENSE DEB_DEPENDS RPM_REQUIRES FILES; do
@@ -45,6 +48,7 @@ mkdir -m 755 "$work/deb/DEBIAN"
     echo "Maintainer: $MAINTAINER"
     echo "Installed-Size: $(du -sk "$root" | cut -f1)"
     echo "Depends: $(printf '%s\n' "$DEB_DEPENDS" | paste -sd ',' - | sed 's/,/, /g')"
+    [ -z "$CONFLICTS" ] || echo "Conflicts: $(printf '%s\n' "$CONFLICTS" | paste -sd ',' - | sed 's/,/, /g')"
     echo "Section: admin"
     echo "Priority: optional"
     echo "Homepage: $HOMEPAGE"
@@ -84,6 +88,7 @@ rpm_script() {
     echo "URL: $HOMEPAGE"
     echo "BuildArch: noarch"
     printf '%s\n' "$RPM_REQUIRES" | sed 's/^/Requires: /'
+    [ -z "$CONFLICTS" ] || printf '%s\n' "$CONFLICTS" | sed 's/^/Conflicts: /'
     echo
     echo "%description"
     printf '%s\n' "$DESCRIPTION" | fold -s -w 78 | sed 's/ *$//'

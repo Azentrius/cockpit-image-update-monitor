@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# Dependency check / installer for the Cockpit Image-Updates plugin.
+# Dependency check / installer for Image Update Monitor, the Cockpit add-on.
 #
 # Called by the plugin via cockpit.spawn with a FIXED set of arguments only:
 #   diun-deps.sh check            one JSON object on stdout (read-only)
@@ -12,7 +12,7 @@
 # Everything else is rejected. Existing files are never overwritten.
 #
 # Lives in /usr/lib/cockpit-image-updates (root-owned, from the package
-# cockpit-image-updates, never mounted into a container), like everything else
+# cockpit-image-update-monitor, never mounted into a container), like everything else
 # Cockpit executes as root for this plugin. The units come with the package.
 #
 # Environment:
@@ -326,8 +326,8 @@ start_diun() {
 # need_unit NAME: the unit must come with the package.
 need_unit() {
     [ -f "$UNIT_DIR/$1" ] || die 2 \
-        "Unit $UNIT_DIR/$1 fehlt (Paket cockpit-image-updates neu installieren)." \
-        "Unit $UNIT_DIR/$1 is missing (reinstall the package cockpit-image-updates)."
+        "Unit $UNIT_DIR/$1 fehlt (Paket cockpit-image-update-monitor neu installieren)." \
+        "Unit $UNIT_DIR/$1 is missing (reinstall the package cockpit-image-update-monitor)."
 }
 
 install_radar() {
