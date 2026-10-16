@@ -56,6 +56,9 @@ its dump before an update too.
 - **Shared design files from Cron Jobs:** `azentrius.css` with `az-page-title--dot` and the
   project-page classes, `icons.js` with the full attribution, `tools/build-packages.sh` with `CONFLICTS`.
   The italic subset now holds the letters of "Monitor".
+- **Tables no longer widen the page:** the table wrapper is positioned (`position: relative` on
+  `.az-table-wrap`, from the shared `azentrius.css`), so the hidden helper texts in a table head stay inside
+  it when the table scrolls sideways.
 - **Fix: buttons out of line.** A row without “Change version” (an image whose version is unknown)
   had its Update button further right than the rows above and below, and a history entry with
   “Roll back” but no kept output had its button further right too. A missing icon button now keeps its

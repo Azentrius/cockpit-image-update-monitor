@@ -251,7 +251,9 @@ code, .az-mono { font-family: var(--az-font-code); font-size: 0.875rem; }
 }
 
 /* ---------- table ---------- */
-.az-table-wrap { overflow-x: auto; }
+/* Positioned, so helpers placed absolutely (.az-sr in the head, the hidden thead of the stacked view) stay
+   inside the scrolling wrapper and do not widen the page once the table scrolls sideways. */
+.az-table-wrap { position: relative; overflow-x: auto; }
 .az-table { inline-size: 100%; border-collapse: collapse; font-size: 14px; }
 .az-table th, .az-table td {
   padding: var(--space-md);
