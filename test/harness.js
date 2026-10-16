@@ -60,9 +60,8 @@ async function scenario(name, { files = fixtures, spawnOk = true, now = "2026-10
     console.log("cols  :", heads.join(" | "));
     [...d.querySelectorAll("#dm-rows tr")].forEach((tr) => {
         const c = [...tr.querySelectorAll("td")];
-        const chips = [...c[4].querySelectorAll(".dm-chip")].map((x) =>
-            `${x.className.split(" ").slice(1).map((k) => k.replace("dm-chip-", "")).join("+")}:${x.textContent}`);
-        const verText = chips.length ? chips.join(", ") : c[4].textContent.trim();
+        const levels = [...c[4].querySelectorAll(".dm-level")].map((x) => `${x.dataset.reach}:${x.textContent}`);
+        const verText = levels.length ? levels.join(", ") : c[4].textContent.trim();
         const inst = c[3].querySelector("[title]");
         console.log(
             c[0].textContent.padEnd(24),

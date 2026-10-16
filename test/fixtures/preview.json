@@ -93,29 +93,29 @@
    {
     "ref": "postgres:rollback-20261012-031500",
     "id": "sha256:old",
-    "size": "275MB",
-    "created": "2026-10-12 03:15:00 +0200 CEST",
+    "size": 274993152,
+    "created": "2026-10-12T03:15:00+02:00",
     "in_use": false
    },
    {
     "ref": "postgres:rollback-20260901-031500",
     "id": "sha256:older",
-    "size": "274MB",
-    "created": "2026-09-01 03:15:00 +0200 CEST",
+    "size": 273891328,
+    "created": "2026-09-01T03:15:00+02:00",
     "in_use": false
    },
    {
     "ref": "actualbudget/actual-server:rollback-20261011-180000",
     "id": "sha256:actual-old",
-    "size": "212MB",
-    "created": "2026-10-11 18:00:00 +0200 CEST",
+    "size": 212123648,
+    "created": "2026-10-11T18:00:00+02:00",
     "in_use": false
    },
    {
     "ref": "ollama/ollama:rollback-20261011-120000",
     "id": "sha256:x",
-    "size": "3.4GB",
-    "created": "2026-10-11 12:00:00 +0200 CEST",
+    "size": 3650722201,
+    "created": "2026-10-11T12:00:00+02:00",
     "in_use": true
    }
   ],

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Columns "Configured / Installed / Newest version" (2026-10-12):
 // installed version from inventory (tag / env) or radar (label / digest),
-// pulled-but-not-rolled-out arrow, reachable vs. outlined chips, unknown.
+// pulled-but-not-rolled-out arrow, the level labels (Update button, another
+// tag, a database migration), unknown.
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
@@ -11,6 +12,7 @@ const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
 const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8").replace(/<script[^>]*><\/script>/g, "");
 const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
+const icons = fs.readFileSync(path.join(PLUGIN, "icons.js"), "utf8");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const radar = JSON.parse(fs.readFileSync(path.join(FIX, "versions2.json"), "utf8"));
 
@@ -31,6 +33,7 @@ function boot(language, files) {
         },
         transport: { wait() {} },
     };
+    w.eval(icons);
     w.eval(js);
     return w.document;
 }
@@ -38,6 +41,9 @@ const FILES = { "/var/lib/diun-radar/versions.json": radar, "/var/lib/diun/event
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const row = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector(".dm-name").textContent === name);
 const cells = (tr) => [...tr.querySelectorAll("td")];
+const levels = (td) => [...td.querySelectorAll(".dm-level")];
+const tipOf = (lv) => (lv.closest("button.dm-level-btn") || lv).title;
+const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s.getAttribute("data-icon") : null; };
 
 (async () => {
     const d = boot("de", FILES);
@@ -61,26 +67,31 @@ const cells = (tr) => [...tr.querySelectorAll("td")];
     assert(c[3].querySelector(".dm-ver").title.includes("Registry-Tag 0.30.11"));
     assert(c[3].querySelector(".dm-ver").title.includes("Digest: c484b703176a"));
 
-    // pinned tag: newer versions only via a changed tag -> outlined chips
+    // pinned tag: newer versions only via a changed tag -> neutral labels
     c = cells(row(d, "plausible"));
-    const manual = [...c[4].querySelectorAll(".dm-chip")].map((x) => x.classList.contains("dm-chip-manual"));
-    console.log("plausible chips manual:", manual, "|", c[4].querySelector(".dm-chip").title.replace(/\n/g, " / "));
-    assert.deepStrictEqual(manual.join(), "true,true");
-    assert(c[4].querySelector(".dm-chip").title.includes("derzeit v2.1.4"));
+    const reach = levels(c[4]).map((x) => x.dataset.reach);
+    console.log("plausible levels:", reach, "|", tipOf(levels(c[4])[0]).replace(/\n/g, " / "));
+    assert.deepStrictEqual(reach.join(), "tag,tag");
+    assert(tipOf(levels(c[4])[0]).includes("derzeit v2.1.4"));
+    assert(levels(c[4]).every((x) => x.className === "az-label dm-level" && !iconOf(x)), "another tag: neutral, no icon");
 
-    // latest: all levels reachable with the Update button -> filled
+    // latest: all levels reachable with the Update button -> hints
     c = cells(row(d, "docuseal"));
-    assert(![...c[4].querySelectorAll(".dm-chip")].some((x) => x.classList.contains("dm-chip-manual")));
-    assert(c[4].querySelector(".dm-chip").title.includes("Der Tag latest liefert das per Update-Knopf"));
+    assert(levels(c[4]).length && levels(c[4]).every((x) => x.dataset.reach === "update"));
+    assert(levels(c[4]).every((x) => x.className === "az-label az-label--info dm-level" && iconOf(x) === "info-circle"));
+    assert(tipOf(levels(c[4])[0]).includes("Der Tag latest liefert das per Update-Knopf"));
 
-    // 16-alpine: minor reachable (filled), DB major grey info
+    // 16-alpine: minor reachable (hint), DB major without judgement (ban)
     c = cells(row(d, "calcom-db"));
-    const kinds = [...c[4].querySelectorAll(".dm-chip")].map((x) => x.className);
-    console.log("calcom-db chips:", kinds.join(" / "));
-    assert.deepStrictEqual(kinds.join("|"), "dm-chip dm-chip-minor|dm-chip dm-chip-info");
+    const kinds = levels(c[4]).map((x) => `${x.className}:${iconOf(x)}:${x.dataset.level}:${x.dataset.reach}`);
+    console.log("calcom-db levels:", kinds.join(" / "));
+    assert.deepStrictEqual(kinds, ["az-label az-label--info dm-level:info-circle:minor:update",
+                                   "az-label dm-level:ban:major:migration"]);
+    assert(levels(c[4])[0].textContent.startsWith("Minor "), "the level as a word");
 
-    // up to date shows the version with a check mark
-    assert.strictEqual(cells(row(d, "calcom"))[4].textContent.trim(), "✓ 6.2.0");
+    // up to date shows the version with check-circle
+    const ok = cells(row(d, "calcom"))[4];
+    assert.deepStrictEqual([ok.textContent.trim(), iconOf(ok)], ["6.2.0", "check-circle"]);
 
     // a floating tag: what it points to in the registry right now
     const tagNow = (n) => { const x = cells(row(d, n))[2]; return [x.textContent.trim(), (x.querySelector(".dm-tagnow") || {}).title]; };
@@ -100,8 +111,11 @@ const cells = (tr) => [...tr.querySelectorAll("td")];
 
     // stale registry data is marked
     assert(cells(row(d, "diun-socket-proxy"))[4].textContent.includes("(Stand älter)"));
-    assert(!d.getElementById("dm-legend").hidden, "legend visible");
-    console.log("legend:", d.getElementById("dm-legend").textContent.replace(/\s+/g, " ").trim());
+    const legend = d.getElementById("dm-legend");
+    assert(!legend.hidden, "legend visible");
+    console.log("legend:", legend.textContent.replace(/\s+/g, " ").trim());
+    assert.deepStrictEqual([...legend.querySelectorAll(".az-label")].map((x) => `${x.className}:${iconOf(x)}`),
+        ["az-label az-label--info:info-circle", "az-label:null", "az-label:ban"], "the legend shows the same labels");
 
     // No registry shows the image (built or tagged on the server, 2026-10-16), or
     // a registry error without earlier data: said so, and with nothing compared

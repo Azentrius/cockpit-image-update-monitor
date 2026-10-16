@@ -358,7 +358,10 @@ rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_sta
 `backups` returns the last 30 operations, with `can_rollback`, `log` and `rollback_log` (whether output
 is kept) added and without paths and image IDs.
 On top come `dumps[]` (`path`, `project`, `container`, `size`, `mtime`), `images[]` (`ref`, `id`,
-`size`, `created`, `in_use`), `dump_bytes`, `free_bytes`, `dir` and `cleanup`:
+`size`, `created`, `in_use`), `dump_bytes`, `free_bytes`, `dir` and `cleanup`. An image's `size` is in
+bytes (`docker image inspect`, `null` if Docker does not say) and `created` is ISO 8601
+(`2026-10-12T03:15:00+02:00`, empty if unreadable); up to 0.12.2 they were Docker's text (`275MB`,
+`2026-10-12 03:15:00 +0200 CEST`), which the page still shows as it is:
 
 ```json
 "cleanup": {"keep_dumps": 3, "image_days": 14, "file": "/etc/image-updates.conf",

@@ -41,12 +41,14 @@
                     aria-controls="dm-tab-backups" data-tab="backups" data-i18n="tab.backups">Backups &amp; dumps</button>
         </nav>
 
-        <!-- Messages for the whole page: right under the tabs, in every tab. -->
+        <!-- Messages for the whole page: right under the tabs, in every tab
+             (role="alert" for errors, set by diun.js). -->
         <div id="dm-status" class="az-alert dm-status" role="status" hidden></div>
 
-        <!-- Requirements: only shown when something is missing. -->
+        <!-- Requirements: only shown when something is missing (an error when
+             Docker is, see depsLevel in diun.js). -->
         <section id="dm-deps" class="az-alert az-alert--warning dm-deps" hidden aria-labelledby="dm-deps-title">
-            <span class="az-alert__icon"><span data-icon="exclamation-triangle"></span></span>
+            <span id="dm-deps-icon" class="az-alert__icon"><span data-icon="exclamation-triangle"></span></span>
             <h2 id="dm-deps-title" class="az-alert__title" data-i18n="deps.title">Missing requirements</h2>
             <div class="az-alert__body">
                 <p id="dm-deps-intro" class="dm-deps-intro"></p>
@@ -94,22 +96,28 @@
                     </table>
                 </div>
 
-                <!-- What the chip styles in "Newest version" mean. -->
+                <!-- What the level labels in "Newest version" mean. -->
                 <p id="dm-legend" class="dm-legend" hidden>
-                    <span class="dm-legend-item"><span class="dm-chip dm-chip-minor">Minor</span>
-                        <span data-i18n="legend.filled">reachable with the Update button</span></span>
-                    <span class="dm-legend-item"><span class="dm-chip dm-chip-minor dm-chip-manual">Minor</span>
-                        <span data-i18n="legend.outlined">needs a different tag in the compose file</span></span>
-                    <span class="dm-legend-item"><span class="dm-chip dm-chip-info">Major</span>
-                        <span data-i18n="legend.dashed">database major – needs a migration</span></span>
+                    <span class="dm-legend-item"><span class="az-label az-label--info"><span data-icon="info-circle"></span>Minor</span>
+                        <span data-i18n="legend.update">reachable with the Update button</span></span>
+                    <span class="dm-legend-item"><span class="az-label">Minor</span>
+                        <span data-i18n="legend.tag">needs a different tag in the compose file</span></span>
+                    <span class="dm-legend-item"><span class="az-label"><span data-icon="ban"></span>Major</span>
+                        <span data-i18n="legend.migration">database major – needs a migration</span></span>
                 </p>
 
-                <p id="dm-empty" class="dm-card-empty" hidden data-i18n="empty">No running containers found.</p>
+                <div id="dm-empty" class="az-empty" hidden>
+                    <span class="az-empty__icon"><span data-icon="info-circle"></span></span>
+                    <h3 id="dm-empty-title" class="az-empty__title" data-i18n="empty.title">No running containers</h3>
+                    <p id="dm-empty-body" class="az-empty__body" data-i18n="empty.body">Docker lists no running container on this server. Containers you start appear here after Refresh.</p>
+                </div>
             </section>
         </section>
 
         <!-- ===================== Tab: Backups ===================== -->
         <section id="dm-tab-backups" class="dm-panel" role="tabpanel" aria-labelledby="dm-tab-btn-backups" hidden>
+            <!-- The backups could not be loaded: above the cards they concern. -->
+            <div id="dm-bk-error" class="az-alert az-alert--danger" role="alert" hidden></div>
             <div class="dm-bk-head">
                 <p id="dm-bk-summary" class="dm-bk-summary"></p>
                 <p class="dm-bk-note" data-i18n="bk.note">Restoring a dump is deliberately a manual step. Dump files are readable by root only.</p>
@@ -148,7 +156,11 @@
                     </tr></thead>
                     <tbody id="dm-ops"></tbody>
                 </table></div>
-                <p id="dm-ops-empty" class="dm-card-empty" hidden data-i18n="bk.noOps">No updates yet.</p>
+                <div id="dm-ops-empty" class="az-empty" hidden>
+                    <span class="az-empty__icon"><span data-icon="history"></span></span>
+                    <h3 class="az-empty__title" data-i18n="bk.noOps">No updates yet</h3>
+                    <p class="az-empty__body" data-i18n="bk.noOpsBody">Updates, version changes and rollbacks started on this page are listed here.</p>
+                </div>
             </section>
 
             <section class="az-card" aria-labelledby="dm-dumps-title">
@@ -166,7 +178,11 @@
                     </tr></thead>
                     <tbody id="dm-dumps"></tbody>
                 </table></div>
-                <p id="dm-dumps-empty" class="dm-card-empty" hidden data-i18n="bk.noDumps">No dumps.</p>
+                <div id="dm-dumps-empty" class="az-empty" hidden>
+                    <span class="az-empty__icon"><span data-icon="copy"></span></span>
+                    <h3 class="az-empty__title" data-i18n="bk.noDumps">No database dumps</h3>
+                    <p class="az-empty__body" data-i18n="bk.noDumpsBody">An update dumps the databases of its project first; the dumps are kept here.</p>
+                </div>
             </section>
 
             <section class="az-card" aria-labelledby="dm-images-title">
@@ -183,13 +199,18 @@
                     </tr></thead>
                     <tbody id="dm-images"></tbody>
                 </table></div>
-                <p id="dm-images-empty" class="dm-card-empty" hidden data-i18n="bk.noImages">No rollback images.</p>
+                <div id="dm-images-empty" class="az-empty" hidden>
+                    <span class="az-empty__icon"><span data-icon="copy"></span></span>
+                    <h3 class="az-empty__title" data-i18n="bk.noImages">No rollback images</h3>
+                    <p class="az-empty__body" data-i18n="bk.noImagesBody">Before every update the image that runs is kept as a rollback copy; the copies are listed here.</p>
+                </div>
             </section>
         </section>
 
         <footer class="az-signature">
-            <a class="az-signature__mark" href="https://github.com/Azentrius/cockpit-image-update-monitor" target="_blank" rel="noopener noreferrer">Azentrius</a>
-            <span class="az-signature__meta"><span id="dm-sig-version">Image updates monitor</span><span id="dm-sig-host" hidden></span></span>
+            <a class="az-signature__mark" href="https://azentrius.de" target="_blank" rel="noopener noreferrer">Azentrius</a>
+            <span class="az-signature__meta"><span id="dm-sig-version">Image updates monitor</span><span id="dm-sig-host" hidden></span>
+                <a href="https://github.com/Azentrius/cockpit-image-update-monitor" target="_blank" rel="noopener noreferrer" data-i18n="sig.source">Source code</a></span>
         </footer>
     </div>
 

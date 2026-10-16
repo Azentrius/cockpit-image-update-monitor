@@ -18,9 +18,13 @@ plugin/DMSerifDisplay-Italic.woff2, subset to the name suffix "monitor")
   Reserved Font Name 'Source'. Copyright 2019 Google LLC.
   SIL Open Font License 1.1, see plugin/OFL.txt
 
-Icons (plugin/icons.js): Font Awesome Free 5 (Solid) by Fonticons, Inc., as
-  shipped by PatternFly. Creative Commons Attribution 4.0 International,
-  https://fontawesome.com/license/free
+Icons (plugin/icons.js): Font Awesome Free 5.15.4 (Solid) by Fonticons, Inc.
+  (https://fontawesome.com), as shipped in @patternfly/react-icons 6.4.0
+  (Red Hat, Inc.); the path data is unchanged.
+  Creative Commons Attribution 4.0 International (CC BY 4.0), see
+  LICENSES/CC-BY-4.0-Font-Awesome.txt (installed as
+  /usr/share/doc/cockpit-image-updates/CC-BY-4.0-Font-Awesome.txt) and
+  https://creativecommons.org/licenses/by/4.0/
 
 The page uses Red Hat Mono from Cockpit's own static files; it is not part of
 this project.

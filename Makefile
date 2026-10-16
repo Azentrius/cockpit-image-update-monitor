@@ -57,6 +57,7 @@ stage:
 		build/root/usr/share/metainfo/de.azentrius.image_updates.metainfo.xml
 	install -D -m 644 NOTICE build/root/usr/share/doc/cockpit-image-updates/copyright
 	install -m 644 LICENSE build/root/usr/share/doc/cockpit-image-updates/LICENSE
+	install -m 644 LICENSES/CC-BY-4.0-Font-Awesome.txt build/root/usr/share/doc/cockpit-image-updates/
 
 # cockpit-image-updates_VERSION-1_all.deb and cockpit-image-updates-VERSION-1.noarch.rpm in
 # dist/ (needs dpkg-deb and rpmbuild), reproducible.

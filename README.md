@@ -61,7 +61,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 |---|---|
 | Configured | The tag as written in the compose file or with `docker run`, e.g. `latest`, `16-alpine`, `v2.1.4`. For tags without a full version it adds what the tag points to in the registry right now: `latest = 6.0.2`. |
 | Installed | The version that really runs, e.g. `0.30.11`. The tooltip names the source (see below) and the digest. `16.14 → 16.15` means: 16.15 is already on the server but does not run yet. `?` means: cannot be determined, or not covered by the radar yet. |
-| Newest version | Newer versions relative to the **installed** version, as patch / minor / major chips. `✓ 6.2.0` = the installed version is the newest. `newest: 6.0.2` appears when the installed version is unknown. `not in a registry`: no registry shows the image, because it was built or tagged on the server or is private; there is nothing newer to find. |
+| Newest version | Newer versions relative to the **installed** version, one label per level (patch / minor / major, the level as a word). A check mark (`check-circle`) with `6.2.0` = the installed version is the newest. `newest: 6.0.2` appears when the installed version is unknown. `not in a registry`: no registry shows the image, because it was built or tagged on the server or is private; there is nothing newer to find. |
 | Status | see the next table |
 
 **Status**
@@ -69,8 +69,8 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | Label | Meaning | Button |
 |---|---|---|
 | ⓘ Update available | Diun reported a new build of **the same tag**. | Update, Dismiss (✓) |
-| ⓘ Roll-out pending | The newer image is already local, the container still runs the old one. | Roll out |
-| ⓘ New version | The radar knows a newer version. The chip style shows whether the Update button delivers it. | – |
+| ⓘ Roll-out pending | The newer image is already local, the container still runs the old one. | Roll out image |
+| ⓘ New version | The radar knows a newer version. The level labels show whether the Update button delivers it. | – |
 | ✓ Up to date | The radar compared the installed version with the registry and knows nothing newer. | – |
 | ⊘ Unknown | Installed version cannot be determined (e.g. `latest` from a development build), or the radar could not compare it: the image is in no registry, or the registry did not answer and there is no earlier result. | – |
 
@@ -80,16 +80,17 @@ The labels use the shared status language: a hint in violet with `info-circle`, 
 Update buttons exist only for containers started with **docker compose** (“manual only” otherwise).
 Such rows also get **Change version** (⇄) when the installed version is known and the radar has versions to offer for it.
 
-**Chips in “Newest version”**
+**Levels in “Newest version”**
 
-| Style | Meaning |
+Each level is a label with the level as a word (Patch, Minor, Major) and the version. Patch, minor and major look the same; how the version can be reached decides the label, and the tooltip says it in words.
+
+| Label | Meaning |
 |---|---|
-| filled | The configured tag delivers this version **with the Update button** (e.g. `latest` → everything, `16-alpine` → 16.x). |
-| outlined | Reachable only by **changing the tag in the compose file** (e.g. `v2.1.4` → `v2.1.5`). A click on the chip opens [*Change version*](#change-version-stage-2) with that tag. |
-| dashed, grey | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. |
-| colour | patch green, minor neutral with bronze (light) or gold (dark) text, major red |
+| hint (`info-circle`) | The configured tag delivers this version **with the Update button** (e.g. `latest` → everything, `16-alpine` → 16.x). |
+| without judgement, no icon | Reachable only by **changing the tag in the compose file** (e.g. `v2.1.4` → `v2.1.5`). A click on the label opens [*Change version*](#change-version-stage-2) with that tag. |
+| without judgement, `ban` | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. |
 
-> **Careful with `latest` and similar tags:** they deliver major versions on update too. If Nextcloud `apache` shows a filled red “Major 35.0.1”, a click on *Update* jumps from 34 to 35. Read the release notes before such jumps (Nextcloud allows only one major step at a time).
+> **Careful with `latest` and similar tags:** they deliver major versions on update too. If Nextcloud `apache` shows “Major 35.0.1” as a hint, a click on *Update* jumps from 34 to 35. Read the release notes before such jumps (Nextcloud allows only one major step at a time).
 
 ---
 
@@ -210,7 +211,7 @@ update dialog repeats the cause and enables *Update* only after a tick box. A ne
 
 ## Change version (stage 2)
 
-Another tag in the compose file, chosen in the page: **Change version** (⇄) in the row, or a click on an outlined chip.
+Another tag in the compose file, chosen in the page: **Change version** (⇄) in the row, or a click on a level label that needs a different tag.
 
 | Group in the field | Example | What the tag does |
 |---|---|---|
@@ -259,7 +260,7 @@ If the project lies in a git repository, the dialog says so; the add-on never co
 | Unused rollback images removed after | 14 days | `ROLLBACK_IMAGE_DAYS` (`0` = never) |
 
 - **Never deleted:** the dumps of each project's last update, rollback images a container (running or stopped) still uses, files in the dump folder that the add-on did not name.
-- **When:** after every successful update, for that project's dumps and that image's rollback copies only; daily for everything once `diun-cleanup.timer` is set up (button in the tab, or `diun-deps.sh install cleanup`); on **“Clean up now”** in the tab.
+- **When:** after every successful update, for that project's dumps and that image's rollback copies only; daily for everything once `diun-cleanup.timer` is set up (button in the tab, or `diun-deps.sh install cleanup`); on **“Clean up dumps and images”** in the tab.
 - **Preview:** the tab names the rules and marks every dump and image the next run would delete. On the console: `sudo /usr/lib/cockpit-image-updates/diun-update.py cleanup --dry-run`.
 - **The file** is optional, root-owned and not writable by others, with plain `KEY=VALUE` lines:
 
@@ -619,5 +620,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 [Apache License 2.0](LICENSE).
 
 The add-on contains no code from Cockpit (LGPL-2.1+); it only uses Cockpit's API `cockpit.js` at runtime, which Cockpit itself ships.
+
+Third-party material keeps its own license, see [NOTICE](NOTICE): the fonts DM Sans and DM Serif Display (SIL Open Font License 1.1, [plugin/OFL.txt](plugin/OFL.txt)) and the icons, Font Awesome Free 5.15.4 by Fonticons, Inc. as shipped in `@patternfly/react-icons` 6.4.0 (CC BY 4.0, [LICENSES/CC-BY-4.0-Font-Awesome.txt](LICENSES/CC-BY-4.0-Font-Awesome.txt)). The packages install both license texts with the add-on.
 
 Please report security issues privately, see [SECURITY.md](SECURITY.md).

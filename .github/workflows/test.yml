@@ -54,6 +54,7 @@ jobs:
             test -f /usr/lib/systemd/system/diun-radar.timer
             test -f /usr/share/cockpit/image-updates/manifest.json
             test -f /usr/share/metainfo/de.azentrius.image_updates.metainfo.xml
+            dpkg -L cockpit-image-updates | grep -qx /usr/share/doc/cockpit-image-updates/CC-BY-4.0-Font-Awesome.txt
             test ! -e /usr/share/cockpit/diun
             test ! -e /etc/systemd/system/diun-radar.service
             test ! -e /etc/systemd/system/diun-radar.timer
@@ -67,6 +68,7 @@ jobs:
             dnf install -y -q /dist/*.rpm
             rpm -V cockpit-image-updates
             test -f /usr/share/cockpit/image-updates/manifest.json
+            rpm -ql cockpit-image-updates | grep -qx /usr/share/doc/cockpit-image-updates/CC-BY-4.0-Font-Awesome.txt
             dnf remove -y -q cockpit-image-updates
             test ! -e /usr/lib/cockpit-image-updates'
       - name: Browser for the preview

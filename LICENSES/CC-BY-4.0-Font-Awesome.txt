@@ -1,0 +1,19 @@
+Font Awesome Free 5.15.4 - icons
+
+Icons by Fonticons, Inc. (https://fontawesome.com), as shipped in
+@patternfly/react-icons 6.4.0 (Red Hat, Inc.).
+
+Used in the Azentrius design system for every icon in assets/Icons/ and
+android/res/drawable/ic_az_*.xml except "pending", which is a PatternFly
+icon (see MIT-PatternFly-Icons.txt).
+
+Changes: the path data is unchanged. The icons were saved as single-colour
+SVG files (fill #151515, for preview only) and converted to Android vector
+drawables (24 dp, 2 dp padding, black fill for tinting).
+
+Licensed under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
+Legal code: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Font Awesome Free license overview: https://fontawesome.com/license/free
+(Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License)

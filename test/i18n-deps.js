@@ -109,7 +109,8 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     assert(!panel.hidden && items.length === 3);
     const btns = [...b.d.querySelectorAll(".dm-dep button")].map((x) => `${x.dataset.verb}:${x.dataset.target}:${x.textContent}`);
     console.log("  buttons:", btns.join(", "));
-    assert.deepStrictEqual(btns, ["start:diun:Starten", "install:skopeo:Installieren", "install:radar:Einrichten"]);
+    assert.deepStrictEqual(btns, ["start:diun:Diun starten", "install:skopeo:skopeo installieren", "install:radar:Radar einrichten"]);
+    assert(panel.classList.contains("az-alert--warning") && !panel.classList.contains("az-alert--danger"), "missing parts: a warning");
 
     // 4. Install skopeo: dialog, confirm, streamed log, success, re-check
     b.d.querySelector('.dm-dep button[data-target="skopeo"]').click();
@@ -117,6 +118,9 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     assert(dlg.hasAttribute("open"));
     console.log("\nDialog:", b.d.getElementById("dm-dialog-title").textContent, "|",
                 b.d.querySelector("#dm-dialog-confirm .dm-btn-label").textContent);
+    assert.strictEqual(b.d.querySelector("#dm-dialog-confirm .dm-btn-label").textContent, "skopeo installieren");
+    assert.deepStrictEqual([...b.d.querySelectorAll("#dm-dialog-desc code")].map((x) => x.textContent), ["skopeo"],
+                           "package names, paths and commands in the text as code");
     const checksBefore = b.calls.filter((c) => c.cmd[1] === "check").length;
     currentDeps = clone(missing); currentDeps.skopeo = DEPS_OK.skopeo;   // after install
     b.d.getElementById("dm-dialog-confirm").click();
@@ -141,18 +145,33 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     assert(!dlg.hasAttribute("open"));
 
     // 5. Failures: exit code, missing admin rights (English)
-    for (const [fail, expect] of [[{ exit_status: 3 }, "Failed (exit code 3)."],
-                                  [{ exit_status: 77 }, "Denied: this needs administrative access in Cockpit (switch it on at the top of Cockpit)."],
-                                  [{ problem: "access-denied" }, "Denied: this needs administrative access in Cockpit (switch it on at the top of Cockpit)."]]) {
+    const DENIED = "Denied: this needs administrative access. Switch it on at the top of Cockpit.";
+    for (const [fail, expect] of [[{ exit_status: 3 }, "The action failed (exit code 3). The output above shows why."],
+                                  [{ exit_status: 77 }, DENIED],
+                                  [{ problem: "access-denied" }, DENIED]]) {
         const c = boot({ language: "en", deps: missing, install: { chunks: ["Aborted: /opt/diun already exists – nothing overwritten.\n"], fail } });
         await sleep(60);
         c.d.querySelector('.dm-dep button[data-target="diun"]').click();
+        assert.deepStrictEqual([...c.d.querySelectorAll("#dm-dialog-desc code")].map((x) => x.textContent),
+                               ["/opt/diun", "docker compose up -d"]);
         c.d.getElementById("dm-dialog-confirm").click();
         await sleep(100);
-        const res = c.d.getElementById("dm-dialog-result").textContent;
-        console.log("fail", JSON.stringify(fail).padEnd(26), "->", res);
-        assert.strictEqual(res, expect);
+        const res = c.d.getElementById("dm-dialog-result");
+        console.log("fail", JSON.stringify(fail).padEnd(26), "->", res.textContent);
+        assert.strictEqual(res.textContent, expect);
+        assert(res.classList.contains("is-error"));
     }
+
+    // Docker unreachable: an error (label and panel), the hint is plain text
+    const dk = clone(missing); dk.docker = { state: "no-daemon" };
+    const g = boot({ language: "en", deps: dk });
+    await sleep(60);
+    const docker = g.d.querySelector(".dm-dep");
+    console.log("\ndocker:", docker.textContent.replace(/\s+/g, " ").trim());
+    assert.deepStrictEqual([docker.querySelector(".az-label").className, docker.querySelector(".az-label").textContent],
+                           ["az-label az-label--danger", "unreachable"]);
+    assert(g.d.getElementById("dm-deps").classList.contains("az-alert--danger"), "Docker missing: the panel is an error");
+    assert.strictEqual(docker.querySelector(".dm-dep-hint").textContent, "Install or start Docker on the server yourself.");
 
     // 6. Not admin -> single hint instead of a misleading list
     const na = clone(DEPS_OK); na.root = false; na.docker.state = "no-daemon";

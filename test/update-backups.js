@@ -35,8 +35,8 @@ const BACKUPS = {
     dir: "/var/backups/image-updates", free_bytes: 40 * 2 ** 30, dump_bytes: 3 * 2 ** 20,
     dumps: [{ path: "glitchtip/20261012-031500_glitchtip-postgres.sql.gz", project: "glitchtip",
               container: "glitchtip-postgres", size: 3 * 2 ** 20, mtime: 1791768900 }],
-    images: [{ ref: "postgres:rollback-20261012-031500", id: "sha256:old", size: "275MB", created: "2026-10-12 03:15:00 +0200 CEST", in_use: false },
-             { ref: "ollama/ollama:rollback-20261011-120000", id: "sha256:x", size: "3.4GB", created: "2026-10-11 12:00:00 +0200 CEST", in_use: true }],
+    images: [{ ref: "postgres:rollback-20261012-031500", id: "sha256:old", size: 274993152, created: "2026-10-12T03:15:00+02:00", in_use: false },
+             { ref: "ollama/ollama:rollback-20261011-120000", id: "sha256:x", size: 3650722201, created: "2026-10-11T12:00:00+02:00", in_use: true }],
     ops: [{ id: "20261012-031500-glitchtip-postgres", ts: "2026-10-12T01:15:00Z", kind: "update", container: "glitchtip-postgres",
             image: "postgres:16-alpine", services: ["postgres"], rollback: "postgres:rollback-20261012-031500",
             dumps: ["glitchtip/20261012-031500_glitchtip-postgres.sql.gz"], status: "ok", can_rollback: true },
@@ -101,7 +101,7 @@ const BASE_SCRIPT = {
     const describe = (tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent.trim()).filter(Boolean).join(" | ");
     for (const n of ["ollama", "glitchtip-postgres", "actual-ai", "calcom"]) console.log("row:", describe(rowOf(a.d, n)));
     assert(rowOf(a.d, "ollama").querySelector('button[data-update="ollama"]').textContent === "Update");
-    assert(rowOf(a.d, "glitchtip-postgres").querySelector("button[data-update]").textContent === "Ausrollen");
+    assert(rowOf(a.d, "glitchtip-postgres").querySelector("button[data-update]").textContent === "Image ausrollen");
     assert(rowOf(a.d, "glitchtip-postgres").textContent.includes("Ausrollen ausstehend"));
     const together = (n) => { const x = rowOf(a.d, n).querySelector("td .dm-row-note"); return x && x.textContent; };
     console.log("together:", ["glitchtip-web", "hbbr", "nextcloud-family-cron-1", "ollama"].map((n) => `${n} -> ${together(n)}`).join(" | "));
@@ -151,7 +151,7 @@ const BASE_SCRIPT = {
     assert.strictEqual(JSON.stringify(c.last("update").cmd.slice(1)), JSON.stringify(["update", "glitchtip-postgres", "--no-dump"]));
     const extra = c.d.getElementById("dm-dialog-extra");
     console.log("result:", c.d.getElementById("dm-dialog-result").textContent, "| extra:", !extra.hidden, extra.textContent.trim());
-    assert(!extra.hidden && extra.textContent.trim() === "Zurückrollen");
+    assert(!extra.hidden && extra.textContent.trim() === "Update zurückrollen");
     extra.click();
     await sleep(60);
     console.log("spawn :", JSON.stringify(c.last("rollback").cmd.slice(1)), "| result:", c.d.getElementById("dm-dialog-result").textContent);
@@ -193,8 +193,14 @@ const BASE_SCRIPT = {
         [...g.d.querySelectorAll(`#${id} tr`)].forEach((tr) => console.log(`  ${id.slice(3).padEnd(6)}`, describe(tr))));
     const inUseBtn = g.d.querySelector('#dm-images button[data-img="1"]');
     assert(inUseBtn.disabled, "in-use image cannot be deleted");
+    const sizes = [...g.d.querySelectorAll('#dm-images td[data-label="Größe"]')].map((x) => x.textContent);
+    assert.deepStrictEqual(sizes, ["262,25 MiB", "3,40 GiB"], "bytes from the helper, on a 1024 base");
+    assert.deepStrictEqual([g.d.getElementById("dm-bk-error").hidden, g.d.getElementById("dm-bk-summary").hidden], [true, false]);
     g.d.querySelector('#dm-dumps button[data-dump="0"]').click();
     console.log("delete dialog:", g.d.getElementById("dm-dialog-title").textContent, "|", g.d.getElementById("dm-dialog-desc").textContent);
+    assert.deepStrictEqual([g.d.querySelector("#dm-dialog-confirm .dm-btn-label").textContent,
+                            g.d.querySelector("#dm-dialog-desc code").textContent],
+                           ["Dump löschen", "glitchtip/20261012-031500_glitchtip-postgres.sql.gz"]);
     g.d.getElementById("dm-dialog-confirm").click();
     await sleep(60);
     console.log("spawn :", JSON.stringify(g.last("delete-dump").cmd.slice(1)), g.last("delete-dump").opts.superuser,
@@ -212,6 +218,20 @@ const BASE_SCRIPT = {
     assert.deepStrictEqual(causes, ["formbricks-app: " + REASON.line, "x: Wegen Speichermangels beendet.",
                                     "y: Health-Check: curl: (7) Failed to connect to localhost port 8000"]);
     assert.strictEqual(g.d.querySelector("#dm-ops .dm-op-reason").title, "formbricks-app: " + REASON.line);
+    // the backups cannot be loaded: an error alert above the cards instead of the summary
+    for (const [fail, body] of [[{ problem: "access-denied" }, "Die Backup-Übersicht braucht administrativen Zugriff: Schalten Sie ihn oben in Cockpit ein."],
+                                [{ message: "docker: not found" }, "Prüfen Sie, ob Docker auf diesem Server läuft, und wählen Sie dann „Aktualisieren“. Details: docker: not found"]]) {
+        const bf = boot("de", { ...BASE_SCRIPT, "diun-update.py backups": { fail } });
+        await sleep(80);
+        const err = bf.d.getElementById("dm-bk-error");
+        console.log("backups fail:", err.textContent);
+        assert.deepStrictEqual([err.hidden, err.getAttribute("role"), err.classList.contains("az-alert--danger"),
+                                err.querySelector(".az-alert__title").textContent, err.querySelector(".az-alert__body").textContent,
+                                bf.d.getElementById("dm-bk-summary").hidden],
+                               [false, "alert", true, "Die Backups konnten nicht geladen werden", body, true]);
+        assert(!bf.d.getElementById("dm-ops-empty").closest(".az-card:not([hidden])"), "no empty states that would claim there is nothing");
+    }
+    assert(!g.d.getElementById("dm-ops-title").closest(".az-card").hidden, "with data the cards show");
 
     // 7. Unknown jump size: the warning comes first, Update waits for the tick box
     const j = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_JUMP) },
@@ -223,8 +243,10 @@ const BASE_SCRIPT = {
     console.log("\njump  :", jbody.textContent.replace(/\s+/g, " ").slice(0, 150), "…");
     const first = jbody.firstElementChild;
     assert(first.classList.contains("dm-gate-group"), "warning first, together with its tick box");
-    assert(first.firstElementChild.classList.contains("dm-callout-warn"));
-    assert(first.firstElementChild.textContent.startsWith("Die installierte Version ist unbekannt, und der Tag latest folgt"));
+    const warnAlert = first.firstElementChild;
+    assert(warnAlert.classList.contains("az-alert") && warnAlert.classList.contains("az-alert--warning"), "a warning alert");
+    assert.strictEqual(warnAlert.querySelector(".az-alert__title").textContent, "Größe des Sprungs unbekannt");
+    assert(warnAlert.querySelector(".az-alert__body").textContent.startsWith("Die installierte Version ist unbekannt, und der Tag latest folgt"));
     assert(first.querySelector(".dm-check #dm-jump-check"), "the tick box in the same group");
     assert(kvRows(jbody).includes("Installierte Version: unbekannt"));
     const jc = j.d.getElementById("dm-dialog-confirm");
@@ -326,7 +348,7 @@ const BASE_SCRIPT = {
     fb.d.querySelector('button[data-update="ollama"]').click();
     await sleep(40);
     const fbBody = fb.d.getElementById("dm-dialog-body");
-    const warns = [...fbBody.querySelectorAll(".dm-callout-warn")].map((x) => x.textContent);
+    const warns = [...fbBody.querySelectorAll(".az-alert--warning .az-alert__body")].map((x) => x.textContent);
     console.log("failed build dialog:", warns[1]);
     assert(warns[1].startsWith(`Das Update auf genau diesen Build ist am ${FB_DATE} gescheitert.`) && warns[1].includes(REASON.line));
     const fc = fb.d.getElementById("dm-dialog-confirm");
@@ -371,10 +393,20 @@ const BASE_SCRIPT = {
      "Einmal-Jobs (laufen erneut): glitchtip-migrate",
      "Wartet auf: glitchtip-postgres gestartet, glitchtip-redis gesund",
      "Hängen davon ab (werden danach beobachtet): glitchtip-side"].forEach((want) => assert(rows11.includes(want), want));
-    const callouts = [...rlBody.querySelectorAll(".dm-callout")].map((x) => x.textContent);
-    assert(callouts.includes("glitchtip-web, glitchtip-worker warten nicht auf glitchtip-migrate: Sie können starten, bevor der Job " +
-                             "fertig ist. In der Compose-Datei sorgt depends_on mit condition: service_completed_successfully dafür, dass sie warten."));
-    assert(callouts.includes("Ebenfalls im Netzwerk mailrelay: calcom, smtp-relay. Sie nutzen dieses Projekt womöglich; das Update unterbricht es kurz."));
+    const alerts = [...rlBody.querySelectorAll(".az-alert")].map((x) =>
+        [x.className, x.querySelector(".az-alert__title").textContent, x.querySelector(".az-alert__body").textContent]);
+    alerts.forEach((x) => console.log("  alert:", x.join(" | ")));
+    assert.deepStrictEqual(alerts, [
+        ["az-alert az-alert--warning", "Startreihenfolge nicht gesichert",
+         "glitchtip-web, glitchtip-worker warten nicht auf glitchtip-migrate: Sie können starten, bevor der Job " +
+         "fertig ist. In der Compose-Datei sorgt depends_on mit condition: service_completed_successfully dafür, dass sie warten."],
+        ["az-alert", "Gemeinsames Netzwerk",
+         "Ebenfalls im Netzwerk mailrelay: calcom, smtp-relay. Sie nutzen dieses Projekt womöglich; das Update unterbricht es kurz."],
+        ["az-alert", "Ein Rollback stellt das Image wieder her, nicht die Daten",
+         "Migriert die neue Version ihre Datenbank, hilft nur der Dump. Die Container sind beim Neuerstellen kurz nicht erreichbar."]]);
+    assert.deepStrictEqual([...rlBody.querySelectorAll(".az-alert--warning code")].map((x) => x.textContent),
+                           ["depends_on", "condition: service_completed_successfully"]);
+    assert(!rlBody.querySelector(".dm-callout"), "no stripes at the edge any more");
     assert(!rl.d.getElementById("dm-dialog-confirm").disabled, "these are hints, no tick box");
 
     // 12. What the update brings; a new major version needs a tick box
@@ -387,7 +419,8 @@ const BASE_SCRIPT = {
     const mjBody = mj.d.getElementById("dm-dialog-body");
     console.log("major :", kvRows(mjBody).filter((r) => r.startsWith("Bringt") || r.startsWith("Installierte")).join(" | "));
     assert(kvRows(mjBody).includes("Bringt: 6.0.2 Major"));
-    assert.strictEqual(mjBody.querySelector(".dm-callout-warn").textContent,
+    assert.strictEqual(mjBody.querySelector(".az-alert--warning .az-alert__title").textContent, "Neue Hauptversion");
+    assert.strictEqual(mjBody.querySelector(".az-alert--warning .az-alert__body").textContent,
         "Dieses Update bringt eine neue Hauptversion: 5.0.2 → 6.0.2. Neue Hauptversionen brauchen oft andere Einstellungen " +
         "oder zusätzliche Dienste; prüfen Sie vorher die Release-Notes.");
     const mc = mj.d.getElementById("dm-dialog-confirm");
@@ -410,8 +443,16 @@ const BASE_SCRIPT = {
         assert(kvRows(xb).includes(row), row);
         assert.strictEqual(!!x.d.getElementById("dm-major-check"), false);
         assert.strictEqual(x.d.getElementById("dm-dialog-confirm").disabled, gate);
-        if (plan.jump_unknown) assert(xb.querySelector(".dm-callout-warn").textContent.endsWith("latest zeigt gerade auf 6.0.2."));
+        if (plan.jump_unknown) assert(xb.querySelector(".az-alert--warning .az-alert__body").textContent.endsWith("latest zeigt gerade auf 6.0.2."));
     }
+    // a database that does not run: an error in the plan, with its icon (.dm-error), not colour alone
+    const ds = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
+        { ...PLAN_OLLAMA, config_changed: false, dbs: [{ name: "actual-db", kind: "postgres", running: false, size: null }] }) } });
+    await sleep(80);
+    ds.d.querySelector('button[data-update="ollama"]').click();
+    await sleep(40);
+    const stopped = ds.d.querySelector("#dm-dialog-body .dm-error");
+    assert(stopped && stopped.textContent === "actual-db läuft nicht – das Update würde abbrechen");
 
     // 6. English: no German left in rows, dialog or backups tab
     const h = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(

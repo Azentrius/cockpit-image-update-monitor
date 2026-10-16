@@ -167,7 +167,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert.strictEqual(upd.className, "az-btn az-btn--secondary az-btn--sm");
     assert.deepStrictEqual([iconOf(upd), upd.textContent], ["arrow-circle-up", "Update"]);
     const roll = b.d.querySelector('button[data-update="glitchtip-postgres"]');
-    assert.deepStrictEqual([iconOf(roll), roll.textContent], ["arrow-circle-up", "Ausrollen"]);
+    assert.deepStrictEqual([iconOf(roll), roll.textContent], ["arrow-circle-up", "Image ausrollen"]);
     const dis = b.d.querySelector("button[data-key]");
     console.log("\ndismiss:", dis.className, iconOf(dis), dis.getAttribute("aria-label"), "|", dis.title);
     assert.strictEqual(dis.className, "az-btn az-btn--plain az-btn--sm");
@@ -180,20 +180,26 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert(radar.closest(".az-card__actions"), "\"Run radar now\" belongs to the card it applies to");
     assert.strictEqual(iconOf(radar), "play");
     const dep = b.d.querySelector('.dm-dep button[data-target="skopeo"]');
-    assert.deepStrictEqual([dep.className, iconOf(dep), dep.textContent], ["az-btn az-btn--secondary az-btn--sm", "plus", "Installieren"]);
+    assert.deepStrictEqual([dep.className, iconOf(dep), dep.textContent], ["az-btn az-btn--secondary az-btn--sm", "plus", "skopeo installieren"]);
     assert.deepStrictEqual([iconOf(b.d.querySelector(".dm-dep .az-label")), b.d.querySelector(".dm-dep .az-label").className],
         ["exclamation-triangle", "az-label az-label--warning"]);
+    assert(b.d.getElementById("dm-deps").classList.contains("az-alert--warning") && iconOf(b.d.getElementById("dm-deps-icon")) === "exclamation-triangle");
     // backups tab
     const rb = b.d.querySelector("#dm-ops button[data-op]");
-    assert.deepStrictEqual([rb.className, iconOf(rb), rb.textContent], ["az-btn az-btn--secondary az-btn--sm", "history", "Zurückrollen"]);
+    assert.deepStrictEqual([rb.className, iconOf(rb), rb.textContent], ["az-btn az-btn--secondary az-btn--sm", "history", "Update zurückrollen"]);
     const del = b.d.querySelector("#dm-dumps button[data-dump]");
     assert.deepStrictEqual([del.className, iconOf(del), del.getAttribute("aria-label")], ["az-btn az-btn--plain az-btn--sm", "trash", "Löschen"]);
     const inUse = b.d.querySelector("#dm-images button[data-img][disabled]");
     assert(inUse && inUse.title.startsWith("Ein Container nutzt"), "image in use: delete locked, reason as tooltip");
     const res = [...b.d.querySelectorAll("#dm-ops .az-label")].map((l) => `${l.className}:${iconOf(l)}:${l.textContent}`);
     console.log("history results:", res.join(" | "));
-    assert.deepStrictEqual(res, ["az-label:history:zurückgerollt", "az-label az-label--success:check-circle:erfolgreich",
+    assert.deepStrictEqual(res, ["az-label:null:zurückgerollt", "az-label az-label--success:check-circle:erfolgreich",
                                  "az-label az-label--success:check-circle:erfolgreich", "az-label:null:keine Änderung"]);
+    // sizes on a 1024 base, dates as everywhere else
+    const imgCells = [...b.d.querySelectorAll("#dm-images tr")][0].querySelectorAll("td");
+    console.log("rollback image:", [...imgCells].slice(0, 3).map((x) => x.textContent.trim()).join(" | "));
+    const made = new Date("2026-10-12T03:15:00+02:00").toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
+    assert.deepStrictEqual([...imgCells].slice(1, 3).map((x) => x.textContent.trim()), [made, "262,25 MiB"]);
     const cause = b.d.querySelector("#dm-ops .dm-op-reason");
     assert(cause && cause.textContent.startsWith("formbricks-app: Error: Invalid environment variables"),
            "failed update: its cause under the result");
@@ -225,6 +231,10 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     const sig = b.d.querySelector("footer.az-signature");
     console.log("\nsignature:", sig.textContent.replace(/\s+/g, " ").trim());
     assert.strictEqual(sig.querySelector(".az-signature__mark").textContent, "Azentrius");
+    assert.strictEqual(sig.querySelector(".az-signature__mark").getAttribute("href"), "https://azentrius.de");
+    const source = sig.querySelector(".az-signature__meta a");
+    assert.deepStrictEqual([source.textContent, source.getAttribute("href"), source.previousElementSibling.id],
+        ["Quellcode", "https://github.com/Azentrius/cockpit-image-update-monitor", "dm-sig-host"], "the source link comes last");
     assert.strictEqual(b.d.getElementById("dm-sig-version").textContent, `Image-Updates monitor ${VERSION}`);
     assert.deepStrictEqual([b.d.getElementById("dm-sig-host").textContent, b.d.getElementById("dm-sig-host").hidden], ["docker-host", false]);
     const e = boot("en", { files: { ...files, "/etc/hostname": null } });
@@ -237,9 +247,17 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     const f = boot("en", { inventoryFails: true });
     await sleep(40);
     const st = f.d.getElementById("dm-status");
-    console.log("status:", st.className, iconOf(st), "|", st.textContent);
+    console.log("status:", st.className, iconOf(st), st.getAttribute("role"), "|", st.textContent);
     assert(!st.hidden && st.classList.contains("az-alert") && iconOf(st) === "info-circle");
-    assert(st.textContent.startsWith("Container inventory unavailable"));
+    assert.deepStrictEqual([st.querySelector(".az-alert__title").textContent, st.getAttribute("role")],
+        ["Container inventory unavailable", "status"]);
+    // Without the inventory and without Diun events: an empty state that says why
+    const q = boot("en", { inventoryFails: true, files: { ...files, "/var/lib/diun/events.jsonl": "" } });
+    await sleep(40);
+    const empty = q.d.getElementById("dm-empty");
+    console.log("empty:", empty.className, iconOf(empty), "|", empty.textContent.replace(/\s+/g, " ").trim());
+    assert(!empty.hidden && empty.classList.contains("az-empty") && iconOf(empty) === "info-circle");
+    assert.strictEqual(empty.querySelector(".az-empty__title").textContent, "No reported updates");
 
     // 8. English: no German anywhere (texts, labels, tooltips, aria)
     const all = e.d.documentElement.outerHTML;
