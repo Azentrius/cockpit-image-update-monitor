@@ -799,19 +799,29 @@
     }
 
     // --- Parsing -----------------------------------------------------------
+    // Diun's newest event per image and tag (verKey: "postgres:16"), and a
+    // registry link per image. A row takes only the event of its own tag: an
+    // event for postgres:18 says nothing about postgres:16. An event for a
+    // reference with a digest (postgres@sha256:…, also a CI job's service
+    // container) belongs to no row: a pinned image does not follow its tag,
+    // so the Update button could not bring what Diun saw.
     function parseEvents(content) {
-        const byRepo = new Map();
+        const byTag = new Map();
+        const links = new Map();
         (content || "").split("\n").forEach((line) => {
             line = line.trim();
             if (!line) return;
             let e;
             try { e = JSON.parse(line); } catch (_) { return; }
             if (!e.image) return;
-            const k = repoKey(e.image);
-            const prev = byRepo.get(k);
-            if (!prev || (e.ts || "") >= (prev.ts || "")) byRepo.set(k, e);
+            if (e.hub_link) links.set(repoKey(e.image), e.hub_link);
+            if (e.image.includes("@")) return;
+            const tg = tagSplit(e.image);
+            const k = verKey(tg.repo, tg.tag);
+            const prev = byTag.get(k);
+            if (!prev || (e.ts || "") >= (prev.ts || "")) byTag.set(k, e);
         });
-        return byRepo;
+        return { byTag, links };
     }
     function parseInventory(stdout) {
         const out = [];
@@ -1077,8 +1087,8 @@
         if (lastRender) render(...lastRender);
     }
 
-    function rowFor(ctn, eventsMap, versionsMap, radarOk) {
-        const ev = eventsMap.get(repoKey(ctn.image));
+    function rowFor(ctn, events, versionsMap, radarOk) {
+        const ev = events.byTag.get(verKey(ctn.image, ctn.tag));
         const acknowledged = ev && dismissed[evKey(ev)];
         let kind;
         if (ctn.pulled) {
@@ -1107,8 +1117,9 @@
         const note = failedBuild
             ? `<span class="dm-row-note">${esc(t("row.failedBuild", { date: fmtDate(new Date(failedBuild.ts)) }))}</span>` : "";
 
-        const imgCell = ev && ev.hub_link
-            ? `<a href="${esc(ev.hub_link)}" target="_blank" rel="noopener">${esc(ctn.image)}</a>`
+        const link = events.links.get(repoKey(ctn.image));
+        const imgCell = link
+            ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(ctn.image)}</a>`
             : esc(ctn.image);
 
         // Three places: the update, "Change version", "Dismiss" (see iconSlot).
@@ -1151,8 +1162,8 @@
     }
 
     // fromEvents: no inventory, the rows come from Diun's events alone.
-    function render(containers, eventsMap, radarDoc, fromEvents) {
-        lastRender = [containers, eventsMap, radarDoc, fromEvents];
+    function render(containers, events, radarDoc, fromEvents) {
+        lastRender = [containers, events, radarDoc, fromEvents];
         rowFailed.clear();
         retagInfo.clear();
         // An update recreates every service of the project with the same image.
@@ -1173,7 +1184,7 @@
 
         const radarOk = !!(radarDoc && Array.isArray(radarDoc.images));
         const versionsMap = parseVersions(radarDoc);
-        const built = containers.map((c) => ({ c, ...rowFor(c, eventsMap, versionsMap, radarOk) }));
+        const built = containers.map((c) => ({ c, ...rowFor(c, events, versionsMap, radarOk) }));
         built.sort((a, b) =>
             (ORDER[a.kind] - ORDER[b.kind]) || a.c.name.localeCompare(b.c.name));
 
@@ -2152,20 +2163,20 @@
             lastDeps = deps;
             renderDeps(deps);
             renderRadarButton();
-            const eventsMap = parseEvents(eventsContent);
+            const events = parseEvents(eventsContent);
             if (invOut === null) {
                 // Inventory unavailable (no Docker access / no admin rights):
                 // fall back to a Diun-events-only view.
                 showStatus(t("status.noInventoryTitle"), t("status.noInventory"), false);
-                const evContainers = Array.from(eventsMap.values()).map((e) => {
+                const evContainers = Array.from(events.byTag.values()).map((e) => {
                     const tg = tagSplit(e.image);
                     return { name: "—", image: tg.repo, tag: tg.tag, digest: "" };
                 });
-                render(evContainers, eventsMap, radarDoc, true);
+                render(evContainers, events, radarDoc, true);
                 return;
             }
             $("dm-status").hidden = true;
-            render(parseInventory(invOut), eventsMap, radarDoc);
+            render(parseInventory(invOut), events, radarDoc);
         }).catch((err) => {
             showStatus(t("status.loadErrorTitle"), t("status.loadError", { msg: err.message || err }), true);
         });
