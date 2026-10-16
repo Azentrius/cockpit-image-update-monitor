@@ -12,7 +12,7 @@ const { JSDOM } = require("jsdom");
 
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
-const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8").replace(/<script[^>]*><\/script>/g, "");
+const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
 const icons = fs.readFileSync(path.join(PLUGIN, "icons.js"), "utf8");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
@@ -37,6 +37,7 @@ const EVENTS = [
 function boot(language, files, inventoryOut) {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
     const w = dom.window;
+    w.document.querySelectorAll("script").forEach((s) => s.remove());   // the page's own tags never run
     w.Date.now = () => Date.parse("2026-10-16T12:00:00Z");
     w.cockpit = {
         language,
