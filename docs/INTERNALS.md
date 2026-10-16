@@ -405,6 +405,12 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 - Written by the script notifier `diun-notify.sh` inside the Diun container: one line with a single
   `printf`, so that parallel notifiers do not mix.
 - Diun checks every 6 h (`0 */6 * * *`) with `firstCheckNotif: true`.
+- Which row an event belongs to: the plugin keeps the newest event per image **and tag** (`verKey`,
+  `postgres:16`); a row takes only the event of its own tag. An event whose `image` carries a digest
+  (`postgres@sha256:…`, `postgres:18.3-alpine@sha256:…`) belongs to no row: a pinned image does not
+  follow its tag, so Update cannot bring what Diun saw (the plan says `digest-pinned`). Service
+  containers of CI jobs produce such events. The registry link (`hub_link`) is the image's, from any of
+  its events. Up to 0.13.0 the newest event of the image counted for every tag.
 
 ## Plugin internals
 
@@ -498,6 +504,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
 | `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, output button, a build that failed before (row note, second tick box), “together with” in the rows, plan groups and dependencies, delete |
+| `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release |

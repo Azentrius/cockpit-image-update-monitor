@@ -38,6 +38,7 @@ run "plugin: update, rollback, backups" node update-backups.js
 run "plugin: change version"            node version-change.js
 run "plugin: radar now, cleanup, history" node radar-cleanup.js
 run "plugin: version columns"           node version-cols.js
+run "plugin: Diun events per tag"      node diun-events.js
 run "plugin: page frame, tabs, labels"  node page-frame.js
 run "design: contrast (light + dark)"   python3 contrast_test.py
 run "plugin: whole table (smoke)"       node harness.js

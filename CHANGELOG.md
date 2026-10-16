@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fix: “Update available” from another tag.** The page matched Diun's events by image only, so the
+  newest event of an image counted for every tag of it: an event for `postgres@sha256:…` (a CI job's
+  service container) marked every PostgreSQL row on a test host right after their updates, and
+  `nextcloud:fpm` would have marked `nextcloud:apache`. A row now takes only the event of its own
+  image and tag. An event for a reference with a digest belongs to no row: a pinned image does not
+  follow its tag, and the Update button could not bring that build anyway (the plan refused with
+  “pinned by digest”).
 - **Build after a release:** a `latest` (or `main`) that points to no release tag showed “?”,
   “newest: v4.5.3” and “Unknown”, although it was newer than that release: MobSF builds `latest` from
   its development branch, 4.5.4 while v4.5.3 is the newest release. On Docker Hub the radar now notes
