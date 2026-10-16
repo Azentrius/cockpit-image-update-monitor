@@ -109,6 +109,19 @@ const BASE_SCRIPT = {
     assert.strictEqual(together("hbbr"), "zusammen mit hbbs");
     assert.strictEqual(together("ollama"), null, "alone in its project with its image");
     console.log("meta:", a.d.getElementById("dm-meta").textContent);
+    // The buttons line up from row to row: a missing icon button keeps its place,
+    // invisible and as large as the button (2026-10-16: in rows without "Change
+    // version" the Update button stood further right).
+    const places = (tr) => [...tr.querySelector("td.az-cell-actions .dm-cell").children].map((x) =>
+        x.classList.contains("dm-slot") ? "slot" : x.dataset.update ? "update" : x.dataset.retag ? "retag"
+            : x.dataset.key ? "dismiss" : x.dataset.op ? "rollback" : x.dataset.log ? "log" : x.tagName);
+    const PLACES = { "ollama": ["update", "retag", "dismiss"], "prod-mcp-1": ["update", "slot", "dismiss"],
+                     "glitchtip-postgres": ["update", "retag", "slot"], "docuseal": ["retag", "slot"], "calcom": [] };
+    console.log("places:", Object.keys(PLACES).map((n) => `${n} = ${places(rowOf(a.d, n))}`).join(" | "));
+    for (const [n, want] of Object.entries(PLACES)) assert.deepStrictEqual(places(rowOf(a.d, n)), want, n);
+    const slot = rowOf(a.d, "prod-mcp-1").querySelector(".dm-slot");
+    assert(slot.getAttribute("aria-hidden") === "true" && slot.classList.contains("az-btn--plain") &&
+           slot.classList.contains("az-btn--sm"), "hidden from screen readers, sized like an icon button");
 
     // 2. Update ollama: plan -> body -> confirm -> stream -> success
     const runOk = { chunks: ["Update ollama/ollama:latest …\n", "+ docker compose … pull\n",
@@ -157,6 +170,23 @@ const BASE_SCRIPT = {
     console.log("spawn :", JSON.stringify(c.last("rollback").cmd.slice(1)), "| result:", c.d.getElementById("dm-dialog-result").textContent);
     assert.strictEqual(c.d.getElementById("dm-dialog-result").textContent, "Rollback erfolgreich.");
 
+    // 3a. No database to dump: no tick box (it stood there greyed out), and no
+    // --no-dump either; the helper says itself that there is nothing to dump
+    for (const dbs of [[], [{ name: "cache", kind: "unsupported", running: true, size: null }]]) {
+        const nd = boot("de", { ...BASE_SCRIPT, "diun-update.py update": runOk,
+            "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, config_changed: false, dbs }) } });
+        await sleep(80);
+        nd.d.querySelector('button[data-update="ollama"]').click();
+        await sleep(40);
+        const ndBody = nd.d.getElementById("dm-dialog-body");
+        console.log("no db :", kvRows(ndBody).find((r) => r.startsWith("Datenbank-Dump")), "| tick box:",
+                    !!nd.d.getElementById("dm-dump-check"));
+        assert(!nd.d.getElementById("dm-dump-check") && !ndBody.querySelector(".dm-check"));
+        nd.d.getElementById("dm-dialog-confirm").click();
+        await sleep(60);
+        assert.deepStrictEqual(nd.last("update").cmd.slice(1), ["update", "ollama"]);
+    }
+
     // 3b. Dialog closed while the plan is still loading -> must stay closed
     const s = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_OLLAMA) } });
     await sleep(80);
@@ -191,6 +221,9 @@ const BASE_SCRIPT = {
     console.log("\nbackups summary:", g.d.getElementById("dm-bk-summary").textContent);
     ["dm-ops", "dm-dumps", "dm-images"].forEach((id) =>
         [...g.d.querySelectorAll(`#${id} tr`)].forEach((tr) => console.log(`  ${id.slice(3).padEnd(6)}`, describe(tr))));
+    const opPlaces = [...g.d.querySelectorAll("#dm-ops tr")].map(places);
+    assert.deepStrictEqual(opPlaces[0], ["rollback", "slot"], "no kept output: its button's place stays");
+    assert.deepStrictEqual(opPlaces[1], [], "nothing to do: no places");
     const inUseBtn = g.d.querySelector('#dm-images button[data-img="1"]');
     assert(inUseBtn.disabled, "in-use image cannot be deleted");
     const sizes = [...g.d.querySelectorAll('#dm-images td[data-label="Größe"]')].map((x) => x.textContent);
@@ -318,6 +351,7 @@ const BASE_SCRIPT = {
     await sleep(40);
     const logBtns = [...lg.d.querySelectorAll("#dm-ops button[data-log]")];
     assert.strictEqual(logBtns.length, 1, "a button only where output is kept");
+    assert.deepStrictEqual(places(lg.d.querySelector("#dm-ops tr")), ["rollback", "log"]);
     assert.strictEqual(logBtns[0].getAttribute("aria-label"), "Ausgabe anzeigen");
     logBtns[0].click();
     await sleep(40);
