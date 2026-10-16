@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 – 2026-10-16
 
-The page follows the Azentrius design system where it did not yet: status never in colour alone and
-never in gold, alerts instead of stripes at the edge, empty states that say why, targets large enough
-for a phone, and clearer texts.
+Image Update Monitor: a new name and the package `cockpit-image-update-monitor`, which replaces
+`cockpit-image-updates`. The page follows the Azentrius design system where it did not yet: status
+never in colour alone and never in gold, alerts instead of stripes at the edge, empty states that say
+why, targets large enough for a phone, and clearer texts. A database started with options only now gets
+its dump before an update too.
 
 - **Fix: database dump skipped** for a MariaDB, MySQL or PostgreSQL container whose compose file
   gives the server options only, as Nextcloud's example does (`command: --transaction-isolation=…
