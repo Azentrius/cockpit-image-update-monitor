@@ -156,7 +156,9 @@ sequenceDiagram
     H->>D: pg_dumpall / mariadb-dump per DB container of the project
     H->>D: docker tag <old image> <repo>:rollback-<time>
     H->>D: compose pull --ignore-pull-failures <services>
-    alt no newer image
+    alt pull failed, old image
+        H-->>U: stopped, nothing changed (rollback tag and dumps removed again)
+    else no newer image
         H-->>U: nochange (rollback tag removed again)
     else newer image
         H->>D: compose up -d --no-deps --pull never <services>
@@ -168,7 +170,7 @@ sequenceDiagram
     H->>D: tag back to the rollback image, compose up -d --no-deps
 ```
 
-**What is included:** all services of the compose project that use **the same image**. With GlitchTip, for example, `web`, `worker` and `migrate`. One-off jobs that end with exit 0 (migrations) count as successful. The overview says so under the container name (“together with …”).
+**What is included:** all services of the compose project that use **the same image** and were started from **the same compose files**. With GlitchTip, for example, `web`, `worker` and `migrate`. A service of the same project in another compose file (started on its own with `-f docker-compose.emu.yml`) is not included: it shows “Roll-out pending” afterwards and is rolled out from its own file. One-off jobs that end with exit 0 (migrations) count as successful. The overview says so under the container name (“together with …”).
 
 **Dependencies:** the plan lists what these services wait for (`depends_on`) and which services wait for them. Those are not restarted, but watched for about 15 seconds after the update: if one stops, restarts or turns unhealthy, the update counts as failed. The plan warns when services start without waiting for their migration job, and names other projects on the same network (e.g. a shared mail relay) as a hint.
 

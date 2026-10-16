@@ -80,6 +80,7 @@ with open(os.path.join(HERE, "inventory3.jsonl"), "w") as out:
         v, src, local, dtag = INST.get(c["name"]) or (re.match(r"v?([0-9.]+)", c["tag"]).group(1), "tag", True, None)
         c["version"], c["version_src"] = (v, src) if local else (None, None)
         c["pulled_version"] = "16.15" if c.get("pulled") else None
+        c["files"] = [f"/opt/{c['project']}/docker-compose.yml"] if c.get("managed") else []
         out.write(json.dumps(c) + "\n")
         db, reach, versions, has_by_tag, newest = R[key]
         rec = recs.setdefault(key, {"image": key[0], "tag": key[1], "containers": [], "db": db, "reach": reach,

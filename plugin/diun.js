@@ -238,6 +238,7 @@
             "reason.digest-pinned": "the image is pinned by digest (`@sha256`) – updating means editing the compose file.",
             "reason.built-locally": "the image is built locally (`build:`) – rebuild it in the project.",
             "reason.compose-config-error": "`docker compose config` fails: {detail}",
+            "reason.service-missing": "the compose files the container was started from do not define {services} (any more).",
             "reason.same-tag": "{tag} is the tag configured now.",
             "reason.no-choices": "the radar has no versions to offer for the installed version (it is unknown, follows no version scheme, or the radar data is older than 0.11.0).",
             "reason.not-offered": "the radar does not offer {tag} for the installed version: it is older, a pre-release or another flavour.",
@@ -558,6 +559,7 @@
             "reason.digest-pinned": "Das Image ist per Digest festgelegt (`@sha256`) – ein Update heißt hier, die Compose-Datei zu ändern.",
             "reason.built-locally": "Das Image wird lokal gebaut (`build:`) – bauen Sie es im Projekt neu.",
             "reason.compose-config-error": "`docker compose config` schlägt fehl: {detail}",
+            "reason.service-missing": "Die Compose-Dateien, aus denen der Container gestartet wurde, enthalten {services} nicht (mehr).",
             "reason.same-tag": "{tag} ist der Tag, der jetzt konfiguriert ist.",
             "reason.no-choices": "Der Radar hat für die installierte Version keine Versionen anzubieten (sie ist unbekannt, folgt keinem Versionsschema, oder die Radar-Daten sind älter als 0.11.0).",
             "reason.not-offered": "Der Radar bietet {tag} für die installierte Version nicht an: Er ist älter, eine Vorabversion oder eine andere Variante.",
@@ -1203,12 +1205,13 @@
         lastRender = [containers, events, radarDoc, fromEvents];
         rowFailed.clear();
         retagInfo.clear();
-        // An update recreates every service of the project with the same image.
+        // An update recreates every service of the project with the same image
+        // that was started from the same compose files.
         siblings.clear();
         const groups = new Map();
         containers.forEach((c) => {
             if (!c.project) return;
-            const k = c.project + "|" + verKey(c.image, c.tag);
+            const k = c.project + "|" + (c.files || []).join(",") + "|" + verKey(c.image, c.tag);
             if (!groups.has(k)) groups.set(k, []);
             groups.get(k).push(c.name);
         });
@@ -1677,8 +1680,8 @@
                 let plan;
                 try { plan = JSON.parse(out); } catch (_) { throw new Error("bad plan output"); }
                 if (!plan.updatable) {
-                    const reason = t("reason." + plan.reason, {
-                        files: (plan.missing || []).join(", "), detail: plan.detail || "" });
+                    const missing = (plan.missing || []).join(", ");
+                    const reason = t("reason." + plan.reason, { files: missing, services: missing, detail: plan.detail || "" });
                     dlg.update({ title, desc: t("upd.notPossible", { reason }) });
                     return;
                 }
@@ -1812,7 +1815,8 @@
     function retagReason(plan) {
         const rt = plan.retag || {};
         const key = "reason." + rt.reason;
-        const text = t(key, { tag: rt.tag, detail: rt.detail || "", files: (plan.missing || []).join(", ") });
+        const missing = (plan.missing || []).join(", ");
+        const text = t(key, { tag: rt.tag, detail: rt.detail || "", files: missing, services: missing });
         return text === key ? rt.reason + (rt.detail ? ` (${rt.detail})` : "") : text.charAt(0).toUpperCase() + text.slice(1);
     }
 

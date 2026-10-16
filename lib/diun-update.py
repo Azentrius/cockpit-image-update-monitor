@@ -13,6 +13,9 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 2. tag the running image as <repo>:rollback-<stamp>
                                 3. docker compose pull + up -d --no-deps for every
                                    service of the project that uses the same image
+                                   and was started from the same compose files
+                                   (a failed pull that leaves the old image
+                                   stops here, exit 5)
                                 4. wait until the new containers run (healthy),
                                    then watch the services that depend on them;
                                    if anything fails, name the most likely cause
@@ -377,6 +380,12 @@ def compose_cmd(ctx):
     return cmd
 
 
+def same_files(a, b):
+    """Started from the same compose files (and project directory)."""
+    la, lb = a["Config"].get("Labels") or {}, b["Config"].get("Labels") or {}
+    return (la.get(L_WORKDIR), la.get(L_FILES)) == (lb.get(L_WORKDIR), lb.get(L_FILES))
+
+
 def project_containers(project):
     names = run(["docker", "ps", "-a", "--filter", f"label={L_PROJECT}={project}",
                  "--format", "{{.Names}}"]).split()
@@ -418,7 +427,13 @@ def make_plan(name):
         return plan, ctx
 
     members = project_containers(ctx["project"])
-    same = [m for m in members if m["Config"]["Image"] == ref]
+    # Together only with containers started from the same compose files: a
+    # project can be split over files that are started one by one
+    # (docker-compose.yml with runner, runner-2, runner-3 and
+    # docker-compose.emu.yml with runner-emu, all on one image), and compose
+    # knows only the services of the files it is given. The others get the
+    # new image as "pulled" and are rolled out from their own files.
+    same = [m for m in members if m["Config"]["Image"] == ref and same_files(m, c)]
     services = sorted({(m["Config"]["Labels"] or {}).get(L_SERVICE) for m in same} - {None})
     plan["services"] = services
     plan["containers"] = sorted(m["Name"].lstrip("/") for m in same)
@@ -430,6 +445,11 @@ def make_plan(name):
         plan["detail"] = (e.stderr or "").strip()[-400:]
         return plan, ctx
     ctx["cfg"] = cfg
+    missing = [s for s in services if s not in (cfg.get("services") or {})]
+    if missing:
+        plan["reason"] = "service-missing"
+        plan["missing"] = missing
+        return plan, ctx
     for s in services:
         svc = (cfg.get("services") or {}).get(s) or {}
         if svc.get("build") is not None:
@@ -1430,9 +1450,7 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
 
     # 3. Pull (registry failures are reported, an already pulled image still counts)
     base = compose_cmd(ctx)
-    if stream(base + ["pull", "--ignore-pull-failures", *services]) != 0:
-        say("Warnung: Pull meldete Fehler – es wird mit dem lokal vorhandenen Image weitergemacht.",
-            "Warning: pull reported errors – continuing with the image available locally.")
+    pull_rc = stream(base + ["pull", "--ignore-pull-failures", *services])
     new_id = image_id(new_ref)
     if retag and not new_id:
         restore_files(op["backup_files"])
@@ -1440,8 +1458,19 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         discard(op)
         raise Abort(5, f"Das Image {new_ref} ist nicht verfügbar – Dateien wiederhergestellt, nichts geändert.",
                     f"The image {new_ref} is not available – files restored, nothing changed.")
+    unchanged = bool(new_id) and all(v == new_id for v in old_ids.values())
+    if pull_rc != 0:
+        # A pull that failed and left the old image says nothing about newer
+        # ones: not "no newer image" (compose stops at once on a service its
+        # files do not define, and pulls nothing at all).
+        if not retag and (unchanged or not new_id):
+            discard(op)
+            raise Abort(5, "Der Pull ist fehlgeschlagen, und auf dem Server liegt kein neueres Image – nichts geändert.",
+                        "The pull failed and there is no newer image on the server – nothing changed.")
+        say("Warnung: Pull meldete Fehler – es wird mit dem lokal vorhandenen Image weitergemacht.",
+            "Warning: pull reported errors – continuing with the image available locally.")
     # A tag change always recreates: the containers must carry the new tag.
-    if not retag and new_id and all(v == new_id for v in old_ids.values()):
+    if not retag and unchanged:
         run(["docker", "rmi", rb], check=False)
         op.update(status="nochange", rollback=None, new_id=new_id, to_version=op["from_version"])
         record(op, log=op_id + ".log")

@@ -161,6 +161,8 @@ class Docker:
         self.up_rc = 0
         self.up_out = []             # what a failing `compose up` prints
         self.images_from = None      # () -> {service: image} read from the files, as compose does
+        self.pull_rc = 0             # exit code of `compose pull`; the tag stays where it is
+        self.undefined = set()       # services the compose files no longer define
 
     def add(self, c):
         self.containers[c["Name"].lstrip("/")] = c
@@ -176,7 +178,7 @@ class Docker:
                 return "".join(f"{s} {self.hashes.get(s, 'h-' + s)}\n" for s in svcs), 0, ""
             if self.images_from:
                 return json.dumps({"services": {s: {"image": i} for s, i in self.images_from().items()}}), 0, ""
-            return json.dumps(self.cfg), 0, ""
+            return json.dumps(self.config_of(cmd)), 0, ""
         if cmd[:2] == ["docker", "inspect"]:
             names = cmd[4:] if cmd[2:4] == ["--type", "container"] else cmd[2:]
             found = [self.containers[n] for n in names if n in self.containers]
@@ -220,6 +222,20 @@ class Docker:
             return "52428800\n", 0, ""
         raise AssertionError(cmd)
 
+    def config_of(self, cmd):
+        """As compose: the services of the files given with -f (those of the
+        containers started from them) besides what the test set in cfg."""
+        files = ",".join(cmd[i + 1] for i, a in enumerate(cmd) if a == "-f")
+        svcs = dict(self.cfg.get("services") or {})
+        for c in self.containers.values():
+            lbl = c["Config"]["Labels"] or {}
+            svc = lbl.get(U.L_SERVICE)
+            if svc and lbl.get(U.L_FILES) == files and svc not in svcs:
+                svcs[svc] = {"image": c["Config"]["Image"]}
+        for svc in self.undefined:
+            svcs.pop(svc, None)
+        return {**self.cfg, "services": svcs}
+
     def run(self, cmd, check=True, capture=True, timeout=600):
         self.calls.append(list(cmd))
         out, rc, err = self.handle(list(cmd))
@@ -229,6 +245,9 @@ class Docker:
 
     def stream(self, cmd):
         self.streamed.append(list(cmd))
+        if "pull" in cmd and self.pull_rc:
+            U.STREAM_TAIL[:] = ["no such service: " + cmd[-1]]
+            return self.pull_rc
         if "pull" in cmd and self.pull_to:
             ref, iid = self.pull_to
             self.tags[U.norm_ref(ref)] = iid
@@ -344,6 +363,30 @@ check("plan: built-locally", plan("built")["reason"], "built-locally")
 D.compose_err = "services.web.image: invalid reference format"
 p = plan("built")
 check("plan: compose-config-error", (p["reason"], p["detail"]), ("compose-config-error", D.compose_err))
+
+# One project, two compose files started one by one, one image (a CI host,
+# 2026-10-16: docker-compose.yml with runner, runner-2, runner-3 and
+# docker-compose.emu.yml with runner-emu). Compose knows only the services of
+# the files it is given: an update takes only what shares them.
+D.compose_err = None
+D.cfg = {"services": {}}
+MAIN, EMU = os.path.join(COMPOSE_DIR, "compose.yml"), os.path.join(COMPOSE_DIR, "compose.emu.yml")
+open(EMU, "w").close()
+for name, svc, files in (("forgejo-runner", "runner", MAIN), ("forgejo-runner-2", "runner-2", MAIN),
+                         ("forgejo-runner-emu", "runner-emu", EMU)):
+    D.add(ctn(name, "data.forgejo.org/forgejo/runner:12", "sha256:run", project="forgejo-runner", service=svc,
+              files=files))
+p = plan("forgejo-runner")
+check("plan: only the services of the same compose files", (p["updatable"], p["services"], p["containers"]),
+      (True, ["runner", "runner-2"], ["forgejo-runner", "forgejo-runner-2"]))
+p = plan("forgejo-runner-emu")
+check("plan: the other file, its own service", (p["updatable"], p["services"], p["containers"]),
+      (True, ["runner-emu"], ["forgejo-runner-emu"]))
+D.undefined = {"runner-2"}
+p = plan("forgejo-runner")
+check("plan: a service the compose files no longer define", (p["updatable"], p["reason"], p["missing"]),
+      (False, "service-missing", ["runner-2"]))
+D.undefined = set()
 
 fresh_docker()
 PG_ENV = ["PG_MAJOR=16", "PG_VERSION=16.14"]
@@ -700,6 +743,23 @@ check("nochange -> exit 0", (rc, res["status"]), (0, "nochange"))
 check("nochange: no rollback tag left", len(D.tags), n_tags)
 check("nochange: versions equal", (ops()[res["op"]]["from_version"], ops()[res["op"]]["to_version"]), ("16.15", "16.15"))
 check("nochange: radar not started", radar.calls, [])
+
+# A pull that fails and leaves the old image is no "nothing newer": compose
+# stops at once on a service its files do not define and pulls nothing
+# (2026-10-16) -> exit 5, nothing left behind, no history entry
+D.pull_rc = 1
+D.streamed.clear()
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
+rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+release_lock()
+check("failed pull, old image -> exit 5", rc, 5)
+check("failed pull: no rollback tag, no dump, no history entry, nothing recreated",
+      (D.tags == tags_before, dumps_of("glitchtip"), ops() == ops_before, [c for c in D.streamed if "up" in c]),
+      (True, dumps_before, True, []))
+check("failed pull: says so, not 'no newer image'",
+      ("The pull failed and there is no newer image on the server – nothing changed." in out,
+       "No newer image available" in out, "continuing with the image available locally" in out), (True, False, False))
+D.pull_rc = 0
 
 # Version only known to the radar (latest without a version variable)
 D.images["sha256:oll"] = {"Id": "sha256:oll", "Config": {"Env": []}}

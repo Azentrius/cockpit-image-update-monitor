@@ -17,6 +17,8 @@ Emits one JSON object per running container:
   pulled_version  version of that newer local image, if known
   project, service, managed   docker compose labels; managed = the addon
            can recreate it with docker compose
+  files    the compose files it was started from ([] without compose); an
+           update recreates the containers of the project that share them
 
 Invoked by the plugin via cockpit.spawn (superuser) on every load, so it
 uses a handful of docker calls instead of several per container.
@@ -101,6 +103,7 @@ def main():
             "project": project,
             "service": service,
             "managed": bool(project and service and labels.get(L_WORKDIR) and labels.get(L_FILES)),
+            "files": [f for f in (labels.get(L_FILES) or "").split(",") if f],
         }, ensure_ascii=False), flush=True)
     return 0
 

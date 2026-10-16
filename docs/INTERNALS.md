@@ -67,7 +67,7 @@ Inputs are checked by regex:
 | 2 | not found / not possible (container, operation, rollback image gone, not updatable, radar not set up, cleanup rules not understood or not root-only) |
 | 3 | refused (already rolled back; file/container exists on `install`) |
 | 4 | after update/rollback the containers do not run stably |
-| 5 | stopped before any change (dump failed, too little space, database not running) |
+| 5 | stopped before any change (dump failed, too little space, database not running, the pull failed and left the old image) |
 | 64 | wrong call |
 | 75 | lock taken (already running) |
 | 77 | no root rights |
@@ -81,13 +81,17 @@ Inputs are checked by regex:
  "digest": "sha256:16bc…", "imgid": "sha256:16bc…",
  "version": "16.14", "version_src": "env:PG_VERSION",
  "tagid": "sha256:7218…", "pulled": true, "pulled_version": "16.15",
- "project": "glitchtip", "service": "glitchtip-postgres", "managed": true}
+ "project": "glitchtip", "service": "glitchtip-postgres", "managed": true,
+ "files": ["/opt/glitchtip/docker-compose.yml"]}
 ```
 
 - `image` is the repo without the tag, as written in the compose file.
 - `version_src` is `tag`, `env:<NAME>` or `null`. Only the radar knows the label and digest sources.
 - `pulled` means: the local tag points to a different image than the running one.
 - `managed` means: the compose labels for project, service, working directory and files are present.
+- `files`: the compose files the container was started from (the label, `[]` without compose). One
+  project can be started from several sets of files one by one; an update takes only the containers
+  that share them (see `plan`).
 - With Docker's containerd image store `imgid` equals the index digest. That is normal.
 
 ### `versions.json` (radar)
@@ -162,8 +166,15 @@ status    = "Unknown" instead of "Up to date" when nothing was compared: install
 ```
 
 - `reason` when not updatable: `not-compose`, `compose-file-missing` (+`missing`), `digest-pinned`,
-  `built-locally` or `compose-config-error` (+`detail`).
-- `services`: all services of the project with the **same** image reference.
+  `built-locally`, `compose-config-error` (+`detail`) or `service-missing` (+`missing`: services the
+  compose files do not define, e.g. renamed since the start).
+- `services`: the services of the project with the **same** image reference that were started from
+  the **same compose files** (label `config_files`, and the project directory). A project split over
+  files started one by one (`docker-compose.yml` with `runner`, `runner-2`, `runner-3`,
+  `docker-compose.emu.yml` with `runner-emu`) is updated per file set: compose knows only the services
+  of the files it is given. The others then run on an image that is already pulled and show “roll-out
+  pending”. Up to 0.14.0 the plan took them along, and `compose pull` stopped at once with
+  `no such service`.
 - `dbs`: all database containers of the project.
   - `kind`: `postgres` or `mysql` when the command starts the server: it names the server, or it
     is options only for the image's `docker-entrypoint.sh` (`--log-bin=binlog`, `-c …`); `unsupported` for
@@ -453,8 +464,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   release. Otherwise the text is muted and the status stays unknown.
 - **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`), by the
   same rule as `target_version`: not when the installed version is known but not among the tags.
-- **Together:** rows of the same compose project with the same image and tag name each other under
-  the container name (“together with …”, three names at most). The name itself is `.dm-name`.
+- **Together:** rows of the same compose project with the same image and tag and the same compose
+  files (`files`) name each other under the container name (“together with …”, three names at most). The name itself is `.dm-name`.
 - **Plan groups:** recreated (`containers` without `jobs`), one-off jobs, waits for (`depends_on`),
   watched afterwards (`dependents`); `job_order` as a warning, `shared_networks` as a hint. Neither
   needs a tick box.
@@ -498,8 +509,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | File | Checks |
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, a build after the newest release, cache, outage) |
-| `test/inv_test.py` | inventory with fake Docker |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
+| `test/inv_test.py` | inventory with fake Docker, compose files per container |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |

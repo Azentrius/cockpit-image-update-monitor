@@ -108,6 +108,16 @@ const BASE_SCRIPT = {
     assert.strictEqual(together("glitchtip-web"), "zusammen mit glitchtip-worker");
     assert.strictEqual(together("hbbr"), "zusammen mit hbbs");
     assert.strictEqual(together("ollama"), null, "alone in its project with its image");
+    // Same project and image, but started from another compose file (a
+    // runner in docker-compose.emu.yml next to docker-compose.yml, 2026-10-16):
+    // an update does not take it along, so it is not "together with".
+    const split = inventory.trim().split("\n").map((l) => JSON.parse(l)).map((c) => c.project !== "rustdesk" ? c
+        : { ...c, files: [c.name === "hbbr" ? "/opt/rustdesk/relay.yml" : "/opt/rustdesk/compose.yml"] });
+    const sp = boot("de", { ...BASE_SCRIPT, "diun-inventory.py": { out: split.map((c) => JSON.stringify(c)).join("\n") + "\n" } });
+    await sleep(80);
+    const togetherIn = (d, n) => { const x = rowOf(d, n).querySelector("td .dm-row-note"); return x && x.textContent; };
+    assert.deepStrictEqual([togetherIn(sp.d, "hbbr"), togetherIn(sp.d, "hbbs"), togetherIn(sp.d, "glitchtip-web")],
+                           [null, null, "zusammen mit glitchtip-worker"], "other compose files: not together");
     console.log("meta:", a.d.getElementById("dm-meta").textContent);
     // The buttons line up from row to row: a missing icon button keeps its place,
     // invisible and as large as the button (2026-10-16: in rows without "Change
@@ -203,6 +213,16 @@ const BASE_SCRIPT = {
     await sleep(40);
     console.log("\nnot updatable:", e.d.getElementById("dm-dialog-desc").textContent, "| confirm hidden:", e.d.getElementById("dm-dialog-confirm").hidden);
     assert(e.d.getElementById("dm-dialog-confirm").hidden);
+    for (const [lang, want] of [["de", "Die Compose-Dateien, aus denen der Container gestartet wurde, enthalten runner-2 nicht (mehr)."],
+                                ["en", "the compose files the container was started from do not define runner-2 (any more)."]]) {
+        const m = boot(lang, { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, updatable: false,
+            reason: "service-missing", missing: ["runner-2"] }) } });
+        await sleep(80);
+        m.d.querySelector('button[data-update="ollama"]').click();
+        await sleep(40);
+        const desc = m.d.getElementById("dm-dialog-desc").textContent;
+        assert(desc.includes(want) && m.d.getElementById("dm-dialog-confirm").hidden, desc);
+    }
     const f = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { fail: { problem: "access-denied" } } });
     await sleep(80);
     f.d.querySelector('button[data-update="ollama"]').click();

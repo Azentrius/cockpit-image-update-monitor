@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: update of a project split over compose files.** On a CI host one compose project ran from
+  two files started one by one: `docker-compose.yml` with three runners, `docker-compose.emu.yml`
+  with a fourth, all on `forgejo/runner:12`. The update took all four, but called compose with the
+  file of the container clicked; `compose pull` stopped at once with `no such service: runner-emu`,
+  and the add-on reported “no newer image”. The runners could never be updated. Now an update takes
+  the services of the same image **and the same compose files**; the others show “Roll-out pending”
+  afterwards and are rolled out from their own file. “Together with …” in the overview counts the
+  same way (the inventory names each container's compose files, `files`).
+- **A failed pull is no “no newer image”:** when `compose pull` fails and the old image stays, the
+  update stops (exit 5) with “the pull failed – nothing changed”; rollback tag and dumps are removed
+  again, as with any stop before a change.
+- **Plan:** a service the compose files do not define (any more) stops the plan with the reason
+  `service-missing` instead of failing in the middle of the update.
+
 ## 0.14.0 – 2026-10-16
 
 “Update available” only from Diun's reports for the row's own tag, and a `latest` that points to no
