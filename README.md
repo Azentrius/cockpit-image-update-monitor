@@ -1,4 +1,4 @@
-# Image updates monitor for Cockpit
+# Image Update Monitor
 
 A [Cockpit](https://cockpit-project.org/) add-on that shows three things for every running Docker container: what the compose file says, which version actually runs and which version is the newest.
 Updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button.
@@ -175,7 +175,7 @@ sequenceDiagram
 **Database dump:** before the update every supported database container **of the project** is backed up:
 - **Postgres:** `pg_dumpall` with the superuser `POSTGRES_USER` (default `postgres`, local socket).
 - **MariaDB/MySQL:** `mariadb-dump`/`mysqldump --all-databases` with `MARIADB_ROOT_PASSWORD`/`MYSQL_ROOT_PASSWORD` from the container's environment.
-- **Whether a container counts as a database:** only if its command really starts the server. Helper containers that merely use the Postgres image (`sh -c …`) are not dumped.
+- **Whether a container counts as a database:** only if its command really starts the server. A `command:` with options only (`--log-bin=binlog`, `-c max_connections=200`) counts, because the image's entrypoint starts the server with them. Helper containers that merely use the Postgres image (`sh -c …`) are not dumped.
 - **When it stops:** if a dump fails or is incomplete (end marker missing), for example because of a wrong password, or there is too little free space. Then the update stops **before any change** (exit 5); dumps of the other databases made in that attempt are removed again.
 
 **Rollback** points the tag back to the rollback copy and recreates the same services.
@@ -388,8 +388,8 @@ sudo rpm --import https://packages.azentrius.de/azentrius.asc
 sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
 ```
 
-Then install **Image updates** in Cockpit under **Applications** (with administrative access), or on the
-console with `sudo apt install cockpit-image-updates` or `sudo dnf install cockpit-image-updates`. The
+Then install **Image Update Monitor** in Cockpit under **Applications** (with administrative access), or on the
+console with `sudo apt install cockpit-image-update-monitor` or `sudo dnf install cockpit-image-update-monitor`. The
 system's updates keep it current. The repository takes a package only after checking that this
 repository's release workflow built it.
 
@@ -397,17 +397,22 @@ repository's release workflow built it.
 `.deb` and the `.rpm`, `SHA256SUMS` and a signed build provenance (`X.Y.Z` is the version):
 
 ```bash
-sudo apt install ./cockpit-image-updates_X.Y.Z-1_all.deb     # Debian, Ubuntu
-sudo dnf install ./cockpit-image-updates-X.Y.Z-1.noarch.rpm  # Fedora, RHEL, openSUSE
+sudo apt install ./cockpit-image-update-monitor_X.Y.Z-1_all.deb     # Debian, Ubuntu
+sudo dnf install ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm  # Fedora, RHEL, openSUSE
 sha256sum --ignore-missing -c SHA256SUMS                     # check a download
 gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor   # built by the release workflow
 ```
 
 The package puts the page into `/usr/share/cockpit/image-updates/`, the root helpers into `/usr/lib/cockpit-image-updates/` and the units `diun-radar` and `diun-cleanup` into `/usr/lib/systemd/system/` (off until you set them up). After an update it starts a radar run if the radar is set up. It also takes over an installation made with `install.sh` (up to 0.11): the old page in `/usr/share/cockpit/diun`, the old helpers in `/usr/local/lib/diun-radar` and the copies of the units in `/etc/systemd/system` go (a timer changed by hand stays and keeps overriding the package's), the `backup-*` folders of `install.sh` and all data stay, and timers that were on keep running.
 
+**From the package `cockpit-image-updates`.** Up to 0.12 the package had that name. `cockpit-image-update-monitor` replaces it: installing it
+removes `cockpit-image-updates` and keeps the same paths, the data, the dumps, `/etc/image-updates.conf`, the rollback
+images and the Diun stack. Removing the old package switches the timers of the radar and the cleanup off,
+so turn on again what was on, e.g. with `sudo systemctl enable --now diun-radar.timer diun-cleanup.timer`.
+
 **From the source.** `git clone` this repository, then `sudo make install`. It installs the same files to the same places and takes over an `install.sh` installation the same way; `sudo make uninstall` removes them again.
 
-Then open **“Image updates”** in Cockpit (switch on administrative access). If something is missing, the add-on shows the *Missing requirements* panel right under the tabs, with install buttons. Alternatively on the console:
+Then open **“Image Update Monitor”** in Cockpit (switch on administrative access). If something is missing, the add-on shows the *Missing requirements* panel right under the tabs, with install buttons. Alternatively on the console:
 
 ```bash
 sudo /usr/lib/cockpit-image-updates/diun-deps.sh check
@@ -423,7 +428,7 @@ sudo /usr/lib/cockpit-image-updates/diun-deps.sh install cleanup  # diun-cleanup
 **Uninstall**
 
 ```bash
-sudo apt remove cockpit-image-updates      # or: sudo dnf remove cockpit-image-updates
+sudo apt remove cockpit-image-update-monitor      # or: sudo dnf remove cockpit-image-update-monitor
 ```
 
 This stops the timers and removes the page, the helpers and the units. On purpose it keeps the radar data (`/var/lib/diun-radar`), the dumps (`/var/backups/image-updates`), `/etc/image-updates.conf`, the rollback images and the Diun stack:
@@ -523,7 +528,7 @@ make lint           # shellcheck, ruff, systemd-analyze verify for the units (ne
 **Packages** (needs `dpkg-deb` and `rpmbuild`; the `test` workflow builds them twice to the same bytes and installs them on Debian and Fedora):
 
 ```bash
-make packages       # dist/cockpit-image-updates_X.Y.Z-1_all.deb, dist/cockpit-image-updates-X.Y.Z-1.noarch.rpm
+make packages       # dist/cockpit-image-update-monitor_X.Y.Z-1_all.deb, dist/cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm
 ```
 
 Covered by the tests, among other things:
@@ -621,6 +626,6 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 
 The add-on contains no code from Cockpit (LGPL-2.1+); it only uses Cockpit's API `cockpit.js` at runtime, which Cockpit itself ships.
 
-Third-party material keeps its own license, see [NOTICE](NOTICE): the fonts DM Sans and DM Serif Display (SIL Open Font License 1.1, [plugin/OFL.txt](plugin/OFL.txt)) and the icons, Font Awesome Free 5.15.4 by Fonticons, Inc. as shipped in `@patternfly/react-icons` 6.4.0 (CC BY 4.0, [LICENSES/CC-BY-4.0-Font-Awesome.txt](LICENSES/CC-BY-4.0-Font-Awesome.txt)). The packages install both license texts with the add-on.
+Third-party material keeps its own license, see [NOTICE](NOTICE): the fonts DM Sans and DM Serif Display (SIL Open Font License 1.1, [plugin/OFL.txt](plugin/OFL.txt)) and the icons, Font Awesome Free 5.15.4 by Fonticons, Inc. as shipped in `@patternfly/react-icons` 6.4.0 (CC BY 4.0, [plugin/CC-BY-4.0-Font-Awesome.txt](plugin/CC-BY-4.0-Font-Awesome.txt)). The packages install both license texts with the add-on.
 
 Please report security issues privately, see [SECURITY.md](SECURITY.md).

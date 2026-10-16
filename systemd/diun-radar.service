@@ -1,5 +1,5 @@
 [Unit]
-Description=Versions-Radar for the Cockpit Image-Updates plugin (registry tag check)
+Description=Versions-Radar for Image Update Monitor (registry tag check)
 Documentation=file:///usr/lib/cockpit-image-updates/diun-versions.py
 After=docker.service network-online.target
 Wants=network-online.target

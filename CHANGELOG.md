@@ -6,6 +6,12 @@ The page follows the Azentrius design system where it did not yet: status never 
 never in gold, alerts instead of stripes at the edge, empty states that say why, targets large enough
 for a phone, and clearer texts.
 
+- **Fix: database dump skipped** for a MariaDB, MySQL or PostgreSQL container whose compose file
+  gives the server options only, as Nextcloud's example does (`command: --transaction-isolation=…
+  --log-bin=binlog`, or `-c max_connections=200`). The image's `docker-entrypoint.sh` starts the server
+  with them, but the add-on looked for the server's name in the command and did not count the
+  container as a database: the plan showed no dump, and an update ran without one. Found before a
+  Nextcloud major update on a test host. The end-to-end test's MariaDB now runs with such options.
 - **Newest version:** each level (patch, minor, major) is a label with the level as a word. A level the
   Update button brings is a hint (`info-circle`), one that needs a different tag is a label without
   judgement, a database major one with `ban`. The green, gold and red chips are gone; how a level is
@@ -35,8 +41,19 @@ for a phone, and clearer texts.
 - **Motion:** the table dims within 120 ms; with reduced motion the spinners stand still. The loading
   spinner is grey instead of gold.
 - **Licenses:** NOTICE names the icons as Font Awesome Free 5.15.4 by Fonticons, Inc. via
-  `@patternfly/react-icons` 6.4.0. The CC BY 4.0 notice ships as `LICENSES/CC-BY-4.0-Font-Awesome.txt`,
-  and the packages install it into `/usr/share/doc/cockpit-image-updates/`.
+  `@patternfly/react-icons` 6.4.0. The CC BY 4.0 notice for this add-on lies next to `icons.js` as
+  `plugin/CC-BY-4.0-Font-Awesome.txt`; the packages install it with the page and into
+  `/usr/share/doc/cockpit-image-update-monitor/`.
+- **New name, Image Update Monitor:** the menu, the window title, the header ("Image Update *Monitor*"),
+  the signature and AppStream use the same name in every language, the way the design system now treats
+  product names; the German "Image-Updates" goes.
+- **Package `cockpit-image-update-monitor`:** the package is named like the repository. It conflicts with
+  `cockpit-image-updates`, so installing it removes the old package. Paths, data, dumps, settings,
+  rollback images and the Diun stack stay. Removing the old package switches the timers of the radar and
+  the cleanup off: turn on again what was on (README, Install).
+- **Shared design files from Cron Jobs:** `azentrius.css` with `az-page-title--dot` and the
+  project-page classes, `icons.js` with the full attribution, `tools/build-packages.sh` with `CONFLICTS`.
+  The italic subset now holds the letters of "Monitor".
 - **Fix: buttons out of line.** A row without “Change version” (an image whose version is unknown)
   had its Update button further right than the rows above and below, and a history entry with
   “Roll back” but no kept output had its button further right too. A missing icon button now keeps its

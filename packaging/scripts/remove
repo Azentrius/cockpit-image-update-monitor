@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# Before cockpit-image-updates is removed (as root; also `make uninstall`): stop its timers.
+# Before cockpit-image-update-monitor is removed (as root; also `make uninstall`): stop its timers.
 # Data, dumps, rollback images and the Diun stack stay (see README, Uninstall).
 # SPDX-License-Identifier: Apache-2.0
 if [ -d /run/systemd/system ]; then

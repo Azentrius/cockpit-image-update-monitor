@@ -5,8 +5,7 @@
   <id>de.azentrius.image_updates</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>Apache-2.0</project_license>
-  <name>Image updates</name>
-  <name xml:lang="de">Image-Updates</name>
+  <name>Image Update Monitor</name>
   <summary>Configured, running and newest version of every Docker container</summary>
   <summary xml:lang="de">Konfigurierte, laufende und neueste Version jedes Docker-Containers</summary>
   <description>

@@ -1,5 +1,5 @@
 [Unit]
-Description=Cleanup for the Cockpit Image-Updates plugin (old dumps, unused rollback images)
+Description=Cleanup for Image Update Monitor (old dumps, unused rollback images)
 Documentation=file:///usr/lib/cockpit-image-updates/diun-update.py
 After=docker.service
 

@@ -1,4 +1,4 @@
-Image updates monitor for Cockpit
+Image Update Monitor, a Cockpit add-on
 Copyright 2026 Azentrius
 Licensed under the Apache License, Version 2.0. See LICENSE.
 
@@ -22,8 +22,8 @@ Icons (plugin/icons.js): Font Awesome Free 5.15.4 (Solid) by Fonticons, Inc.
   (https://fontawesome.com), as shipped in @patternfly/react-icons 6.4.0
   (Red Hat, Inc.); the path data is unchanged.
   Creative Commons Attribution 4.0 International (CC BY 4.0), see
-  LICENSES/CC-BY-4.0-Font-Awesome.txt (installed as
-  /usr/share/doc/cockpit-image-updates/CC-BY-4.0-Font-Awesome.txt) and
+  plugin/CC-BY-4.0-Font-Awesome.txt (installed next to the page and as
+  /usr/share/doc/cockpit-image-update-monitor/CC-BY-4.0-Font-Awesome.txt) and
   https://creativecommons.org/licenses/by/4.0/
 
 The page uses Red Hat Mono from Cockpit's own static files; it is not part of

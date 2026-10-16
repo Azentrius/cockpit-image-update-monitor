@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Container inventory for the Cockpit Image-Updates plugin.
+"""Container inventory for Image Update Monitor, the Cockpit add-on.
 
 Emits one JSON object per running container:
   name, image (repo, tag-less), tag (as configured: latest, 16-alpine, v2.1.4)

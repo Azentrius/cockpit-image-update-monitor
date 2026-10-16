@@ -5,7 +5,7 @@
     },
     "menu": {
         "index": {
-            "label": "Image updates",
+            "label": "Image Update Monitor",
             "order": 35,
             "keywords": [
                 {

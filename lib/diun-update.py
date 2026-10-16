@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Update / rollback / backup helper for the Cockpit Image-Updates plugin.
+"""Update / rollback / backup helper for Image Update Monitor, the Cockpit add-on.
 
 Called by the plugin via cockpit.spawn with a FIXED set of commands only:
 
@@ -321,6 +321,20 @@ def command_words(c):
     return words
 
 
+def runs_server(c, servers):
+    """True if the container's command starts the database server: the server
+    is named in it, or the command is options only (`command:
+    --log-bin=binlog`, `-c max_connections=200`) for the official images'
+    docker-entrypoint.sh, which then puts the server in front of them
+    (mariadbd, mysqld, postgres)."""
+    if command_words(c) & servers:
+        return True
+    cfg = c["Config"]
+    entry = [os.path.basename(str(a)) for a in cfg.get("Entrypoint") or []]
+    cmd = [str(a) for a in cfg.get("Cmd") or []]
+    return entry == ["docker-entrypoint.sh"] and bool(cmd) and cmd[0].startswith("-")
+
+
 def kind_of(c):
     """Database type of a container (inspect dict). The image is recognised by
     name or by the version variables the official postgres / mariadb / mysql
@@ -329,11 +343,10 @@ def kind_of(c):
     migrations, backups) is not dumped."""
     repo = split_ref(c["Config"]["Image"])[0].lower()
     env = c["Config"].get("Env") or []
-    words = command_words(c)
     if PG_RE.search(repo) or any(e.startswith(PG_ENV) for e in env):
-        return "postgres" if words & PG_SERVER else None
+        return "postgres" if runs_server(c, PG_SERVER) else None
     if MY_RE.search(repo) or any(e.startswith(MY_ENV) for e in env):
-        return "mysql" if words & MY_SERVER else None
+        return "mysql" if runs_server(c, MY_SERVER) else None
     if NODUMP_RE.search(repo):
         return "unsupported"
     return None

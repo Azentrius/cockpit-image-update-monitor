@@ -102,6 +102,10 @@
   --space-lg: 24px;
   --space-xl: 32px;
   --space-2xl: 48px;
+  --space-section: 112px;
+  --space-hero-end: 88px;
+  --space-columns: 80px;
+  --space-cards: 40px;
   --radius-tiny: 4px;
   --radius-small: 6px;
   --radius-medium: 16px;
@@ -157,6 +161,8 @@ code, .az-mono { font-family: var(--az-font-code); font-size: 0.875rem; }
 .az-page-header > :first-child { min-width: 0; }
 .az-page-title { margin: 0; font-family: var(--az-font-head); font-size: 24px; line-height: 1.3; font-weight: 500; letter-spacing: 0.01em; text-wrap: balance; }
 .az-page-title__suffix { font-family: var(--font-brand); font-style: italic; font-weight: 400; color: var(--signature); }
+/* A name without a suffix ("Cron Jobs") carries the dot of the wordmark instead. */
+.az-page-title--dot::after { content: "."; color: var(--signature); }
 .az-page-desc { margin: var(--space-xs) 0 0; color: var(--text-subtle); max-width: 65ch; }
 .az-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); }
 .az-meta { color: var(--text-subtle); font-size: 12px; }
@@ -463,6 +469,12 @@ code, .az-mono { font-family: var(--az-font-code); font-size: 0.875rem; }
 .az-signature__meta { display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-md); }
 .az-signature__meta a { color: var(--text-subtle); }
 .az-signature__meta a:hover { color: var(--link-hover); }
+
+/* ---------- project pages ---------- */
+/* Main link (CTA) in the hero of a project page: a large pill; an icon is optional there. */
+.az-btn--lg { min-block-size: 48px; padding-inline: 28px; font-size: 16px; }
+/* Small line above a section title, only on project pages and covers: the one exception to no capitals. */
+.az-eyebrow { margin: 0; font-size: 13px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: var(--signature); }
 
 /* ---------- helpers ---------- */
 .az-sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

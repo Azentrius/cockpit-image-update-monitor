@@ -164,7 +164,8 @@ status    = "Unknown" instead of "Up to date" when nothing was compared: install
   `built-locally` or `compose-config-error` (+`detail`).
 - `services`: all services of the project with the **same** image reference.
 - `dbs`: all database containers of the project.
-  - `kind`: `postgres` or `mysql` when the command starts the server; `unsupported` for
+  - `kind`: `postgres` or `mysql` when the command starts the server: it names the server, or it
+    is options only for the image's `docker-entrypoint.sh` (`--log-bin=binlog`, `-c …`); `unsupported` for
     redis/valkey/mongo/clickhouse … (no dump).
   - `size`: Postgres only, sum of `pg_database_size`.
 - `config_changed`: `docker compose config --hash` differs from the label
@@ -423,7 +424,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   `?v=<version>`. `tools/check-version.sh` keeps them and `CHANGELOG.md` in step.
 - **Language:** `../base1/po.js` sets `cockpit.language`. `de*` → German, otherwise English.
   - Texts live in `I18N.en` / `I18N.de` in `diun.js`. Static texts in the HTML carry `data-i18n`.
-  - The menu entry is translated through `po.manifest.de.js`.
+  - The menu entry is the product name, Image Update Monitor, and is not translated (`po.manifest.de.js` stays empty).
 - **Loading:** `safeLoad()` never loads twice; a request during a load is repeated once afterwards.
   - `cockpit.file().watch()` triggers a reload only on a **changed** tag.
   - Background: on 2026-10-12 a watch/read loop started hundreds of inventory processes.

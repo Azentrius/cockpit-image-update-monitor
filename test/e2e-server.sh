@@ -354,6 +354,8 @@ services:
   mariadb:
     image: imgupd-test/mariadb:11
     container_name: imgupd-test-mariadb
+    # options only, as in Nextcloud's example: the entrypoint starts mariadbd with them
+    command: ["--transaction-isolation=READ-COMMITTED", "--log-bin=binlog", "--binlog-format=ROW"]
     environment:
       MARIADB_ROOT_PASSWORD: test-only
       MARIADB_DATABASE: e2e
