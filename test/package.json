@@ -2,7 +2,7 @@
   "name": "cockpit-image-update-monitor-tests",
   "version": "1.0.0",
   "private": true,
-  "description": "Offline tests for the Cockpit Image-Updates monitor (jsdom, no build step)",
+  "description": "Offline tests for Image Update Monitor, the Cockpit add-on (jsdom, no build step)",
   "scripts": {
     "test": "bash run-all.sh"
   },

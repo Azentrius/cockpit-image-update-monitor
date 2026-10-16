@@ -35,8 +35,19 @@ for a phone, and clearer texts.
 - **Motion:** the table dims within 120 ms; with reduced motion the spinners stand still. The loading
   spinner is grey instead of gold.
 - **Licenses:** NOTICE names the icons as Font Awesome Free 5.15.4 by Fonticons, Inc. via
-  `@patternfly/react-icons` 6.4.0. The CC BY 4.0 notice ships as `LICENSES/CC-BY-4.0-Font-Awesome.txt`,
-  and the packages install it into `/usr/share/doc/cockpit-image-updates/`.
+  `@patternfly/react-icons` 6.4.0. The CC BY 4.0 notice for this add-on lies next to `icons.js` as
+  `plugin/CC-BY-4.0-Font-Awesome.txt`; the packages install it with the page and into
+  `/usr/share/doc/cockpit-image-update-monitor/`.
+- **New name, Image Update Monitor:** the menu, the window title, the header ("Image Update *Monitor*"),
+  the signature and AppStream use the same name in every language, the way the design system now treats
+  product names; the German "Image-Updates" goes.
+- **Package `cockpit-image-update-monitor`:** the package is named like the repository. It conflicts with
+  `cockpit-image-updates`, so installing it removes the old package. Paths, data, dumps, settings,
+  rollback images and the Diun stack stay. Removing the old package switches the timers of the radar and
+  the cleanup off: turn on again what was on (README, Install).
+- **Shared design files from Cron Jobs:** `azentrius.css` with `az-page-title--dot` and the
+  project-page classes, `icons.js` with the full attribution, `tools/build-packages.sh` with `CONFLICTS`.
+  The italic subset now holds the letters of "Monitor".
 
 ## 0.12.2 – 2026-10-16
 

@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# After every install and upgrade of cockpit-image-updates (as root; also `make install`).
+# After every install and upgrade of cockpit-image-update-monitor (as root; also `make install`).
 # SPDX-License-Identifier: Apache-2.0
 #
 # Up to 0.11, install.sh put the page into /usr/share/cockpit/diun, the helpers into

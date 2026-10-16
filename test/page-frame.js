@@ -73,14 +73,14 @@ const iconOf = (el) => { const s = el && el.querySelector("svg.az-icon"); return
 const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key: k, bubbles: true }));
 
 (async () => {
-    // 1. Header: title from app.title, suffix "monitor" (never translated), meta, one filled button.
+    // 1. Header: the product name Image Update Monitor, suffix "Monitor" (names are never translated), meta, one filled button.
     const a = boot("de", { holdInventory: true });
     await sleep(20);
     const title = a.d.querySelector("header.az-page-header h1.az-page-title");
     const suffix = title.querySelector(".az-page-title__suffix");
     console.log("title:", title.textContent.replace(/\s+/g, " "), "| suffix:", suffix.textContent);
-    assert.strictEqual(title.textContent.replace(/\s+/g, " ").trim(), "Image-Updates monitor");
-    assert.strictEqual(suffix.textContent, "monitor");
+    assert.strictEqual(title.textContent.replace(/\s+/g, " ").trim(), "Image Update Monitor");
+    assert.strictEqual(suffix.textContent, "Monitor");
     assert(a.d.getElementById("dm-meta").classList.contains("az-meta"));
     const refresh = a.d.getElementById("dm-refresh");
     assert(refresh.classList.contains("az-btn") && refresh.classList.contains("az-btn--primary"));
@@ -235,13 +235,13 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     const source = sig.querySelector(".az-signature__meta a");
     assert.deepStrictEqual([source.textContent, source.getAttribute("href"), source.previousElementSibling.id],
         ["Quellcode", "https://github.com/Azentrius/cockpit-image-update-monitor", "dm-sig-host"], "the source link comes last");
-    assert.strictEqual(b.d.getElementById("dm-sig-version").textContent, `Image-Updates monitor ${VERSION}`);
+    assert.strictEqual(b.d.getElementById("dm-sig-version").textContent, `Image Update Monitor ${VERSION}`);
     assert.deepStrictEqual([b.d.getElementById("dm-sig-host").textContent, b.d.getElementById("dm-sig-host").hidden], ["docker-host", false]);
     const e = boot("en", { files: { ...files, "/etc/hostname": null } });
     await sleep(40);
-    assert.strictEqual(e.d.getElementById("dm-sig-version").textContent, `Image updates monitor ${VERSION}`);
+    assert.strictEqual(e.d.getElementById("dm-sig-version").textContent, `Image Update Monitor ${VERSION}`);
     assert(e.d.getElementById("dm-sig-host").hidden, "no host name -> product only");
-    assert.strictEqual(e.d.querySelector(".az-page-title").textContent.replace(/\s+/g, " ").trim(), "Image updates monitor");
+    assert.strictEqual(e.d.querySelector(".az-page-title").textContent.replace(/\s+/g, " ").trim(), "Image Update Monitor");
 
     // 7. Messages under the tab bar as an alert with its icon
     const f = boot("en", { inventoryFails: true });

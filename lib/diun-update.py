@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Update / rollback / backup helper for the Cockpit Image-Updates plugin.
+"""Update / rollback / backup helper for Image Update Monitor, the Cockpit add-on.
 
 Called by the plugin via cockpit.spawn with a FIXED set of commands only:
 

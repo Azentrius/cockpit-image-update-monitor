@@ -29,4 +29,4 @@ The helpers in `lib/` run as root. Reports are particularly welcome for:
 - ways to make the plugin run commands or arguments other than the fixed helper verbs,
 - path or container-name handling that escapes the intended scope,
 - anything that lets the Diun container or `/var/lib/diun` influence code that runs as root,
-- the package (`cockpit-image-updates`, `make install`) overwriting or exposing files it should not touch.
+- the package (`cockpit-image-update-monitor`, `make install`) overwriting or exposing files it should not touch.

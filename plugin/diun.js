@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/* Image-Updates monitor for Cockpit
+/* Image Update Monitor, a Cockpit add-on
  * Lists running containers (their installed version + current digest) and
  * annotates each with independent signals:
  *   - inventory -> cockpit.spawn(diun-inventory.py)  configured tag, exact installed
@@ -55,7 +55,6 @@
     // Plural entries: { one, other }, picked by vars.n.
     const I18N = {
         en: {
-            "app.title": "Image updates",
             "tab.updates": "Updates",
             "tab.backups": "Backups & dumps",
             "tabs.label": "Sections",
@@ -367,12 +366,11 @@
             "dialog.running": "Running …",
             "dialog.success": "Completed successfully.",
             "dialog.failed": "The action failed (exit code {code}). The output above shows why.",
-            "dialog.error": "The helper did not answer as expected. Check that the package cockpit-image-updates is installed completely, then try again. Details: {msg}",
+            "dialog.error": "The helper did not answer as expected. Check that the package cockpit-image-update-monitor is installed completely, then try again. Details: {msg}",
             "dialog.noAdmin": "Denied: this needs administrative access. Switch it on at the top of Cockpit.",
             "sig.source": "Source code",
         },
         de: {
-            "app.title": "Image-Updates",
             "tab.updates": "Updates",
             "tab.backups": "Backups & Dumps",
             "tabs.label": "Bereiche",
@@ -684,7 +682,7 @@
             "dialog.running": "Läuft …",
             "dialog.success": "Erfolgreich abgeschlossen.",
             "dialog.failed": "Der Vorgang ist fehlgeschlagen (Exit-Code {code}). Die Ausgabe oben zeigt die Ursache.",
-            "dialog.error": "Der Helfer hat nicht wie erwartet geantwortet. Prüfen Sie, ob das Paket cockpit-image-updates vollständig installiert ist, und versuchen Sie es erneut. Details: {msg}",
+            "dialog.error": "Der Helfer hat nicht wie erwartet geantwortet. Prüfen Sie, ob das Paket cockpit-image-update-monitor vollständig installiert ist, und versuchen Sie es erneut. Details: {msg}",
             "dialog.noAdmin": "Abgelehnt: Dafür braucht diese Sitzung administrativen Zugriff. Schalten Sie ihn oben in Cockpit ein.",
             "sig.source": "Quellcode",
         },
@@ -2121,7 +2119,7 @@
     // --- Signature -----------------------------------------------------------
     // Foot of the page: product name with version, then the server's host name.
     function renderSignature() {
-        $("dm-sig-version").textContent = t("app.title") + " monitor " + VERSION;
+        $("dm-sig-version").textContent = "Image Update Monitor " + VERSION;
         Promise.resolve().then(() => cockpit.file("/etc/hostname").read())
             .then((text) => {
                 const host = String(text || "").trim().split(/\s+/)[0];
