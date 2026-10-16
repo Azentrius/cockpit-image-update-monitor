@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 – 2026-10-16
+
+“Update available” only from Diun's reports for the row's own tag, and a `latest` that points to no
+release but to a newer build says so: “build after v4.5.3”, up to date when exactly that build runs.
 
 - **Fix: “Update available” from another tag.** The page matched Diun's events by image only, so the
   newest event of an image counted for every tag of it: an event for `postgres@sha256:…` (a CI job's
