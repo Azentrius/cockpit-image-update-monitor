@@ -28,8 +28,9 @@ const BACKUPS = {
               container: "glitchtip-postgres", size: 3 * 2 ** 20, mtime: 1791768900 },
             { path: "glitchtip/20260901-031500_glitchtip-postgres.sql.gz", project: "glitchtip",
               container: "glitchtip-postgres", size: 3 * 2 ** 20, mtime: 1788232500 }],
+    // the first as an older helper sent it (Docker's text), the second in bytes
     images: [{ ref: "postgres:rollback-20260901-031500", id: "sha256:a", size: "275MB", created: "2026-09-01 03:15:00 +0200 CEST", in_use: false },
-             { ref: "postgres:rollback-20261012-031500", id: "sha256:b", size: "275MB", created: "2026-10-12 03:15:00 +0200 CEST", in_use: false }],
+             { ref: "postgres:rollback-20261012-031500", id: "sha256:b", size: 275 * 2 ** 20, created: "2026-10-12T03:15:00+02:00", in_use: false }],
     ops: [{ id: "20261012-031500-glitchtip-postgres", ts: "2026-10-12T01:15:00Z", kind: "update", container: "glitchtip-postgres",
             image: "postgres:16-alpine", services: ["postgres"], rollback: "postgres:rollback-20261012-031500",
             dumps: ["glitchtip/20261012-031500_glitchtip-postgres.sql.gz"], status: "ok", can_rollback: true,
@@ -113,16 +114,21 @@ const BASE = {
     console.log("run in progress:", c.text("dm-radar"), "| disabled:", c.d.getElementById("dm-radar").disabled);
     assert(c.d.getElementById("dm-radar").disabled && c.text("dm-radar") === "Radar running …");
 
-    // 3. Failures stay visible
-    for (const [fail, want] of [[{ exit_status: 1 }, "The radar run failed – details: journalctl -u diun-radar.service"],
-                                [{ exit_status: 2 }, "The version radar is not set up yet (see “Missing requirements”)."],
-                                [{ problem: "access-denied" }, "Denied: this needs administrative access in Cockpit (switch it on at the top of Cockpit)."]]) {
+    // 3. Failures stay visible: an error alert with a title, the fix below, commands as code
+    for (const [fail, title, body, code] of [
+        [{ exit_status: 1 }, "The radar run failed", "The journal shows why: journalctl -u diun-radar.service", "journalctl -u diun-radar.service"],
+        [{ exit_status: 2 }, "The version radar is not set up", "Set it up under “Missing requirements”.", undefined],
+        [{ problem: "access-denied" }, "Administrative access needed", "Denied: this needs administrative access. Switch it on at the top of Cockpit.", undefined]]) {
         const e = boot("en", { ...BASE, "diun-update.py radar": { fail } });
         await sleep(80);
         e.d.getElementById("dm-radar").click();
         await sleep(60);
-        console.log("radar fails", JSON.stringify(fail).padEnd(28), "->", e.text("dm-status"));
-        assert.strictEqual(e.text("dm-status"), want);
+        const st = e.d.getElementById("dm-status");
+        const got = [st.querySelector(".az-alert__title").textContent, st.querySelector(".az-alert__body").textContent];
+        console.log("radar fails", JSON.stringify(fail).padEnd(28), "->", got.join(" / "));
+        assert.deepStrictEqual(got, [title, body]);
+        assert.deepStrictEqual([st.hidden, st.getAttribute("role"), st.classList.contains("az-alert--danger")], [false, "alert", true]);
+        assert.strictEqual((st.querySelector("code") || {}).textContent, code);
         assert(!e.d.getElementById("dm-radar").disabled);
     }
 
@@ -137,7 +143,9 @@ const BASE = {
     console.log("timer  :", g.text("dm-cleanup-timer"));
     console.log("preview:", g.text("dm-cleanup-preview"), "| button:", !g.d.getElementById("dm-cleanup-btn").hidden);
     assert(g.text("dm-cleanup-rules").startsWith("Regeln: behält den neuesten Dump je Datenbank-Container, entfernt ungenutzte Rollback-Images nach 14 Tagen. Standardwerte"));
-    assert.strictEqual(g.text("dm-cleanup-preview"), "Jetzt zu löschen: 1 Dump, 1 Rollback-Image (3,0 MB).");
+    assert.deepStrictEqual([...g.d.querySelectorAll("#dm-cleanup-rules code")].map((x) => x.textContent),
+                           ["/etc/image-updates.conf", "KEEP_DUMPS", "ROLLBACK_IMAGE_DAYS"]);
+    assert.strictEqual(g.text("dm-cleanup-preview"), "Jetzt zu löschen: 1 Dump, 1 Rollback-Image (3,00 MiB).");
     assert(!g.d.getElementById("dm-cleanup-btn").hidden);
     const rows = (id) => [...g.d.querySelectorAll(`#${id} tr`)].map((tr) => tr.textContent.replace(/\s+/g, " ").trim());
     rows("dm-dumps").forEach((r) => console.log("  dump  ", r));
@@ -145,11 +153,16 @@ const BASE = {
     rows("dm-ops").forEach((r) => console.log("  op    ", r));
     assert.deepStrictEqual(rows("dm-dumps").map((r) => r.includes("wird gelöscht")), [false, true]);
     assert.deepStrictEqual(rows("dm-images").map((r) => r.includes("wird gelöscht")), [true, false]);
+    assert.deepStrictEqual(rows("dm-images").map((r) => r.includes("275MB") || r.includes("275,00 MiB")), [true, true],
+                           "sizes in bytes on a 1024 base; Docker's text from an older helper as it is");
+    const day = (iso) => new Date(iso).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
+    assert.deepStrictEqual(rows("dm-images").map((r) => r.includes(day("2026-09-01T03:15:00+02:00")) || r.includes(day("2026-10-12T03:15:00+02:00"))),
+                           [true, true], "the creation time as a date, also in Docker's text");
     assert(rows("dm-ops")[0].includes("16.14 → 16.15") && rows("dm-ops")[1].includes("—"));
 
     // 5. Set up the daily run from the timer line
     const setup = g.d.querySelector("#dm-cleanup-timer button");
-    assert(setup && setup.textContent === "Einrichten");
+    assert(setup && setup.textContent === "Täglichen Lauf einrichten");
     setup.click();
     console.log("setup dialog:", g.text("dm-dialog-title"));
     assert.strictEqual(g.text("dm-dialog-title"), "Tägliches Aufräumen einrichten?");
@@ -159,9 +172,12 @@ const BASE = {
     g.d.getElementById("dm-dialog-cancel").click();
     await sleep(80);
 
-    // 6. Clean up now: dialog lists what goes, runs `cleanup`, result from @@RESULT
+    // 6. Clean up dumps and images: dialog lists what goes, runs `cleanup`, result from @@RESULT
+    assert.strictEqual(g.text("dm-cleanup-btn"), "Dumps und Images aufräumen");
     g.d.getElementById("dm-cleanup-btn").click();
     console.log("\ncleanup dialog:", g.text("dm-dialog-title"), "|", g.text("dm-dialog-body"));
+    assert.deepStrictEqual([g.text("dm-dialog-title"), g.d.querySelector("#dm-dialog-confirm .dm-btn-label").textContent],
+                           ["Dumps und Images aufräumen?", "Dumps und Images aufräumen"]);
     assert(g.text("dm-dialog-body").includes("glitchtip/20260901-031500_glitchtip-postgres.sql.gz"));
     assert(g.text("dm-dialog-body").includes("postgres:rollback-20260901-031500"));
     g.d.getElementById("dm-dialog-confirm").click();
@@ -169,7 +185,7 @@ const BASE = {
     const cl = g.calls.find((x) => x.cmd[1] === "cleanup");
     console.log("spawn :", JSON.stringify(cl.cmd.slice(1)), cl.opts.superuser, "| result:", g.text("dm-dialog-result"));
     assert.strictEqual(JSON.stringify(cl.cmd), JSON.stringify([UPDATE, "cleanup"]));
-    assert.strictEqual(g.text("dm-dialog-result"), "Aufgeräumt: 1 Dump, 1 Rollback-Image (3,0 MB frei geworden).");
+    assert.strictEqual(g.text("dm-dialog-result"), "Aufgeräumt: 1 Dump, 1 Rollback-Image (3,00 MiB frei geworden).");
 
     // 7. Rules not understood -> the message, no button; timer active -> no setup button
     const broken = { ...BACKUPS, cleanup: { ...BACKUPS.cleanup, error: "/etc/image-updates.conf, line 2 not understood: KEEP=1 – nothing deleted.",
@@ -181,6 +197,7 @@ const BASE = {
     await sleep(80);
     console.log("\nbroken rules:", h.text("dm-cleanup-rules"), "| timer:", h.text("dm-cleanup-timer"));
     assert(h.text("dm-cleanup-rules").startsWith("Cleanup rules: /etc/image-updates.conf, line 2"));
+    assert(h.d.querySelector("#dm-cleanup-rules .dm-error"), "an error with its icon, not colour alone");
     assert(h.d.getElementById("dm-cleanup-btn").hidden && !h.d.querySelector("#dm-cleanup-timer button"));
     assert(h.text("dm-cleanup-timer").includes("daily via diun-cleanup.timer"));
 

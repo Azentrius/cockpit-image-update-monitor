@@ -919,6 +919,15 @@ check("backups: cleanup preview", (bk["cleanup"]["keep_dumps"], bk["cleanup"]["i
                                    bk["cleanup"]["images"], bk["cleanup"]["error"]),
       (3, 14, ["a/20261002-030000_a-db.sql.gz"], [], None))
 check("backups: rollback image in use is not offered", [x["in_use"] for x in bk["images"]], [True])
+check("backups: rollback image without a size Docker names -> None, created as ISO 8601",
+      [(x["size"], x["created"]) for x in bk["images"]], [(None, "2026-01-01T00:00:00+00:00")])
+D.images["sha256:p1"] = {"Id": "sha256:p1", "Config": {"Env": []}, "Size": 288358400}
+bk = json.loads(quiet(U.cmd_backups)[1])
+check("backups: rollback image size in bytes (docker image inspect)", [x["size"] for x in bk["images"]], [288358400])
+del D.images["sha256:p1"]
+check("iso_time: docker image ls -> ISO 8601",
+      (U.iso_time("2026-10-12 03:15:00 +0200 CEST"), U.iso_time("2026-10-12 03:15:00 -0430 X"), U.iso_time("")),
+      ("2026-10-12T03:15:00+02:00", "2026-10-12T03:15:00-04:30", ""))
 check("backups: history with versions, without paths",
       [(o["from_version"], o["to_version"], "workdir" in o, "new_id" in o) for o in bk["ops"]], [("16.3", "16.4", False, False)])
 U.record({"id": "20261006-030000-a-db", "ts": "x", "kind": "update", "container": "a-db", "project": "a",

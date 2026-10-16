@@ -63,13 +63,15 @@
             "btn.loading": "Loading …",
             "btn.dismiss": "Dismiss",
             "btn.update": "Update",
-            "btn.rollout": "Roll out",
+            "btn.rollout": "Roll out image",
             "btn.delete": "Delete",
             "btn.radar": "Run radar now",
             "btn.radarRunning": "Radar running …",
             "radar.tip": "Looks for newer versions in the registries right away instead of waiting for the next 6-hour run.",
-            "radar.failed": "The radar run failed – details: journalctl -u diun-radar.service",
-            "radar.notSetUp": "The version radar is not set up yet (see “Missing requirements”).",
+            "radar.failedTitle": "The radar run failed",
+            "radar.failed": "The journal shows why: `journalctl -u diun-radar.service`",
+            "radar.notSetUpTitle": "The version radar is not set up",
+            "radar.notSetUp": "Set it up under “Missing requirements”.",
             "loading.title": "Loading overview …",
             "loading.sub": "Inventorying containers and matching them against Diun and the version radar.",
             "col.container": "Container",
@@ -87,7 +89,10 @@
             "col.size": "Size",
             "col.version": "Version",
             "col.actions": "Actions",
-            "empty": "No running containers found.",
+            "empty.title": "No running containers",
+            "empty.body": "Docker lists no running container on this server. Containers you start appear here after Refresh.",
+            "empty.eventsTitle": "No reported updates",
+            "empty.eventsBody": "Without the container inventory the table shows only what Diun reported, and Diun has reported nothing yet.",
             "badge.update": "Update available",
             "badge.pulled": "Roll-out pending",
             "badge.pulledTip": "A newer image is already on the server, but the container still runs the old one.",
@@ -121,9 +126,9 @@
             "ver.reachNo": "Needs a different tag in the compose file (currently {tag}).",
             "ver.dbMajor": "Database major: requires a migration (dump/restore or pg_upgrade), not just an image swap",
             "ver.clickRetag": "Click to change the tag to {tag}.",
-            "legend.filled": "reachable with the Update button",
-            "legend.outlined": "needs a different tag in the compose file",
-            "legend.dashed": "database major – needs a migration",
+            "legend.update": "reachable with the Update button",
+            "legend.tag": "needs a different tag in the compose file",
+            "legend.migration": "database major – needs a migration",
             "meta.updates": { one: "{n} update", other: "{n} updates" },
             "meta.newver": { one: "{n} new version", other: "{n} new versions" },
             "meta.containers": { one: "{n} container", other: "{n} containers" },
@@ -135,20 +140,24 @@
             "ago.min": "{n} min ago",
             "ago.h": "{n} h ago",
             "ago.d": { one: "{n} day ago", other: "{n} days ago" },
-            "status.noInventory": "Container inventory unavailable (Docker unreachable or no administrative access). Showing reported Diun updates only.",
-            "status.loadError": "Loading failed: {msg}",
-            "status.saveError": "Could not save status: {msg}",
+            "status.noInventoryTitle": "Container inventory unavailable",
+            "status.noInventory": "Docker is unreachable or this session has no administrative access. The table shows only the updates Diun reported.",
+            "status.loadErrorTitle": "The overview could not be loaded",
+            "status.loadError": "Load it again with Refresh; if the error stays, reload Cockpit in the browser. Details: {msg}",
+            "status.saveErrorTitle": "The update could not be marked as done",
+            "status.saveError": "Marking it writes to `/var/lib/diun` and needs administrative access: switch it on at the top of Cockpit. Details: {msg}",
+            "status.noAdminTitle": "Administrative access needed",
             "deps.title": "Missing requirements",
             "deps.intro": "Some components are missing or not running. The overview works with limitations until they are in place.",
             "deps.needAdmin": "Checking requirements needs administrative access in Cockpit.",
             "dep.docker": "Docker",
             "dep.docker.desc": "Without Docker the add-on cannot list containers.",
-            "dep.docker.hint": "Please install or start Docker manually.",
+            "dep.docker.hint": "Install or start Docker on the server yourself.",
             "dep.diun": "Diun",
             "dep.diun.desc": "Reports new builds of the same tag (digest updates).",
-            "dep.diun.noEvents": "Diun is running but sends no events to the add-on (script notifier missing in diun.yml).",
+            "dep.diun.noEvents": "Diun is running but sends no events to the add-on (script notifier missing in `diun.yml`).",
             "dep.diun.noCompose": "Docker Compose is required to install Diun.",
-            "dep.diun.external": "Diun is managed outside /opt/diun – please start it there.",
+            "dep.diun.external": "Diun is managed outside `/opt/diun` – start it there.",
             "dep.skopeo": "skopeo",
             "dep.skopeo.desc": "Reads tag lists from registries for the version radar.",
             "dep.skopeo.noPm": "No supported package manager (apt-get or dnf) found.",
@@ -160,19 +169,21 @@
             "state.inactive": "inactive",
             "state.unreachable": "unreachable",
             "state.noEvents": "no events",
-            "action.install": "Install",
-            "action.start": "Start",
-            "action.setup": "Set up",
+            "action.install.skopeo": "Install skopeo",
+            "action.install.diun": "Install Diun",
+            "action.start.diun": "Start Diun",
+            "action.install.radar": "Set up radar",
+            "action.install.cleanup": "Set up daily run",
             "dlg.install.skopeo.title": "Install skopeo?",
-            "dlg.install.skopeo.desc": "Installs the “skopeo” package from the system's package repositories (package lists are refreshed first).",
+            "dlg.install.skopeo.desc": "Installs the package `skopeo` from the system's package repositories (package lists are refreshed first).",
             "dlg.install.diun.title": "Install Diun?",
-            "dlg.install.diun.desc": "Creates /opt/diun (Diun 4.33.0 plus a read-only Docker socket proxy), writes the event notifier to /var/lib/diun and starts the stack with docker compose. Existing files are never overwritten.",
+            "dlg.install.diun.desc": "Creates `/opt/diun` (Diun 4.33.0 plus a read-only Docker socket proxy), writes the event notifier to `/var/lib/diun` and starts the stack with `docker compose`. Existing files are never overwritten.",
             "dlg.start.diun.title": "Start Diun?",
-            "dlg.start.diun.desc": "Starts the existing stack in /opt/diun (docker compose up -d).",
+            "dlg.start.diun.desc": "Starts the existing stack in `/opt/diun` (`docker compose up -d`).",
             "dlg.install.radar.title": "Set up the version radar?",
-            "dlg.install.radar.desc": "Sets up diun-radar.service and diun-radar.timer (runs every 6 hours) and starts a first run right away.",
+            "dlg.install.radar.desc": "Sets up `diun-radar.service` and `diun-radar.timer` (runs every 6 hours) and starts a first run right away.",
             "dlg.install.cleanup.title": "Set up the daily cleanup?",
-            "dlg.install.cleanup.desc": "Sets up diun-cleanup.service and diun-cleanup.timer (daily around 04:40). Each run deletes what the rules shown in this tab select; the first run happens at the next scheduled time.",
+            "dlg.install.cleanup.desc": "Sets up `diun-cleanup.service` and `diun-cleanup.timer` (daily around 04:40). Each run deletes what the rules shown in this tab select; the first run happens at the next scheduled time.",
             "upd.title": "Update {name}?",
             "upd.titlePulled": "Roll out {name}?",
             "upd.desc": "Pulls the current image for {image} and recreates the affected containers. The image running now is kept as a rollback copy first.",
@@ -186,7 +197,9 @@
             "cond.healthy": "healthy",
             "cond.started": "started",
             "cond.completed": "finished successfully",
-            "upd.jobOrder": "{services} do not wait for {job}: they can start before it is done. In the compose file, depends_on with condition: service_completed_successfully makes them wait.",
+            "upd.jobOrderTitle": "Start order not ensured",
+            "upd.jobOrder": "{services} do not wait for {job}: they can start before it is done. In the compose file, `depends_on` with `condition: service_completed_successfully` makes them wait.",
+            "upd.sharedNetTitle": "Shared network",
             "upd.sharedNet": "Also on the network {network}: {projects}. They may use this project; the update interrupts it briefly.",
             "row.together": "together with {names}",
             "upd.project": "Compose project",
@@ -199,32 +212,37 @@
             "upd.dbStopped": "{name} is not running – the update would abort",
             "upd.free": "Free space for dumps: {free}",
             "upd.dumpCheck": "Create database dump first (recommended)",
+            "upd.configChangedTitle": "Compose file changed",
             "upd.configChanged": "The compose file changed since these containers were created – those changes will be rolled out too.",
-            "upd.dataWarn": "A rollback restores the image, not the data. If the new version migrates its database, only the dump helps.",
+            "upd.dataTitle": "A rollback restores the image, not the data",
+            "upd.dataWarn": "If the new version migrates its database, only the dump helps.",
             "upd.downtime": "The containers are briefly unavailable while they are recreated.",
             "upd.installed": "Installed version",
             "upd.versionUnknown": "unknown",
+            "upd.jumpTitle": "Size of the jump unknown",
             "upd.jumpUnknown": "The installed version is unknown and the tag {tag} follows every new release, so nobody can tell how big the jump is. It may be a new major version that needs other settings or additional services. Check the release notes first.",
             "upd.jumpConfirm": "I know that this update may bring a new major version.",
             "upd.jumpTarget": "{tag} points to {v} right now.",
             "upd.target": "Brings",
             "upd.targetSame": "{v} (the version that runs now)",
+            "upd.majorTitle": "New major version",
             "upd.majorJump": "This update brings a new major version: {from} → {to}. New major versions often need other settings or additional services; check the release notes first.",
             "upd.majorConfirm": "I have checked the release notes for {to}.",
+            "upd.notPossibleTitle": "Not possible from the add-on",
             "upd.notPossible": "Not possible from the add-on: {reason}",
-            "reason.not-compose": "the container was not started with docker compose, so it cannot be recreated safely.",
+            "reason.not-compose": "the container was not started with `docker compose`, so it cannot be recreated safely.",
             "reason.compose-file-missing": "the compose file no longer exists ({files}).",
-            "reason.digest-pinned": "the image is pinned by digest (@sha256) – updating means editing the compose file.",
-            "reason.built-locally": "the image is built locally (build:) – rebuild it in the project.",
-            "reason.compose-config-error": "docker compose config fails: {detail}",
+            "reason.digest-pinned": "the image is pinned by digest (`@sha256`) – updating means editing the compose file.",
+            "reason.built-locally": "the image is built locally (`build:`) – rebuild it in the project.",
+            "reason.compose-config-error": "`docker compose config` fails: {detail}",
             "reason.same-tag": "{tag} is the tag configured now.",
             "reason.no-choices": "the radar has no versions to offer for the installed version (it is unknown, follows no version scheme, or the radar data is older than 0.11.0).",
             "reason.not-offered": "the radar does not offer {tag} for the installed version: it is older, a pre-release or another flavour.",
             "reason.db-major": "a new major version of a database needs a migration (dump and restore or pg_upgrade); the add-on cannot do that yet.",
             "reason.major-skip": "Nextcloud can only be upgraded one major version per step.",
             "reason.anchors": "the image line sits under a YAML anchor or outside a service ({detail}). Please change the tag by hand.",
-            "reason.not-found": "no image line with this reference was found for {detail}, for example because of include: or a generated file. Please change the tag by hand.",
-            "reason.variable-complex": "the tag comes from a variable that cannot be changed safely ({detail}): it is not in the .env file, set more than once, only has a default, or the reference is built from several variables.",
+            "reason.not-found": "no image line with this reference was found for {detail}, for example because of `include:` or a generated file. Please change the tag by hand.",
+            "reason.variable-complex": "the tag comes from a variable that cannot be changed safely ({detail}): it is not in the `.env` file, set more than once, only has a default, or the reference is built from several variables.",
             "reason.variable-shared": "the variable {detail} is used elsewhere too; changing it would change more than this image.",
             "reason.unreadable": "{detail} is not a regular UTF-8 file of at most 1 MiB.",
             "upd.ok": "Update successful. Rollback copy: {rb}",
@@ -240,6 +258,7 @@
             "upd.reasonExit": "Stopped with exit code {code}; the log shows no error line.",
             "upd.reasonTimeout": "Not ready within the waiting time; the log shows no error line.",
             "upd.reasonNone": "The log shows no error line; see the output.",
+            "upd.failedBuildTitle": "This build failed before",
             "upd.failedBuild": "The update to exactly this build failed on {date}. Try again only if the cause is fixed, for example a setting in the compose file.",
             "upd.retryConfirm": "Try this build again anyway.",
             "row.failedBuild": "The update to this build failed on {date}.",
@@ -260,9 +279,13 @@
             "rt.grp.major": "Major versions",
             "rt.grp.floating": "Follows every release",
             "rt.checking": "Checking the change …",
+            "rt.checkFailed": "The change could not be checked",
             "rt.diff": "What changes in the files",
-            "rt.variable": "The tag comes from the variable {name}; it changes where it is set.",
-            "rt.git": "The project lies in the git repository {path}. The add-on does not commit; commit the change there if you want it in the history.",
+            "rt.variableTitle": "Tag from a variable",
+            "rt.variable": "The tag comes from the variable `{name}`; it changes where it is set.",
+            "rt.gitTitle": "Git repository",
+            "rt.git": "The project lies in the git repository `{path}`. The add-on does not commit; commit the change there if you want it in the history.",
+            "rt.floatingTitle": "The tag follows every release",
             "rt.floating": "{tag} follows every new release, new major versions included: which version it brings shows only after the pull, and every later update can bring a new major version. Check the release notes first.",
             "rt.floatingConfirm": "I know that {tag} follows every new release.",
             "rt.ok": "Version changed: the compose file now names {tag}. Rollback copy: {rb}",
@@ -274,7 +297,7 @@
             "log.desc": "{when} · {image}",
             "log.loading": "Loading the output …",
             "log.none": "No output is kept for this operation (updates before 0.9.0 kept none).",
-            "rb.button": "Roll back",
+            "rb.button": "Roll back update",
             "rb.title": "Roll back {name}?",
             "rb.desc": "Points {image} back to {rb} and recreates {services}. Databases are not reset – if migrations cause trouble, restore the dump.",
             "rb.descRetag": "Puts back {files} as they were before the tag change, points {image} back to {rb} and recreates {services}. Databases are not reset – if migrations cause trouble, restore the dump.",
@@ -288,33 +311,37 @@
             "bk.ops": "Update history",
             "bk.dumps": "Database dumps",
             "bk.images": "Rollback images",
-            "bk.noOps": "No updates yet.",
-            "bk.noDumps": "No dumps.",
-            "bk.noImages": "No rollback images.",
-            "bk.error": "Backups could not be loaded: {msg}",
-            "bk.needAdmin": "The backup overview needs administrative access in Cockpit.",
+            "bk.noOps": "No updates yet",
+            "bk.noOpsBody": "Updates, version changes and rollbacks started on this page are listed here.",
+            "bk.noDumps": "No database dumps",
+            "bk.noDumpsBody": "An update dumps the databases of its project first; the dumps are kept here.",
+            "bk.noImages": "No rollback images",
+            "bk.noImagesBody": "Before every update the image that runs is kept as a rollback copy; the copies are listed here.",
+            "bk.errorTitle": "The backups could not be loaded",
+            "bk.error": "Check that Docker runs on this server, then choose Refresh. Details: {msg}",
+            "bk.needAdmin": "The backup overview needs administrative access: switch it on at the top of Cockpit.",
             "cl.title": "Cleanup",
             "cl.keep": { one: "keeps the newest dump per database container", other: "keeps the newest {n} dumps per database container" },
             "cl.keepOff": "never deletes dumps",
             "cl.days": { one: "removes unused rollback images after {n} day", other: "removes unused rollback images after {n} days" },
             "cl.daysOff": "never removes rollback images",
             "cl.rules": "Rules: {keep}, {days}.",
-            "cl.srcFile": "Set in {file}.",
-            "cl.srcDefault": "Defaults – change them in /etc/image-updates.conf (KEEP_DUMPS, ROLLBACK_IMAGE_DAYS; 0 = never).",
+            "cl.srcFile": "Set in `{file}`.",
+            "cl.srcDefault": "Defaults – change them in `/etc/image-updates.conf` (`KEEP_DUMPS`, `ROLLBACK_IMAGE_DAYS`; 0 = never).",
             "cl.protect": "The dumps of each project's last update and rollback images in use are never deleted.",
-            "cl.timerOn": "Runs after every successful update (for its project) and daily via diun-cleanup.timer.",
+            "cl.timerOn": "Runs after every successful update (for its project) and daily via `diun-cleanup.timer`.",
             "cl.timerOff": "Runs after every successful update (for its project). The daily run is not set up.",
             "cl.dumpsN": { one: "{n} dump", other: "{n} dumps" },
             "cl.imagesN": { one: "{n} rollback image", other: "{n} rollback images" },
             "cl.preview": "To be deleted now: {dumps}, {images} ({size}).",
             "cl.nothing": "Nothing to clean up right now.",
             "cl.error": "Cleanup rules: {msg}",
-            "cl.button": "Clean up now",
+            "cl.button": "Clean up dumps and images",
             "cl.mark": "to be deleted",
-            "cl.markTip": "Selected by the cleanup rules (next run or “Clean up now”).",
-            "cl.dlgTitle": "Clean up now?",
+            "cl.markTip": "Selected by the cleanup rules (next run or “Clean up dumps and images”).",
+            "cl.dlgTitle": "Clean up dumps and images?",
             "cl.dlgDesc": "Deletes the dumps and rollback images the rules select. They cannot be restored afterwards.",
-            "cl.confirm": "Clean up",
+            "cl.confirm": "Clean up dumps and images",
             "cl.done": "Cleaned up: {dumps}, {images} ({size} freed).",
             "cl.partial": "{n} could not be removed – see output.",
             "cl.nochange": "Nothing to clean up.",
@@ -328,19 +355,21 @@
             "img.inUseTip": "A container still uses this image – it cannot be deleted.",
             "img.free": "unused",
             "del.dumpTitle": "Delete dump?",
-            "del.dumpDesc": "Deletes {path} permanently. It cannot be restored afterwards.",
+            "del.dumpDesc": "Deletes `{path}` permanently. It cannot be restored afterwards.",
             "del.imgTitle": "Delete rollback image?",
-            "del.imgDesc": "Removes {ref}. Rolling back to this state is no longer possible afterwards.",
-            "del.confirm": "Delete permanently",
+            "del.imgDesc": "Removes `{ref}`. Rolling back to this state is no longer possible afterwards.",
+            "del.dumpConfirm": "Delete dump",
+            "del.imgConfirm": "Delete image",
             "del.ok": "Deleted.",
             "dialog.note": "Runs with administrator privileges via Cockpit. Output appears here live.",
             "dialog.cancel": "Cancel",
             "dialog.close": "Close",
             "dialog.running": "Running …",
             "dialog.success": "Completed successfully.",
-            "dialog.failed": "Failed (exit code {code}).",
-            "dialog.error": "Failed: {msg}",
-            "dialog.noAdmin": "Denied: this needs administrative access in Cockpit (switch it on at the top of Cockpit).",
+            "dialog.failed": "The action failed (exit code {code}). The output above shows why.",
+            "dialog.error": "The helper did not answer as expected. Check that the package cockpit-image-updates is installed completely, then try again. Details: {msg}",
+            "dialog.noAdmin": "Denied: this needs administrative access. Switch it on at the top of Cockpit.",
+            "sig.source": "Source code",
         },
         de: {
             "app.title": "Image-Updates",
@@ -351,13 +380,15 @@
             "btn.loading": "Lädt …",
             "btn.dismiss": "Erledigt",
             "btn.update": "Update",
-            "btn.rollout": "Ausrollen",
+            "btn.rollout": "Image ausrollen",
             "btn.delete": "Löschen",
             "btn.radar": "Radar jetzt starten",
             "btn.radarRunning": "Radar läuft …",
             "radar.tip": "Sucht sofort in den Registries nach neueren Versionen, statt auf den nächsten 6-Stunden-Lauf zu warten.",
-            "radar.failed": "Der Radar-Lauf ist fehlgeschlagen – Details: journalctl -u diun-radar.service",
-            "radar.notSetUp": "Der Versions-Radar ist noch nicht eingerichtet (siehe „Voraussetzungen unvollständig“).",
+            "radar.failedTitle": "Der Radar-Lauf ist fehlgeschlagen",
+            "radar.failed": "Die Ursache steht im Journal: `journalctl -u diun-radar.service`",
+            "radar.notSetUpTitle": "Der Versions-Radar ist nicht eingerichtet",
+            "radar.notSetUp": "Richten Sie ihn unter „Voraussetzungen unvollständig“ ein.",
             "loading.title": "Übersicht wird geladen …",
             "loading.sub": "Container werden inventarisiert und mit Diun und dem Versions-Radar abgeglichen.",
             "col.container": "Container",
@@ -375,7 +406,10 @@
             "col.size": "Größe",
             "col.version": "Version",
             "col.actions": "Aktionen",
-            "empty": "Keine laufenden Container gefunden.",
+            "empty.title": "Keine laufenden Container",
+            "empty.body": "Docker meldet auf diesem Server keinen laufenden Container. Gestartete Container erscheinen hier nach „Aktualisieren“.",
+            "empty.eventsTitle": "Keine gemeldeten Updates",
+            "empty.eventsBody": "Ohne Container-Inventar zeigt die Tabelle nur, was Diun gemeldet hat, und Diun hat noch nichts gemeldet.",
             "badge.update": "Update verfügbar",
             "badge.pulled": "Ausrollen ausstehend",
             "badge.pulledTip": "Ein neueres Image liegt schon auf dem Server, der Container läuft aber noch auf dem alten.",
@@ -408,10 +442,10 @@
             "ver.reachYes": "Der Tag {tag} liefert das per Update-Knopf.",
             "ver.reachNo": "Erfordert einen anderen Tag in der Compose-Datei (derzeit {tag}).",
             "ver.dbMajor": "Datenbank-Major: braucht eine Migration (Dump/Restore bzw. pg_upgrade), kein reiner Image-Tausch",
-            "ver.clickRetag": "Klicken, um den Tag auf {tag} zu ändern.",
-            "legend.filled": "per Update-Knopf erreichbar",
-            "legend.outlined": "braucht einen anderen Tag in der Compose-Datei",
-            "legend.dashed": "Datenbank-Major – braucht eine Migration",
+            "ver.clickRetag": "Klicken Sie, um den Tag auf {tag} zu ändern.",
+            "legend.update": "per Update-Knopf erreichbar",
+            "legend.tag": "braucht einen anderen Tag in der Compose-Datei",
+            "legend.migration": "Datenbank-Major – braucht eine Migration",
             "meta.updates": { one: "{n} Update", other: "{n} Updates" },
             "meta.newver": { one: "{n} neue Version", other: "{n} neue Versionen" },
             "meta.containers": { one: "{n} Container", other: "{n} Container" },
@@ -423,20 +457,24 @@
             "ago.min": "vor {n} min",
             "ago.h": "vor {n} h",
             "ago.d": { one: "vor {n} Tag", other: "vor {n} Tagen" },
-            "status.noInventory": "Container-Inventar nicht verfügbar (Docker nicht erreichbar oder kein administrativer Zugriff). Es werden nur gemeldete Diun-Updates gezeigt.",
-            "status.loadError": "Fehler beim Laden: {msg}",
-            "status.saveError": "Konnte Status nicht speichern: {msg}",
+            "status.noInventoryTitle": "Container-Inventar nicht verfügbar",
+            "status.noInventory": "Docker ist nicht erreichbar, oder diese Sitzung hat keinen administrativen Zugriff. Die Tabelle zeigt nur die von Diun gemeldeten Updates.",
+            "status.loadErrorTitle": "Die Übersicht konnte nicht geladen werden",
+            "status.loadError": "Laden Sie sie mit „Aktualisieren“ neu; bleibt der Fehler, laden Sie Cockpit im Browser neu. Details: {msg}",
+            "status.saveErrorTitle": "Das Update konnte nicht als erledigt markiert werden",
+            "status.saveError": "Das Markieren schreibt nach `/var/lib/diun` und braucht administrativen Zugriff: Schalten Sie ihn oben in Cockpit ein. Details: {msg}",
+            "status.noAdminTitle": "Administrativer Zugriff nötig",
             "deps.title": "Voraussetzungen unvollständig",
             "deps.intro": "Einige Bestandteile fehlen oder laufen nicht. Bis dahin funktioniert die Übersicht nur eingeschränkt.",
             "deps.needAdmin": "Zum Prüfen der Voraussetzungen wird administrativer Zugriff in Cockpit benötigt.",
             "dep.docker": "Docker",
             "dep.docker.desc": "Ohne Docker kann das Addon keine Container auflisten.",
-            "dep.docker.hint": "Bitte Docker manuell installieren bzw. starten.",
+            "dep.docker.hint": "Installieren oder starten Sie Docker auf dem Server selbst.",
             "dep.diun": "Diun",
             "dep.diun.desc": "Meldet neue Builds desselben Tags (Digest-Updates).",
-            "dep.diun.noEvents": "Diun läuft, liefert aber keine Ereignisse an das Addon (Script-Notifier fehlt in diun.yml).",
+            "dep.diun.noEvents": "Diun läuft, liefert aber keine Ereignisse an das Addon (Script-Notifier fehlt in `diun.yml`).",
             "dep.diun.noCompose": "Für die Installation von Diun wird Docker Compose benötigt.",
-            "dep.diun.external": "Diun wird außerhalb von /opt/diun verwaltet – bitte dort starten.",
+            "dep.diun.external": "Diun wird außerhalb von `/opt/diun` verwaltet – starten Sie es dort.",
             "dep.skopeo": "skopeo",
             "dep.skopeo.desc": "Liest Versionslisten aus den Registries für den Versions-Radar.",
             "dep.skopeo.noPm": "Kein unterstützter Paketmanager (apt-get oder dnf) gefunden.",
@@ -448,25 +486,27 @@
             "state.inactive": "inaktiv",
             "state.unreachable": "nicht erreichbar",
             "state.noEvents": "keine Ereignisse",
-            "action.install": "Installieren",
-            "action.start": "Starten",
-            "action.setup": "Einrichten",
+            "action.install.skopeo": "skopeo installieren",
+            "action.install.diun": "Diun installieren",
+            "action.start.diun": "Diun starten",
+            "action.install.radar": "Radar einrichten",
+            "action.install.cleanup": "Täglichen Lauf einrichten",
             "dlg.install.skopeo.title": "skopeo installieren?",
-            "dlg.install.skopeo.desc": "Installiert das Paket „skopeo“ aus den Paketquellen des Systems (die Paketlisten werden vorher aktualisiert).",
+            "dlg.install.skopeo.desc": "Installiert das Paket `skopeo` aus den Paketquellen des Systems (die Paketlisten werden vorher aktualisiert).",
             "dlg.install.diun.title": "Diun installieren?",
-            "dlg.install.diun.desc": "Legt /opt/diun an (Diun 4.33.0 plus schreibgeschützter Docker-Socket-Proxy), schreibt den Ereignis-Notifier nach /var/lib/diun und startet den Stack mit docker compose. Vorhandene Dateien werden nie überschrieben.",
+            "dlg.install.diun.desc": "Legt `/opt/diun` an (Diun 4.33.0 plus schreibgeschützter Docker-Socket-Proxy), schreibt den Ereignis-Notifier nach `/var/lib/diun` und startet den Stack mit `docker compose`. Vorhandene Dateien werden nie überschrieben.",
             "dlg.start.diun.title": "Diun starten?",
-            "dlg.start.diun.desc": "Startet den vorhandenen Stack in /opt/diun (docker compose up -d).",
+            "dlg.start.diun.desc": "Startet den vorhandenen Stack in `/opt/diun` (`docker compose up -d`).",
             "dlg.install.radar.title": "Versions-Radar einrichten?",
-            "dlg.install.radar.desc": "Richtet diun-radar.service und diun-radar.timer ein (Lauf alle 6 Stunden) und startet sofort einen ersten Lauf.",
+            "dlg.install.radar.desc": "Richtet `diun-radar.service` und `diun-radar.timer` ein (Lauf alle 6 Stunden) und startet sofort einen ersten Lauf.",
             "dlg.install.cleanup.title": "Tägliches Aufräumen einrichten?",
-            "dlg.install.cleanup.desc": "Richtet diun-cleanup.service und diun-cleanup.timer ein (täglich gegen 04:40). Jeder Lauf löscht, was die in diesem Tab gezeigten Regeln auswählen; der erste Lauf folgt zum nächsten geplanten Zeitpunkt.",
+            "dlg.install.cleanup.desc": "Richtet `diun-cleanup.service` und `diun-cleanup.timer` ein (täglich gegen 04:40). Jeder Lauf löscht, was die in diesem Tab gezeigten Regeln auswählen; der erste Lauf folgt zum nächsten geplanten Zeitpunkt.",
             "upd.title": "{name} aktualisieren?",
             "upd.titlePulled": "{name} ausrollen?",
             "upd.desc": "Zieht das aktuelle Image für {image} und erstellt die betroffenen Container neu. Das jetzt laufende Image wird vorher als Rollback-Kopie gesichert.",
             "upd.descPulled": "Das neuere Image für {image} liegt schon auf dem Server. Die betroffenen Container werden damit neu erstellt; das jetzt laufende Image wird vorher als Rollback-Kopie gesichert.",
             "upd.cardTitle": "Laufende Container",
-            "upd.planning": "Prüfe, was das Update betrifft …",
+            "upd.planning": "Es wird geprüft, was das Update betrifft …",
             "upd.containers": "Neu erstellt (gleiches Image)",
             "upd.jobs": "Einmal-Jobs (laufen erneut)",
             "upd.dependsOn": "Wartet auf",
@@ -474,7 +514,9 @@
             "cond.healthy": "gesund",
             "cond.started": "gestartet",
             "cond.completed": "erfolgreich beendet",
-            "upd.jobOrder": "{services} warten nicht auf {job}: Sie können starten, bevor der Job fertig ist. In der Compose-Datei sorgt depends_on mit condition: service_completed_successfully dafür, dass sie warten.",
+            "upd.jobOrderTitle": "Startreihenfolge nicht gesichert",
+            "upd.jobOrder": "{services} warten nicht auf {job}: Sie können starten, bevor der Job fertig ist. In der Compose-Datei sorgt `depends_on` mit `condition: service_completed_successfully` dafür, dass sie warten.",
+            "upd.sharedNetTitle": "Gemeinsames Netzwerk",
             "upd.sharedNet": "Ebenfalls im Netzwerk {network}: {projects}. Sie nutzen dieses Projekt womöglich; das Update unterbricht es kurz.",
             "row.together": "zusammen mit {names}",
             "upd.project": "Compose-Projekt",
@@ -487,32 +529,37 @@
             "upd.dbStopped": "{name} läuft nicht – das Update würde abbrechen",
             "upd.free": "Freier Platz für Dumps: {free}",
             "upd.dumpCheck": "Vorher Datenbank-Dump erstellen (empfohlen)",
+            "upd.configChangedTitle": "Compose-Datei geändert",
             "upd.configChanged": "Die Compose-Datei wurde seit dem Start dieser Container geändert – diese Änderungen werden mit ausgerollt.",
-            "upd.dataWarn": "Ein Rollback stellt das Image wieder her, nicht die Daten. Migriert die neue Version ihre Datenbank, hilft nur der Dump.",
+            "upd.dataTitle": "Ein Rollback stellt das Image wieder her, nicht die Daten",
+            "upd.dataWarn": "Migriert die neue Version ihre Datenbank, hilft nur der Dump.",
             "upd.downtime": "Die Container sind beim Neuerstellen kurz nicht erreichbar.",
             "upd.installed": "Installierte Version",
             "upd.versionUnknown": "unbekannt",
+            "upd.jumpTitle": "Größe des Sprungs unbekannt",
             "upd.jumpUnknown": "Die installierte Version ist unbekannt, und der Tag {tag} folgt jeder neuen Version. Wie groß der Sprung ist, lässt sich deshalb nicht sagen. Es kann eine neue Hauptversion sein, die andere Einstellungen oder zusätzliche Dienste braucht. Prüfen Sie vorher die Release-Notes.",
             "upd.jumpConfirm": "Mir ist bewusst, dass dieses Update eine neue Hauptversion bringen kann.",
             "upd.jumpTarget": "{tag} zeigt gerade auf {v}.",
             "upd.target": "Bringt",
             "upd.targetSame": "{v} (die Version, die jetzt läuft)",
+            "upd.majorTitle": "Neue Hauptversion",
             "upd.majorJump": "Dieses Update bringt eine neue Hauptversion: {from} → {to}. Neue Hauptversionen brauchen oft andere Einstellungen oder zusätzliche Dienste; prüfen Sie vorher die Release-Notes.",
             "upd.majorConfirm": "Ich habe die Release-Notes zu {to} geprüft.",
+            "upd.notPossibleTitle": "Über das Addon nicht möglich",
             "upd.notPossible": "Über das Addon nicht möglich: {reason}",
-            "reason.not-compose": "Der Container wurde nicht mit docker compose gestartet und lässt sich daher nicht sicher neu erstellen.",
+            "reason.not-compose": "Der Container wurde nicht mit `docker compose` gestartet und lässt sich daher nicht sicher neu erstellen.",
             "reason.compose-file-missing": "Die Compose-Datei existiert nicht mehr ({files}).",
-            "reason.digest-pinned": "Das Image ist per Digest festgelegt (@sha256) – ein Update heißt hier, die Compose-Datei zu ändern.",
-            "reason.built-locally": "Das Image wird lokal gebaut (build:) – bitte im Projekt neu bauen.",
-            "reason.compose-config-error": "docker compose config schlägt fehl: {detail}",
+            "reason.digest-pinned": "Das Image ist per Digest festgelegt (`@sha256`) – ein Update heißt hier, die Compose-Datei zu ändern.",
+            "reason.built-locally": "Das Image wird lokal gebaut (`build:`) – bauen Sie es im Projekt neu.",
+            "reason.compose-config-error": "`docker compose config` schlägt fehl: {detail}",
             "reason.same-tag": "{tag} ist der Tag, der jetzt konfiguriert ist.",
             "reason.no-choices": "Der Radar hat für die installierte Version keine Versionen anzubieten (sie ist unbekannt, folgt keinem Versionsschema, oder die Radar-Daten sind älter als 0.11.0).",
             "reason.not-offered": "Der Radar bietet {tag} für die installierte Version nicht an: Er ist älter, eine Vorabversion oder eine andere Variante.",
             "reason.db-major": "Eine neue Hauptversion einer Datenbank braucht eine Migration (Dump und Restore bzw. pg_upgrade); das kann das Addon noch nicht.",
             "reason.major-skip": "Nextcloud lässt sich nur um eine Hauptversion pro Schritt aktualisieren.",
             "reason.anchors": "Die Image-Zeile steht unter einem YAML-Anker oder außerhalb eines Service ({detail}). Bitte ändern Sie den Tag von Hand.",
-            "reason.not-found": "Für {detail} wurde keine Image-Zeile mit dieser Referenz gefunden, etwa wegen include: oder einer erzeugten Datei. Bitte ändern Sie den Tag von Hand.",
-            "reason.variable-complex": "Der Tag kommt aus einer Variable, die sich nicht sicher ändern lässt ({detail}): Sie steht nicht in der .env-Datei, ist mehrfach gesetzt, hat nur einen Standardwert, oder die Referenz setzt sich aus mehreren Variablen zusammen.",
+            "reason.not-found": "Für {detail} wurde keine Image-Zeile mit dieser Referenz gefunden, etwa wegen `include:` oder einer erzeugten Datei. Bitte ändern Sie den Tag von Hand.",
+            "reason.variable-complex": "Der Tag kommt aus einer Variable, die sich nicht sicher ändern lässt ({detail}): Sie steht nicht in der `.env`-Datei, ist mehrfach gesetzt, hat nur einen Standardwert, oder die Referenz setzt sich aus mehreren Variablen zusammen.",
             "reason.variable-shared": "Die Variable {detail} wird auch anderswo verwendet; sie zu ändern, würde mehr als dieses Image ändern.",
             "reason.unreadable": "{detail} ist keine reguläre UTF-8-Datei von höchstens 1 MiB.",
             "upd.ok": "Update erfolgreich. Rollback-Kopie: {rb}",
@@ -528,6 +575,7 @@
             "upd.reasonExit": "Mit Exit-Code {code} beendet; im Log steht keine Fehlerzeile.",
             "upd.reasonTimeout": "In der Wartezeit nicht bereit geworden; im Log steht keine Fehlerzeile.",
             "upd.reasonNone": "Im Log steht keine Fehlerzeile; siehe Ausgabe.",
+            "upd.failedBuildTitle": "Dieser Build ist schon einmal gescheitert",
             "upd.failedBuild": "Das Update auf genau diesen Build ist am {date} gescheitert. Versuchen Sie es nur erneut, wenn die Ursache behoben ist, etwa eine Einstellung in der Compose-Datei.",
             "upd.retryConfirm": "Diesen Build trotzdem erneut versuchen.",
             "row.failedBuild": "Das Update auf diesen Build ist am {date} gescheitert.",
@@ -547,10 +595,14 @@
             "rt.grp.minor": "Minor-Versionen",
             "rt.grp.major": "Major-Versionen",
             "rt.grp.floating": "Folgt jeder neuen Version",
-            "rt.checking": "Prüfe die Änderung …",
+            "rt.checking": "Die Änderung wird geprüft …",
+            "rt.checkFailed": "Die Änderung konnte nicht geprüft werden",
             "rt.diff": "Was sich in den Dateien ändert",
-            "rt.variable": "Der Tag kommt aus der Variable {name}; sie wird dort geändert, wo sie gesetzt ist.",
-            "rt.git": "Das Projekt liegt im Git-Repository {path}. Das Addon committet nicht; übernehmen Sie die Änderung dort, wenn sie in die Historie soll.",
+            "rt.variableTitle": "Tag aus einer Variable",
+            "rt.variable": "Der Tag kommt aus der Variable `{name}`; sie wird dort geändert, wo sie gesetzt ist.",
+            "rt.gitTitle": "Git-Repository",
+            "rt.git": "Das Projekt liegt im Git-Repository `{path}`. Das Addon committet nicht; übernehmen Sie die Änderung dort, wenn sie in die Historie soll.",
+            "rt.floatingTitle": "Der Tag folgt jeder neuen Version",
             "rt.floating": "{tag} folgt jeder neuen Version, auch neuen Hauptversionen: Welche Version er bringt, zeigt sich erst nach dem Pull, und jedes spätere Update kann eine neue Hauptversion bringen. Prüfen Sie vorher die Release-Notes.",
             "rt.floatingConfirm": "Mir ist bewusst, dass {tag} jeder neuen Version folgt.",
             "rt.ok": "Version geändert: Die Compose-Datei nennt jetzt {tag}. Rollback-Kopie: {rb}",
@@ -562,10 +614,10 @@
             "log.desc": "{when} · {image}",
             "log.loading": "Lädt die Ausgabe …",
             "log.none": "Für diesen Vorgang ist keine Ausgabe gespeichert (Updates vor 0.9.0 speicherten keine).",
-            "rb.button": "Zurückrollen",
+            "rb.button": "Update zurückrollen",
             "rb.title": "{name} zurückrollen?",
-            "rb.desc": "Setzt {image} wieder auf {rb} und erstellt {services} neu. Datenbanken werden nicht zurückgesetzt – bei Migrationsproblemen den Dump einspielen.",
-            "rb.descRetag": "Stellt {files} wieder her, wie sie vor dem Tag-Wechsel waren, setzt {image} wieder auf {rb} und erstellt {services} neu. Datenbanken werden nicht zurückgesetzt – bei Migrationsproblemen den Dump einspielen.",
+            "rb.desc": "Setzt {image} wieder auf {rb} und erstellt {services} neu. Datenbanken werden nicht zurückgesetzt – machen Migrationen Probleme, spielen Sie den Dump ein.",
+            "rb.descRetag": "Stellt {files} wieder her, wie sie vor dem Tag-Wechsel waren, setzt {image} wieder auf {rb} und erstellt {services} neu. Datenbanken werden nicht zurückgesetzt – machen Migrationen Probleme, spielen Sie den Dump ein.",
             "rb.ok": "Rollback erfolgreich.",
             "rb.failed": "Rollback fehlgeschlagen – siehe Ausgabe.",
             "rb.aborted": "Rollback abgebrochen, bevor etwas geändert wurde – siehe Ausgabe.",
@@ -576,33 +628,37 @@
             "bk.ops": "Update-Verlauf",
             "bk.dumps": "Datenbank-Dumps",
             "bk.images": "Rollback-Images",
-            "bk.noOps": "Noch keine Updates.",
-            "bk.noDumps": "Keine Dumps.",
-            "bk.noImages": "Keine Rollback-Images.",
-            "bk.error": "Backups konnten nicht geladen werden: {msg}",
-            "bk.needAdmin": "Die Backup-Übersicht braucht administrativen Zugriff in Cockpit.",
+            "bk.noOps": "Noch keine Updates",
+            "bk.noOpsBody": "Hier erscheinen Updates, Versionswechsel und Rollbacks, die auf dieser Seite gestartet werden.",
+            "bk.noDumps": "Keine Datenbank-Dumps",
+            "bk.noDumpsBody": "Ein Update sichert vorher die Datenbanken seines Projekts; die Dumps liegen dann hier.",
+            "bk.noImages": "Keine Rollback-Images",
+            "bk.noImagesBody": "Vor jedem Update wird das laufende Image als Rollback-Kopie gesichert; die Kopien stehen dann hier.",
+            "bk.errorTitle": "Die Backups konnten nicht geladen werden",
+            "bk.error": "Prüfen Sie, ob Docker auf diesem Server läuft, und wählen Sie dann „Aktualisieren“. Details: {msg}",
+            "bk.needAdmin": "Die Backup-Übersicht braucht administrativen Zugriff: Schalten Sie ihn oben in Cockpit ein.",
             "cl.title": "Aufräumen",
             "cl.keep": { one: "behält den neuesten Dump je Datenbank-Container", other: "behält die neuesten {n} Dumps je Datenbank-Container" },
             "cl.keepOff": "löscht nie Dumps",
             "cl.days": { one: "entfernt ungenutzte Rollback-Images nach {n} Tag", other: "entfernt ungenutzte Rollback-Images nach {n} Tagen" },
             "cl.daysOff": "entfernt nie Rollback-Images",
             "cl.rules": "Regeln: {keep}, {days}.",
-            "cl.srcFile": "Festgelegt in {file}.",
-            "cl.srcDefault": "Standardwerte – änderbar in /etc/image-updates.conf (KEEP_DUMPS, ROLLBACK_IMAGE_DAYS; 0 = nie).",
+            "cl.srcFile": "Festgelegt in `{file}`.",
+            "cl.srcDefault": "Standardwerte – änderbar in `/etc/image-updates.conf` (`KEEP_DUMPS`, `ROLLBACK_IMAGE_DAYS`; 0 = nie).",
             "cl.protect": "Die Dumps des letzten Updates je Projekt und benutzte Rollback-Images werden nie gelöscht.",
-            "cl.timerOn": "Läuft nach jedem erfolgreichen Update (für dessen Projekt) und täglich über diun-cleanup.timer.",
+            "cl.timerOn": "Läuft nach jedem erfolgreichen Update (für dessen Projekt) und täglich über `diun-cleanup.timer`.",
             "cl.timerOff": "Läuft nach jedem erfolgreichen Update (für dessen Projekt). Der tägliche Lauf ist nicht eingerichtet.",
             "cl.dumpsN": { one: "{n} Dump", other: "{n} Dumps" },
             "cl.imagesN": { one: "{n} Rollback-Image", other: "{n} Rollback-Images" },
             "cl.preview": "Jetzt zu löschen: {dumps}, {images} ({size}).",
             "cl.nothing": "Derzeit nichts aufzuräumen.",
             "cl.error": "Aufräumregeln: {msg}",
-            "cl.button": "Jetzt aufräumen",
+            "cl.button": "Dumps und Images aufräumen",
             "cl.mark": "wird gelöscht",
-            "cl.markTip": "Von den Aufräumregeln ausgewählt (nächster Lauf oder „Jetzt aufräumen“).",
-            "cl.dlgTitle": "Jetzt aufräumen?",
+            "cl.markTip": "Von den Aufräumregeln ausgewählt (nächster Lauf oder „Dumps und Images aufräumen“).",
+            "cl.dlgTitle": "Dumps und Images aufräumen?",
             "cl.dlgDesc": "Löscht die von den Regeln ausgewählten Dumps und Rollback-Images. Sie lassen sich danach nicht wiederherstellen.",
-            "cl.confirm": "Aufräumen",
+            "cl.confirm": "Dumps und Images aufräumen",
             "cl.done": "Aufgeräumt: {dumps}, {images} ({size} frei geworden).",
             "cl.partial": "{n} ließen sich nicht entfernen – siehe Ausgabe.",
             "cl.nochange": "Nichts aufzuräumen.",
@@ -616,19 +672,21 @@
             "img.inUseTip": "Ein Container nutzt dieses Image noch – es kann nicht gelöscht werden.",
             "img.free": "ungenutzt",
             "del.dumpTitle": "Dump löschen?",
-            "del.dumpDesc": "Löscht {path} endgültig. Danach lässt er sich nicht mehr wiederherstellen.",
+            "del.dumpDesc": "Löscht `{path}` endgültig. Danach lässt er sich nicht mehr wiederherstellen.",
             "del.imgTitle": "Rollback-Image löschen?",
-            "del.imgDesc": "Entfernt {ref}. Ein Zurückrollen auf diesen Stand ist danach nicht mehr möglich.",
-            "del.confirm": "Endgültig löschen",
+            "del.imgDesc": "Entfernt `{ref}`. Ein Zurückrollen auf diesen Stand ist danach nicht mehr möglich.",
+            "del.dumpConfirm": "Dump löschen",
+            "del.imgConfirm": "Image löschen",
             "del.ok": "Gelöscht.",
             "dialog.note": "Läuft mit Administratorrechten über Cockpit. Die Ausgabe erscheint hier live.",
             "dialog.cancel": "Abbrechen",
             "dialog.close": "Schließen",
             "dialog.running": "Läuft …",
             "dialog.success": "Erfolgreich abgeschlossen.",
-            "dialog.failed": "Fehlgeschlagen (Exit-Code {code}).",
-            "dialog.error": "Fehlgeschlagen: {msg}",
-            "dialog.noAdmin": "Abgelehnt: Dafür wird administrativer Zugriff in Cockpit benötigt (oben in Cockpit einschalten).",
+            "dialog.failed": "Der Vorgang ist fehlgeschlagen (Exit-Code {code}). Die Ausgabe oben zeigt die Ursache.",
+            "dialog.error": "Der Helfer hat nicht wie erwartet geantwortet. Prüfen Sie, ob das Paket cockpit-image-updates vollständig installiert ist, und versuchen Sie es erneut. Details: {msg}",
+            "dialog.noAdmin": "Abgelehnt: Dafür braucht diese Sitzung administrativen Zugriff. Schalten Sie ihn oben in Cockpit ein.",
+            "sig.source": "Quellcode",
         },
     };
     const LANG = /^de([-_]|$)/i.test(String(cockpit.language || "")) ? "de" : "en";
@@ -705,12 +763,17 @@
             "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
         }[c]));
     }
+    // A translated text as HTML: `…` marks a path or a command (<code>).
+    function rich(s) {
+        return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+    }
+    // Sizes on a 1024 base with two decimals: "1,67 GiB".
     function human(n) {
         if (n == null || isNaN(n)) return "?";
-        const units = ["B", "KB", "MB", "GB", "TB"];
+        const units = ["B", "KiB", "MiB", "GiB", "TiB"];
         let i = 0;
         while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-        return (i === 0 ? n.toFixed(0) : n.toFixed(1)).replace(".", LANG === "de" ? "," : ".") + " " + units[i];
+        return (i === 0 ? n.toFixed(0) : n.toFixed(2)).replace(".", LANG === "de" ? "," : ".") + " " + units[i];
     }
     function fmtDate(d) {
         if (!d || isNaN(d)) return "—";
@@ -788,6 +851,22 @@
     function label(kind, iconName, text, title) {
         return `<span class="az-label${kind ? " az-label--" + kind : ""}"${title ? ` title="${esc(title)}"` : ""}>` +
                `${iconName ? icon(iconName) : ""}${esc(text)}</span>`;
+    }
+    // Alert (az-alert): a note with info-circle, a warning with the triangle,
+    // an error with the circle and role="alert". body is HTML.
+    const ALERT_ICON = { info: "info-circle", warning: "exclamation-triangle", danger: "exclamation-circle" };
+    function alertInner(kind, title, body) {
+        return `<span class="az-alert__icon">${icon(ALERT_ICON[kind])}</span>` +
+               (title ? `<p class="az-alert__title">${esc(title)}</p>` : "") +
+               `<p class="az-alert__body">${body}</p>`;
+    }
+    function alertBox(kind, title, body) {
+        return `<div class="az-alert${kind === "info" ? "" : " az-alert--" + kind}" role="${kind === "danger" ? "alert" : "status"}">` +
+               alertInner(kind, title, body) + `</div>`;
+    }
+    // An error in running text: never colour alone, always the icon.
+    function errorText(text) {
+        return `<span class="dm-error">${icon("exclamation-circle")}${esc(text)}</span>`;
     }
     // Text button with an icon on the left (az-btn--secondary az-btn--sm).
     function textButton(iconName, text, attrs) {
@@ -899,10 +978,17 @@
     //   compared = the radar compared the installed version (or the tag) with
     //          the registry's tags; not for an image no registry shows
     //          ("unlisted") or a registry error without earlier data.
-    // Chips are compared with the INSTALLED version; filled = the configured
-    // tag delivers it via the Update button, outlined = needs a new tag. An
-    // outlined chip whose tag the selection field offers (pick) is a button
-    // that opens "Change version" with that tag.
+    // Each level (patch, minor, major) is a label with the level as a word,
+    // compared with the INSTALLED version. data-reach says how to get it:
+    //   update    the configured tag delivers it via the Update button: a hint
+    //             (az-label--info, info-circle)
+    //   tag       needs a different tag: without judgement (az-label)
+    //   migration a database major: without judgement, with ban
+    // A "tag" level the selection field offers (pick) sits in a button that
+    // opens "Change version" with that tag. Gold is never a status.
+    const REACH = { update: ["az-label az-label--info", "info-circle"], tag: ["az-label", ""],
+                    migration: ["az-label", "ban"] };
+
     function versionCell(ctn, rec, inst, radarOk, pick) {
         const muted = (text, title) => ({
             html: `<span class="dm-muted"${title ? ` title="${esc(title)}"` : ""}>${esc(text)}</span>`,
@@ -922,29 +1008,31 @@
         const stale = rec.stale
             ? ` <span class="dm-muted" title="${esc(rec.error || "")}">${esc(t("ver.stale"))}</span>` : "";
         const reach = Array.isArray(rec.reach) ? rec.reach : [];
-        const chips = [];
+        const levels = [];
         let news = false;
         LEVELS.forEach(([lvl, label]) => {
             if (!cmp[lvl]) return;
             const info = lvl === "major" && rec.db;
             if (!info) news = true;
             const can = reach.indexOf(lvl) > -1;
-            const cls = info ? "dm-chip-info" : "dm-chip-" + lvl + (can ? "" : " dm-chip-manual");
-            const tag = !info && !can && pick && pick.has(cmp[lvl]) ? cmp[lvl] : null;
-            const title = [info ? t("ver.dbMajor") : t("ver.levelTip", { level: label }),
-                           t(can ? "ver.reachYes" : "ver.reachNo", { tag: ctn.tag })]
-                .concat(tag ? [t("ver.clickRetag", { tag })] : []).join("\n");
-            const text = `${label} <span class="dm-ver">${esc(cmp[lvl])}</span>`;
-            chips.push(tag
-                ? `<button type="button" class="dm-chip ${cls}" title="${esc(title)}" ` +
-                  `data-retag="${esc(ctn.name)}" data-tag="${esc(tag)}">${text}</button>`
-                : `<span class="dm-chip ${cls}" title="${esc(title)}">${text}</span>`);
+            const how = info ? "migration" : can ? "update" : "tag";
+            const [cls, ic] = REACH[how];
+            const tag = how === "tag" && pick && pick.has(cmp[lvl]) ? cmp[lvl] : null;
+            const title = esc([info ? t("ver.dbMajor") : t("ver.levelTip", { level: label }),
+                               t(can ? "ver.reachYes" : "ver.reachNo", { tag: ctn.tag })]
+                .concat(tag ? [t("ver.clickRetag", { tag })] : []).join("\n"));
+            const lab = `<span class="${cls} dm-level" data-level="${lvl}" data-reach="${how}"${tag ? "" : ` title="${title}"`}>` +
+                        `${ic ? icon(ic) : ""}${label} <span class="dm-ver">${esc(cmp[lvl])}</span></span>`;
+            levels.push(tag
+                ? `<button type="button" class="dm-level-btn" title="${title}" ` +
+                  `data-retag="${esc(ctn.name)}" data-tag="${esc(tag)}">${lab}</button>`
+                : lab);
         });
-        if (!chips.length) {
-            return { html: `<span class="dm-uptodate" title="${esc(t("ver.upToDateTip"))}">✓` +
-                           `${inst.v ? " " + esc(inst.v) : ""}</span>${stale}`, news: false, compared: true };
+        if (!levels.length) {
+            return { html: `<span class="dm-uptodate" title="${esc(t("ver.upToDateTip"))}">${icon("check-circle")}` +
+                           `${inst.v ? `<span class="dm-ver">${esc(inst.v)}</span>` : ""}</span>${stale}`, news: false, compared: true };
         }
-        return { html: `<span class="dm-chips">${chips.join("")}</span>${stale}`, news, compared: true };
+        return { html: `<span class="dm-levels">${levels.join("")}</span>${stale}`, news, compared: true };
     }
 
     // Failed builds from the history: image ref -> the newest update of that
@@ -1060,8 +1148,9 @@
         return t("meta.radar", { ago: a.text }) + (a.hours > RADAR_STALE_H ? " " + t("meta.outdated") : "");
     }
 
-    function render(containers, eventsMap, radarDoc) {
-        lastRender = [containers, eventsMap, radarDoc];
+    // fromEvents: no inventory, the rows come from Diun's events alone.
+    function render(containers, eventsMap, radarDoc, fromEvents) {
+        lastRender = [containers, eventsMap, radarDoc, fromEvents];
         rowFailed.clear();
         retagInfo.clear();
         // An update recreates every service of the project with the same image.
@@ -1098,6 +1187,8 @@
         if (containers.length === 0) {
             $("dm-table").hidden = true;
             $("dm-legend").hidden = true;
+            $("dm-empty-title").textContent = t(fromEvents ? "empty.eventsTitle" : "empty.title");
+            $("dm-empty-body").textContent = t(fromEvents ? "empty.eventsBody" : "empty.body");
             $("dm-empty").hidden = false;
             return;
         }
@@ -1132,36 +1223,45 @@
 
     // Turns the check result into the list of problems the panel shows.
     // action = [verb, target] the helper accepts, or null with a hint instead.
+    // Without Docker nothing works: an error; everything else is a warning.
     function depProblems(d) {
         const out = [];
         if (!d) return out;
         const dk = d.docker || {}, di = d.diun || {}, sk = d.skopeo || {}, ra = d.radar || {};
         if (dk.state !== "ok") {
-            out.push({ id: "docker", state: t(dk.state === "no-cli" ? "state.missing" : "state.unreachable"),
+            out.push({ id: "docker", error: true, state: t(dk.state === "no-cli" ? "state.missing" : "state.unreachable"),
                        hint: t("dep.docker.hint") });
         }
         if (di.state === "missing") {
             out.push({ id: "diun", state: t("state.missing"),
-                       action: di.can_install ? ["install", "diun", "action.install"] : null,
+                       action: di.can_install ? ["install", "diun"] : null,
                        hint: di.can_install ? "" : (dk.state === "ok" ? t("dep.diun.noCompose") : t("dep.docker.hint")) });
         } else if (di.state === "stopped") {
             out.push({ id: "diun", state: t("state.stopped"),
-                       action: di.can_start ? ["start", "diun", "action.start"] : null,
+                       action: di.can_start ? ["start", "diun"] : null,
                        hint: di.can_start ? "" : t("dep.diun.external") });
         } else if (di.state === "running" && !di.events) {
             out.push({ id: "diun", state: t("state.noEvents"), hint: t("dep.diun.noEvents") });
         }
         if (sk.state !== "ok") {
             out.push({ id: "skopeo", state: t("state.missing"),
-                       action: sk.can_install ? ["install", "skopeo", "action.install"] : null,
+                       action: sk.can_install ? ["install", "skopeo"] : null,
                        hint: sk.can_install ? "" : t("dep.skopeo.noPm") });
         }
         if (ra.state !== "active") {
             out.push({ id: "radar", state: t(ra.state === "inactive" ? "state.inactive" : "state.missing"),
-                       action: ra.can_install ? ["install", "radar", "action.setup"] : null,
+                       action: ra.can_install ? ["install", "radar"] : null,
                        hint: ra.can_install ? "" : t("dep.radar.noScript") });
         }
         return out;
+    }
+
+    // The panel is an error when Docker is the problem, a warning otherwise.
+    function depsLevel(error) {
+        const panel = $("dm-deps");
+        panel.classList.toggle("az-alert--danger", error);
+        panel.classList.toggle("az-alert--warning", !error);
+        $("dm-deps-icon").innerHTML = icon(error ? "exclamation-circle" : "exclamation-triangle");
     }
 
     function renderDeps(d) {
@@ -1171,26 +1271,28 @@
         if (!d) { panel.hidden = true; return; }
         if (!d.root) {
             // Without admin rights the check can't see Docker; say so once.
+            depsLevel(false);
             $("dm-deps-intro").textContent = t("deps.needAdmin");
             panel.hidden = false;
             return;
         }
         const problems = depProblems(d);
         if (!problems.length) { panel.hidden = true; return; }
+        depsLevel(problems.some((p) => p.error));
         $("dm-deps-intro").textContent = t("deps.intro");
         problems.forEach((p) => {
             const li = document.createElement("li");
             li.className = "dm-dep";
             const btn = p.action
-                ? textButton(p.action[0] === "start" ? "play" : "plus", t(p.action[2]),
+                ? textButton(p.action[0] === "start" ? "play" : "plus", t("action." + p.action.join(".")),
                              `data-verb="${esc(p.action[0])}" data-target="${esc(p.action[1])}"`)
                 : "";
             li.innerHTML =
                 `<div class="dm-dep-main">` +
                   `<span class="dm-dep-name">${esc(t("dep." + p.id))}</span> ` +
-                  label("warning", "exclamation-triangle", p.state) +
+                  (p.error ? label("danger", "exclamation-circle", p.state) : label("warning", "exclamation-triangle", p.state)) +
                   `<div class="dm-dep-desc">${esc(t("dep." + p.id + ".desc"))}</div>` +
-                  (p.hint ? `<div class="dm-dep-hint">${esc(p.hint)}</div>` : "") +
+                  (p.hint ? `<div class="dm-dep-hint">${rich(p.hint)}</div>` : "") +
                 `</div>` +
                 `<div class="dm-dep-action">${btn}</div>`;
             list.appendChild(li);
@@ -1228,15 +1330,15 @@
         Promise.resolve().then(() => spawnHelper([UPDATE_CMD, "radar"], "require"))
             .catch((ex) => {
                 ex = ex || {};
-                failed = isNoAdmin(ex) ? t("dialog.noAdmin")
-                    : ex.exit_status === 2 ? t("radar.notSetUp") : t("radar.failed");
+                failed = isNoAdmin(ex) ? ["status.noAdminTitle", "dialog.noAdmin"]
+                    : ex.exit_status === 2 ? ["radar.notSetUpTitle", "radar.notSetUp"] : ["radar.failedTitle", "radar.failed"];
             })
             .finally(() => {
                 radarRunning = false;
                 // The run is over, whatever the last check said.
                 if (lastDeps && lastDeps.radar) lastDeps.radar.running = false;
                 renderRadarButton();
-                if (failed) showStatus(failed, true); else safeLoad();
+                if (failed) showStatus(t(failed[0]), t(failed[1]), true); else safeLoad();
             });
     }
 
@@ -1262,7 +1364,7 @@
         open(spec) {
             this.spec = spec;
             $("dm-dialog-title").textContent = spec.title;
-            $("dm-dialog-desc").textContent = spec.desc || "";
+            $("dm-dialog-desc").innerHTML = rich(spec.desc || "");
             $("dm-dialog-desc").hidden = !spec.desc;
             const body = $("dm-dialog-body");
             body.innerHTML = spec.body || "";
@@ -1294,9 +1396,10 @@
             this.open(spec);
         },
 
+        // The outcome line; success and failure carry their icon, not colour alone.
         result(text, ok) {
             const res = $("dm-dialog-result");
-            res.textContent = text;
+            res.innerHTML = text ? (ok === true ? icon("check-circle") : ok === false ? icon("exclamation-circle") : "") + esc(text) : "";
             res.className = "dm-dialog-result" + (ok === true ? " is-ok" : ok === false ? " is-error" : "");
         },
 
@@ -1409,12 +1512,10 @@
     // --- Install requirement -------------------------------------------------
     function openInstallDialog(verb, target) {
         const base = "dlg." + verb + "." + target;
-        const setup = target === "radar" || target === "cleanup";
-        const label = { install: setup ? "action.setup" : "action.install", start: "action.start" }[verb];
         confirmAndRun({
             title: t(base + ".title"),
             desc: t(base + ".desc"),
-            confirm: { label: t(label), argv: () => [DEPS_CMD, verb, target] },
+            confirm: { label: t("action." + verb + "." + target), argv: () => [DEPS_CMD, verb, target] },
         });
     }
 
@@ -1429,7 +1530,7 @@
         const dbs = plan.dbs || [];
         const dbLines = dbs.map((d) => {
             if (d.kind === "unsupported") return esc(t("upd.dbUnsupported", { name: d.name }));
-            if (!d.running) return `<span class="dm-warn-text">${esc(t("upd.dbStopped", { name: d.name }))}</span>`;
+            if (!d.running) return errorText(t("upd.dbStopped", { name: d.name }));
             return esc(d.size ? t("upd.dbLine", { name: d.name, size: human(d.size) })
                               : t("upd.dbLineNoSize", { name: d.name }));
         });
@@ -1440,26 +1541,27 @@
         // (.dm-gate, see startUpdate). A warning and its tick box stay
         // together (.dm-gate-group).
         const tag = tagSplit(plan.image).tag;
-        const gate = (warning, id, confirm) =>
-            `<div class="dm-gate-group"><p class="dm-callout dm-callout-warn">${warning}</p>` +
+        const gate = (title, warning, id, confirm) =>
+            `<div class="dm-gate-group">${alertBox("warning", title, warning)}` +
             `<label class="dm-check"><input type="checkbox" class="dm-gate" id="${id}"> ${esc(confirm)}</label></div>`;
         if (plan.jump_unknown && rt) {
-            html += gate(esc(t("rt.floating", { tag: rt.tag })), "dm-jump-check", t("rt.floatingConfirm", { tag: rt.tag }));
+            html += gate(t("rt.floatingTitle"), esc(t("rt.floating", { tag: rt.tag })), "dm-jump-check",
+                         t("rt.floatingConfirm", { tag: rt.tag }));
         } else if (plan.jump_unknown) {
-            html += gate(esc(t("upd.jumpUnknown", { tag })) +
+            html += gate(t("upd.jumpTitle"), esc(t("upd.jumpUnknown", { tag })) +
                          (plan.target_version ? " " + esc(t("upd.jumpTarget", { tag, v: plan.target_version })) : ""),
                          "dm-jump-check", t("upd.jumpConfirm"));
         }
         // The update brings a new major version (installed and target known).
         if (plan.jump === "major") {
-            html += gate(esc(t("upd.majorJump", { from: plan.installed_version, to: plan.target_version })),
+            html += gate(t("upd.majorTitle"), esc(t("upd.majorJump", { from: plan.installed_version, to: plan.target_version })),
                          "dm-major-check", t("upd.majorConfirm", { to: plan.target_version }));
         }
         // The registry offers exactly the build whose update failed before.
         if (failed) {
             const cause = failed.reason ? reasonText(failed.reason) : "";
-            html += gate(esc(t("upd.failedBuild", { date: fmtDate(new Date(failed.ts)) })) +
-                         (cause ? `<span class="dm-reason-line dm-callout-line">${esc(cause)}</span>` : ""),
+            html += gate(t("upd.failedBuildTitle"), esc(t("upd.failedBuild", { date: fmtDate(new Date(failed.ts)) })) +
+                         (cause ? `<span class="dm-reason-line dm-alert-line">${esc(cause)}</span>` : ""),
                          "dm-retry-check", t("upd.retryConfirm"));
         }
         const jobs = plan.jobs || [];
@@ -1488,14 +1590,14 @@
             `</ul>`;
         html += `<label class="dm-check"><input type="checkbox" id="dm-dump-check"${dumpable ? " checked" : " disabled"}> ` +
                 `${esc(t("upd.dumpCheck"))}</label>`;
-        if (plan.config_changed) html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.configChanged"))}</p>`;
+        if (plan.config_changed) html += alertBox("warning", t("upd.configChangedTitle"), esc(t("upd.configChanged")));
         (plan.job_order || []).forEach((o) => {
-            html += `<p class="dm-callout dm-callout-warn">${esc(t("upd.jobOrder", { job: o.job, services: o.services.join(", ") }))}</p>`;
+            html += alertBox("warning", t("upd.jobOrderTitle"), rich(t("upd.jobOrder", { job: o.job, services: o.services.join(", ") })));
         });
         (plan.shared_networks || []).forEach((n) => {
-            html += `<p class="dm-callout">${esc(t("upd.sharedNet", { network: n.network, projects: n.projects.join(", ") }))}</p>`;
+            html += alertBox("info", t("upd.sharedNetTitle"), esc(t("upd.sharedNet", { network: n.network, projects: n.projects.join(", ") })));
         });
-        html += `<p class="dm-callout">${esc(t("upd.dataWarn"))} ${esc(t("upd.downtime"))}</p>`;
+        html += alertBox("info", t("upd.dataTitle"), `${esc(t("upd.dataWarn"))} ${esc(t("upd.downtime"))}`);
         return html;
     }
 
@@ -1644,15 +1746,17 @@
                 `<div class="dm-diff-lines"><div class="dm-diff-old">- ${esc(c.old)}</div>` +
                 `<div class="dm-diff-new">+ ${esc(c.new)}</div></div></div>`).join("") +
             `</div>` +
-            (rt.variable ? `<p class="dm-callout">${esc(t("rt.variable", { name: rt.variable }))}</p>` : "") +
-            (rt.git ? `<p class="dm-callout">${esc(t("rt.git", { path: rt.git }))}</p>` : "");
+            (rt.variable ? alertBox("info", t("rt.variableTitle"), rich(t("rt.variable", { name: rt.variable }))) : "") +
+            (rt.git ? alertBox("info", t("rt.gitTitle"), rich(t("rt.git", { path: rt.git }))) : "");
     }
 
+    // Why a version change is not possible, as a sentence of its own (it
+    // stands under a title); a reason this page does not know yet as it is.
     function retagReason(plan) {
         const rt = plan.retag || {};
         const key = "reason." + rt.reason;
         const text = t(key, { tag: rt.tag, detail: rt.detail || "", files: (plan.missing || []).join(", ") });
-        return text === key ? rt.reason + (rt.detail ? ` (${rt.detail})` : "") : text;
+        return text === key ? rt.reason + (rt.detail ? ` (${rt.detail})` : "") : text.charAt(0).toUpperCase() + text.slice(1);
     }
 
     // preset: the tag of a clicked chip; "" opens the field on the configured tag.
@@ -1696,7 +1800,7 @@
                     try { plan = JSON.parse(out); } catch (_) { throw new Error("bad plan output"); }
                     const rt = plan.retag || {};
                     if (!rt.possible) {
-                        box.innerHTML = `<p class="dm-callout dm-callout-warn">${esc(t("upd.notPossible", { reason: retagReason(plan) }))}</p>`;
+                        box.innerHTML = alertBox("warning", t("upd.notPossibleTitle"), rich(retagReason(plan)));
                         return;
                     }
                     box.innerHTML = retagDiff(rt) + planBody(plan, null, rt);
@@ -1709,8 +1813,8 @@
                 })
                 .catch((ex) => {
                     if (stale()) return;
-                    box.innerHTML = `<p class="dm-callout dm-callout-warn">${esc(isNoAdmin(ex) ? t("dialog.noAdmin")
-                        : t("dialog.error", { msg: (ex && (ex.message || ex.problem)) || ex }))}</p>`;
+                    box.innerHTML = alertBox("danger", t("rt.checkFailed"), esc(isNoAdmin(ex) ? t("dialog.noAdmin")
+                        : t("dialog.error", { msg: (ex && (ex.message || ex.problem)) || ex })));
                 });
         };
         sel.addEventListener("change", preview);
@@ -1758,7 +1862,7 @@
         if (o.rolled_back) {
             return o.rollback_status === "failed"
                 ? label("danger", "exclamation-circle", t("res.rollbackFailed"))
-                : label("", "history", t("res.rolledBack"));
+                : label("", null, t("res.rolledBack"));
         }
         const map = { ok: ["success", "check-circle", "res.ok"], nochange: ["", null, "res.nochange"],
                       failed: ["danger", "exclamation-circle", "res.failed"],
@@ -1819,20 +1923,20 @@
         if (!c) return;
         const rules = $("dm-cleanup-rules");
         if (c.error) {
-            rules.innerHTML = `<span class="dm-danger-text">${esc(t("cl.error", { msg: c.error }))}</span>`;
+            rules.innerHTML = errorText(t("cl.error", { msg: c.error }));
         } else {
             const keep = c.keep_dumps ? t("cl.keep", { n: c.keep_dumps }) : t("cl.keepOff");
             const days = c.image_days ? t("cl.days", { n: c.image_days }) : t("cl.daysOff");
-            rules.textContent = [t("cl.rules", { keep, days }),
-                                 c.file ? t("cl.srcFile", { file: c.file }) : t("cl.srcDefault"),
-                                 t("cl.protect")].join(" ");
+            rules.innerHTML = [t("cl.rules", { keep, days }),
+                               c.file ? t("cl.srcFile", { file: c.file }) : t("cl.srcDefault"),
+                               t("cl.protect")].map(rich).join(" ");
         }
         const timer = $("dm-cleanup-timer");
         const cl = lastDeps && lastDeps.root ? lastDeps.cleanup : null;
         timer.hidden = !cl;
-        timer.textContent = cl ? t(cl.state === "active" ? "cl.timerOn" : "cl.timerOff") : "";
+        timer.innerHTML = cl ? rich(t(cl.state === "active" ? "cl.timerOn" : "cl.timerOff")) : "";
         if (cl && cl.state !== "active" && cl.can_install) {
-            timer.insertAdjacentHTML("beforeend", " " + textButton("plus", t("action.setup"), 'data-setup="cleanup"'));
+            timer.insertAdjacentHTML("beforeend", " " + textButton("plus", t("action.install.cleanup"), 'data-setup="cleanup"'));
             timer.querySelector("button[data-setup]").addEventListener("click", () => openInstallDialog("install", "cleanup"));
         }
         const nd = (c.dumps || []).length, ni = (c.images || []).length;
@@ -1865,22 +1969,28 @@
         });
     }
 
+    // Size of a rollback image in bytes, its creation time in ISO 8601; older
+    // helpers sent Docker's text ("275MB", "2026-10-12 03:15:00 +0200 CEST").
+    const imageSize = (s) => typeof s === "number" ? human(s) : s || "?";
+    const imageDate = (s) => fmtDate(new Date(String(s || "").replace(/^(\S+) (\S+) ([+-]\d\d)(\d\d)\b.*$/, "$1T$2$3:$4")));
+
     function renderBackups() {
         const b = backups || { dumps: [], images: [], ops: [] };
         const L = (key) => esc(t(key));
         const doomed = new Set(b.cleanup ? (b.cleanup.dumps || []).concat(b.cleanup.images || []) : []);
         renderCleanup();
         const summary = $("dm-bk-summary");
-        summary.classList.toggle("dm-danger-text", !backups && !!backupsError);
-        if (backups) {
-            summary.textContent = t("bk.summary", {
-                dumps: t("bk.dumpsN", { n: b.dumps.length, size: human(b.dump_bytes) }),
-                images: t("bk.imagesN", { n: b.images.length }),
-                free: human(b.free_bytes), dir: b.dir,
-            });
-        } else {
-            summary.textContent = backupsError;
-        }
+        const failure = $("dm-bk-error");
+        failure.hidden = !!backups || !backupsError;
+        failure.innerHTML = failure.hidden ? "" : alertInner("danger", t("bk.errorTitle"), esc(backupsError));
+        summary.hidden = !backups;
+        summary.textContent = backups ? t("bk.summary", {
+            dumps: t("bk.dumpsN", { n: b.dumps.length, size: human(b.dump_bytes) }),
+            images: t("bk.imagesN", { n: b.images.length }),
+            free: human(b.free_bytes), dir: b.dir,
+        }) : "";
+        // Without data the cards would call themselves empty: only the error shows.
+        ["dm-ops-title", "dm-dumps-title", "dm-images-title"].forEach((id) => { $(id).closest(".az-card").hidden = !backups; });
 
         const ops = $("dm-ops");
         ops.innerHTML = b.ops.map((o, i) =>
@@ -1925,7 +2035,7 @@
             btn.addEventListener("click", () => confirmAndRun({
                 title: t("del.dumpTitle"),
                 desc: t("del.dumpDesc", { path: d.path }),
-                confirm: { label: t("del.confirm"), danger: true, argv: () => [UPDATE_CMD, "delete-dump", d.path] },
+                confirm: { label: t("del.dumpConfirm"), danger: true, argv: () => [UPDATE_CMD, "delete-dump", d.path] },
                 onDone: (o) => { if (o.ok) { dlg.result(t("del.ok"), true); return true; } return false; },
             }));
         });
@@ -1934,8 +2044,8 @@
         imgs.innerHTML = b.images.map((im, i) =>
             `<tr>` +
             `<td data-label="${L("col.image")}"><span class="dm-cell az-mono">${esc(im.ref)}</span></td>` +
-            `<td class="az-nowrap" data-label="${L("col.created")}"><span class="dm-cell">${esc(String(im.created || "").slice(0, 16))}</span></td>` +
-            `<td class="az-nowrap" data-label="${L("col.size")}"><span class="dm-cell">${esc(im.size)}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.created")}"><span class="dm-cell">${esc(imageDate(im.created))}</span></td>` +
+            `<td class="az-nowrap" data-label="${L("col.size")}"><span class="dm-cell">${esc(imageSize(im.size))}</span></td>` +
             `<td data-label="${L("col.status")}"><span class="dm-cell">` +
               (im.in_use ? label("", null, t("img.inUse"), t("img.inUseTip"))
                          : `<span class="dm-muted">${L("img.free")}</span>${doomed.has(im.ref) ? cleanupMark() : ""}`) +
@@ -1951,7 +2061,7 @@
             btn.addEventListener("click", () => confirmAndRun({
                 title: t("del.imgTitle"),
                 desc: t("del.imgDesc", { ref: im.ref }),
-                confirm: { label: t("del.confirm"), danger: true, argv: () => [UPDATE_CMD, "delete-image", im.ref] },
+                confirm: { label: t("del.imgConfirm"), danger: true, argv: () => [UPDATE_CMD, "delete-image", im.ref] },
                 onDone: (o) => { if (o.ok) { dlg.result(t("del.ok"), true); return true; } return false; },
             }));
         });
@@ -1995,14 +2105,16 @@
     function dismiss(key) {
         dismissed[key] = true;
         dismissedFile.replace(dismissed)
-            .catch((err) => showStatus(t("status.saveError", { msg: err.message || err }), true))
+            .catch((err) => showStatus(t("status.saveErrorTitle"), t("status.saveError", { msg: err.message || err }), true))
             .finally(safeLoad);
     }
-    function showStatus(msg, isError) {
+    // Message for the whole page: a title that says what happened, the text
+    // how to fix it; an error is announced at once (role="alert").
+    function showStatus(title, body, isError) {
         const el = $("dm-status");
-        el.innerHTML = `<span class="az-alert__icon">${icon(isError ? "exclamation-circle" : "info-circle")}</span>` +
-                       `<p class="az-alert__body">${esc(msg)}</p>`;
+        el.innerHTML = alertInner(isError ? "danger" : "info", title, rich(body));
         el.classList.toggle("az-alert--danger", !!isError);
+        el.setAttribute("role", isError ? "alert" : "status");
         el.hidden = false;
     }
 
@@ -2037,18 +2149,18 @@
             if (invOut === null) {
                 // Inventory unavailable (no Docker access / no admin rights):
                 // fall back to a Diun-events-only view.
-                showStatus(t("status.noInventory"), false);
+                showStatus(t("status.noInventoryTitle"), t("status.noInventory"), false);
                 const evContainers = Array.from(eventsMap.values()).map((e) => {
                     const tg = tagSplit(e.image);
                     return { name: "—", image: tg.repo, tag: tg.tag, digest: "" };
                 });
-                render(evContainers, eventsMap, radarDoc);
+                render(evContainers, eventsMap, radarDoc, true);
                 return;
             }
             $("dm-status").hidden = true;
             render(parseInventory(invOut), eventsMap, radarDoc);
         }).catch((err) => {
-            showStatus(t("status.loadError", { msg: err.message || err }), true);
+            showStatus(t("status.loadErrorTitle"), t("status.loadError", { msg: err.message || err }), true);
         });
         // Both tabs are loaded together, so switching tabs loads nothing.
         return jobs.then(loadBackups);
@@ -2084,7 +2196,7 @@
         // Promise.resolve().then(): even a synchronous throw ends in finally,
         // so the indicator can never get stuck.
         Promise.resolve().then(load).catch((err) => {
-            showStatus(t("status.loadError", { msg: (err && err.message) || err }), true);
+            showStatus(t("status.loadErrorTitle"), t("status.loadError", { msg: (err && err.message) || err }), true);
         }).finally(() => {
             loading = false;
             if (pending) { pending = false; safeLoad(); return; }

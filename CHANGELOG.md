@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+The page follows the Azentrius design system where it did not yet: status never in colour alone and
+never in gold, alerts instead of stripes at the edge, empty states that say why, targets large enough
+for a phone, and clearer texts.
+
+- **Newest version:** each level (patch, minor, major) is a label with the level as a word. A level the
+  Update button brings is a hint (`info-circle`), one that needs a different tag is a label without
+  judgement, a database major one with `ban`. The green, gold and red chips are gone; how a level is
+  reached is in its tooltip and in the legend. “Installed is the newest” shows `check-circle` instead
+  of “✓”.
+- **Alerts:** the warnings in the plan of an update or a version change (unknown jump, new major
+  version, a build that failed before, compose file changed, start order, not possible) are warning
+  alerts with the triangle and a title; the notes (shared network, tag from a variable, git repository,
+  what a rollback restores) are info alerts; a check that fails is an error alert. Messages for the
+  whole page get a title, and errors are announced at once (`role="alert"`). Backups that cannot be
+  loaded show an error alert above the cards instead of red text.
+- **Errors never in colour alone:** a database that does not run, cleanup rules that are not
+  understood and the outcome line of a dialog carry their icon. Docker missing or unreachable is an
+  error (`az-label--danger` with `exclamation-circle`), and so is the requirements panel then.
+- **Empty states:** the containers table and the history, dumps and rollback images cards say what is
+  empty and why, with an icon.
+- **Targets:** level labels that open “Change version” and the tick boxes in the dialogs are at least
+  29 px high, 44 px on a phone.
+- **Texts:** buttons name what they act on (“Roll out image”, “Install skopeo”, “Set up radar”,
+  “Roll back update”, “Clean up dumps and images”, “Delete dump”); error messages say what happened and
+  how to fix it; the German texts address the user as “Sie” throughout; paths and commands are set as
+  code.
+- **Sizes** are on a 1024 base with two decimals (“1,67 GiB”). The helper reports the size of rollback
+  images in bytes and their creation time in ISO 8601 (`backups`), and the page formats both like
+  everything else; Docker's text from an older helper is still shown.
+- **Signature:** the word mark links to azentrius.de; a link to the source code follows the host.
+- **Motion:** the table dims within 120 ms; with reduced motion the spinners stand still. The loading
+  spinner is grey instead of gold.
+- **Licenses:** NOTICE names the icons as Font Awesome Free 5.15.4 by Fonticons, Inc. via
+  `@patternfly/react-icons` 6.4.0. The CC BY 4.0 notice ships as `LICENSES/CC-BY-4.0-Font-Awesome.txt`,
+  and the packages install it into `/usr/share/doc/cockpit-image-updates/`.
+
 ## 0.12.2 – 2026-10-16
 
 Images that no registry shows are named as such, and nothing is called up to date without a comparison.

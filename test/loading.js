@@ -102,7 +102,8 @@ function boot(spawnImpl) {
     await sleep(100);
     const thrown = c.state();
     console.log("spawn wirft   :", JSON.stringify(thrown));
-    assert(!thrown.loader && !thrown.btnDisabled && thrown.status.includes("Fehler beim Laden"));
+    assert(!thrown.loader && !thrown.btnDisabled && thrown.status.startsWith("Die Übersicht konnte nicht geladen werden") &&
+           thrown.status.endsWith("Details: boom"));
 
     console.log("\nALL CHECKS PASSED");
 })().catch((e) => { console.error("FEHLGESCHLAGEN:", e.message); process.exit(1); });

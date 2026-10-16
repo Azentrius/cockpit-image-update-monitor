@@ -118,12 +118,13 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     assert.deepStrictEqual([b0.className, b0.getAttribute("aria-label"), b0.title, b0.textContent,
                             b0.querySelector("svg").getAttribute("data-icon")],
                            ["az-btn az-btn--plain az-btn--sm", "Version ändern", "Version ändern", "", "exchange-alt"]);
-    const chips = [...rowOf(a.d, "plausible").querySelectorAll(".dm-chip")];
-    console.log("plausible chips:", chips.map((c) => `${c.tagName}:${c.dataset.tag}`).join(" "));
-    assert.deepStrictEqual(chips.map((c) => [c.tagName, c.dataset.tag]), [["BUTTON", "v2.1.5"], ["BUTTON", "v3.2.1"]]);
-    assert(chips[0].title.endsWith("Klicken, um den Tag auf v2.1.5 zu ändern."));
-    const pgChips = [...rowOf(a.d, "glitchtip-postgres").querySelectorAll(".dm-chip")];
-    assert(pgChips.every((c) => c.tagName === "SPAN"), "filled chips and database majors stay labels");
+    const lv = [...rowOf(a.d, "plausible").querySelectorAll(".dm-level")].map((x) => x.closest("button") || x);
+    console.log("plausible levels:", lv.map((c) => `${c.tagName}:${c.dataset.tag}`).join(" "));
+    assert.deepStrictEqual(lv.map((c) => [c.tagName, c.className, c.dataset.tag]),
+                           [["BUTTON", "dm-level-btn", "v2.1.5"], ["BUTTON", "dm-level-btn", "v3.2.1"]]);
+    assert(lv[0].title.endsWith("Klicken Sie, um den Tag auf v2.1.5 zu ändern."));
+    const pgLevels = [...rowOf(a.d, "glitchtip-postgres").querySelectorAll(".dm-level")];
+    assert(pgLevels.length && pgLevels.every((c) => !c.closest("button")), "levels the Update button brings and database majors stay labels");
 
     // 2. The field: configured tag first, groups, locked entries
     b0.click();
@@ -169,10 +170,10 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
         image: REPO + ":v2.1.5", backup: "/var/backups/image-updates/compose/plausible/20261015-101500" }) + "\n"] };
     const c = boot("de", { ...BASE, "diun-update.py retag": (cmd) => DRY()(cmd) || runOk });
     await sleep(80);
-    rowOf(c.d, "plausible").querySelector('button.dm-chip[data-tag="v2.1.5"]').click();
+    rowOf(c.d, "plausible").querySelector('button.dm-level-btn[data-tag="v2.1.5"]').click();
     await sleep(5);
-    assert.strictEqual(c.$("dm-retag-select").value, "v2.1.5", "the chip's tag is chosen");
-    assert.strictEqual(c.$("dm-retag-preview").textContent, "Prüfe die Änderung …");
+    assert.strictEqual(c.$("dm-retag-select").value, "v2.1.5", "the level's tag is chosen");
+    assert.strictEqual(c.$("dm-retag-preview").textContent, "Die Änderung wird geprüft …");
     assert(c.$("dm-dialog-confirm").disabled, "no confirm while planning");
     await sleep(40);
     const dry = c.last("retag");
@@ -213,7 +214,7 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     await sleep(40);
     const mc = m.$("dm-dialog-confirm");
     const mpv = m.$("dm-retag-preview");
-    console.log("\nmajor  :", mpv.querySelector(".dm-callout-warn").textContent);
+    console.log("\nmajor  :", mpv.querySelector(".az-alert--warning").textContent);
     assert(kvRows(mpv).includes("Bringt: 3.2.1 Major"));
     assert(mc.disabled, "waits for the tick box");
     tick(m, "dm-major-check", true);
@@ -239,7 +240,8 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     await sleep(40);
     const fw = f.$("dm-retag-preview").querySelector(".dm-gate-group");
     console.log("\nlatest :", fw.textContent.replace(/\s+/g, " ").trim());
-    assert(fw.querySelector(".dm-callout-warn").textContent.startsWith("latest folgt jeder neuen Version, auch neuen Hauptversionen"));
+    assert.strictEqual(fw.querySelector(".az-alert--warning .az-alert__title").textContent, "Der Tag folgt jeder neuen Version");
+    assert(fw.querySelector(".az-alert--warning .az-alert__body").textContent.startsWith("latest folgt jeder neuen Version, auch neuen Hauptversionen"));
     assert.strictEqual(fw.querySelector(".dm-check").textContent.trim(), "Mir ist bewusst, dass latest jeder neuen Version folgt.");
     assert(!f.$("dm-retag-preview").textContent.includes("unbekannt"));
     assert(f.$("dm-dialog-confirm").disabled);
@@ -260,15 +262,18 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     assert(!s.$("dm-major-check"), "the slower major plan did not replace it");
     assert(kvRows(s.$("dm-retag-preview")).includes("Bringt: 2.1.5 Patch"));
 
-    // 7. Refusals and hints
+    // 7. Refusals (a warning: what is not possible, then why) and hints
+    const refused = (x) => { const a = x.$("dm-retag-preview").querySelector(".az-alert");
+        return [a.className, a.querySelector(".az-alert__title").textContent, a.querySelector(".az-alert__body").textContent]; };
+    const NOT = ["az-alert az-alert--warning", "Über das Addon nicht möglich"];
     const refusals = [
         [{ possible: false, reason: "variable-shared", detail: "PLAUSIBLE_VERSION", changes: [], fingerprint: null },
-         "Über das Addon nicht möglich: Die Variable PLAUSIBLE_VERSION wird auch anderswo verwendet; sie zu ändern, würde mehr als dieses Image ändern."],
+         "Die Variable PLAUSIBLE_VERSION wird auch anderswo verwendet; sie zu ändern, würde mehr als dieses Image ändern."],
         [{ possible: false, reason: "anchors", detail: "/opt/plausible/compose.yml:12", changes: [], fingerprint: null },
-         "Über das Addon nicht möglich: Die Image-Zeile steht unter einem YAML-Anker oder außerhalb eines Service " +
+         "Die Image-Zeile steht unter einem YAML-Anker oder außerhalb eines Service " +
          "(/opt/plausible/compose.yml:12). Bitte ändern Sie den Tag von Hand."],
         [{ possible: false, reason: "something-new", detail: "x", changes: [], fingerprint: null },
-         "Über das Addon nicht möglich: something-new (x)"],
+         "something-new (x)"],
     ];
     for (const [rt, want] of refusals) {
         const r = boot("de", { ...BASE, "diun-update.py retag": DRY(rt) });
@@ -277,8 +282,8 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
         await sleep(10);
         choose(r, "v2.1.5");
         await sleep(40);
-        console.log("refused:", r.$("dm-retag-preview").textContent);
-        assert.strictEqual(r.$("dm-retag-preview").textContent, want);
+        console.log("refused:", refused(r).slice(1).join(" / "));
+        assert.deepStrictEqual(refused(r), [...NOT, want]);
         assert(r.$("dm-dialog-confirm").disabled);
     }
     const nf = boot("de", { ...BASE, "diun-update.py retag": (cmd) => ({ out: JSON.stringify({ ...dryRun(cmd[3]), updatable: false,
@@ -289,8 +294,7 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     await sleep(10);
     choose(nf, "v2");
     await sleep(40);
-    assert.strictEqual(nf.$("dm-retag-preview").textContent,
-                       "Über das Addon nicht möglich: Die Compose-Datei existiert nicht mehr (/opt/plausible/compose.yml).");
+    assert.deepStrictEqual(refused(nf), [...NOT, "Die Compose-Datei existiert nicht mehr (/opt/plausible/compose.yml)."]);
     const hv = boot("de", { ...BASE, "diun-update.py retag": DRY({ variable: "PLAUSIBLE_VERSION", git: "/opt",
         changes: [{ file: "/opt/plausible/.env", line: 3, old: "PLAUSIBLE_VERSION=v2.1.4", new: "PLAUSIBLE_VERSION=v2",
                     service: null, sha256: "e".repeat(64) }] }) });
@@ -299,19 +303,26 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     await sleep(10);
     choose(hv, "v2");
     await sleep(40);
-    const hints = [...hv.$("dm-retag-preview").querySelectorAll(".dm-callout:not(.dm-callout-warn)")].map((x) => x.textContent);
-    console.log("hints  :", hints.slice(0, 2).join(" | "));
+    const hints = [...hv.$("dm-retag-preview").querySelectorAll(".az-alert:not(.az-alert--warning)")].map((x) =>
+        [x.querySelector(".az-alert__title").textContent, x.querySelector(".az-alert__body").textContent]);
+    console.log("hints  :", hints.slice(0, 2).map((x) => x.join(": ")).join(" | "));
     assert.strictEqual(hv.d.querySelector(".dm-diff-file").textContent, "/opt/plausible/.env:3");
-    assert.strictEqual(hints[0], "Der Tag kommt aus der Variable PLAUSIBLE_VERSION; sie wird dort geändert, wo sie gesetzt ist.");
-    assert.strictEqual(hints[1], "Das Projekt liegt im Git-Repository /opt. Das Addon committet nicht; übernehmen Sie die Änderung dort, " +
-                                 "wenn sie in die Historie soll.");
+    assert.deepStrictEqual(hints[0], ["Tag aus einer Variable",
+                                      "Der Tag kommt aus der Variable PLAUSIBLE_VERSION; sie wird dort geändert, wo sie gesetzt ist."]);
+    assert.deepStrictEqual(hints[1], ["Git-Repository", "Das Projekt liegt im Git-Repository /opt. Das Addon committet nicht; " +
+                                      "übernehmen Sie die Änderung dort, wenn sie in die Historie soll."]);
+    assert.deepStrictEqual([...hv.$("dm-retag-preview").querySelectorAll(".az-alert code")].slice(0, 2).map((x) => x.textContent),
+                           ["PLAUSIBLE_VERSION", "/opt"], "variable and path as code");
     const na = boot("en", { ...BASE, "diun-update.py retag": { fail: { problem: "access-denied" } } });
     await sleep(80);
     rowOf(na.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
     await sleep(10);
     choose(na, "v2");
     await sleep(40);
-    assert(na.$("dm-retag-preview").textContent.startsWith("Denied"));
+    const naAlert = na.$("dm-retag-preview").querySelector(".az-alert--danger");
+    assert.deepStrictEqual([naAlert.getAttribute("role"), naAlert.querySelector(".az-alert__title").textContent],
+                           ["alert", "The change could not be checked"], "an error, not a warning");
+    assert(naAlert.querySelector(".az-alert__body").textContent.startsWith("Denied"));
 
     // 8. Failure -> cause, rollback offered; a rollback that finds an edited file stops
     const RS = { container: "plausible", state: "restarting", exit_code: 1, oom: false, source: "log", line: "Error: boom" };

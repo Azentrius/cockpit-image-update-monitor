@@ -1555,9 +1555,34 @@ def list_dumps():
     return dumps
 
 
+CREATED_RE = re.compile(r"(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d) ([+-]\d\d)(\d\d)\b")
+
+
+def iso_time(created):
+    """'2026-10-12 03:15:00 +0200 CEST' (docker image ls) -> '2026-10-12T03:15:00+02:00', else ''."""
+    m = CREATED_RE.match(created or "")
+    return f"{m.group(1)}T{m.group(2)}{m.group(3)}:{m.group(4)}" if m else ""
+
+
+def image_sizes(ids):
+    """Size in bytes of local images by ID. An image removed in the meantime is
+    missing; Docker still prints the others (and exits 1)."""
+    if not ids:
+        return {}
+    try:
+        out = run(["docker", "image", "inspect", *sorted(ids)])
+    except subprocess.CalledProcessError as e:
+        out = e.stdout or ""
+    try:
+        return {i["Id"]: i["Size"] for i in json.loads(out or "[]") if isinstance(i.get("Size"), int)}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return {}
+
+
 def rollback_images():
     """Local <repo>:rollback-<stamp> tags, newest first. in_use = a container
-    (running or stopped) still uses the image."""
+    (running or stopped) still uses the image; size in bytes (None if Docker
+    does not say), created as ISO 8601."""
     in_use = set(run(["docker", "ps", "-a", "--format", "{{.ID}}"]).split())
     used_ids = set()
     if in_use:
@@ -1570,8 +1595,10 @@ def rollback_images():
             continue
         if ROLLBACK_TAG_RE.match(i.get("Tag", "")):
             images.append({"ref": f"{i['Repository']}:{i['Tag']}", "id": i["ID"],
-                           "size": i.get("Size", ""), "created": i.get("CreatedAt", ""),
-                           "in_use": i["ID"] in used_ids})
+                           "created": iso_time(i.get("CreatedAt", "")), "in_use": i["ID"] in used_ids})
+    sizes = image_sizes({i["id"] for i in images})
+    for i in images:
+        i["size"] = sizes.get(i["id"])
     images.sort(key=lambda x: x["ref"].rsplit(":", 1)[1], reverse=True)
     return images
 
