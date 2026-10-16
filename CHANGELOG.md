@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Build after a release:** a `latest` (or `main`) that points to no release tag showed “?”,
+  “newest: v4.5.3” and “Unknown”, although it was newer than that release: MobSF builds `latest` from
+  its development branch, 4.5.4 while v4.5.3 is the newest release. On Docker Hub the radar now notes
+  when the tag was pushed after the newest release (at least a day later; `tag_now.pushed` and
+  `tag_now.after` in `versions.json`), and the row says “build after v4.5.3”. When the container runs
+  exactly that build, the row is up to date. Other registries do not say when a tag was pushed.
+
 ## 0.13.0 – 2026-10-16
 
 Image Update Monitor: a new name and the package `cockpit-image-update-monitor`, which replaces

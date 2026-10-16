@@ -149,6 +149,49 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     assert(tip.startsWith("No registry shows onlyoffice/documentserver: it was built or tagged on this server"), tip);
     assert(cells(row(ue, "diun"))[4].querySelector(".dm-muted").title.startsWith("The registry did not answer properly"));
 
+    // latest points to no release tag but to a build pushed after the newest
+    // release (MobSF on a test host, 2026-10-16: latest = a 4.5.4 build, v4.5.3
+    // the newest release): said so instead of "newest: 5.1.0", and up to date
+    // while the container runs that very build.
+    const dev = JSON.parse(JSON.stringify(radar));
+    const pf = dev.images.find((x) => x.image === "boky/postfix");
+    Object.keys(pf.installed).forEach((k) => { pf.installed[k] = { version: null, src: "digest", tag: null, ts: pf.checked }; });
+    delete pf.versions;
+    Object.assign(pf, { status: "unknown", tag_now: {
+        digest: "sha256:aafc772384232497bed875e1eb66b4d3e54ba1ebc86e2e185a6dc1dbc48182ef", version: null, tag: null,
+        pushed: "2026-10-13T05:15:45Z", after: { tag: "5.1.0", pushed: "2026-09-21T03:04:04Z" } } });
+    const b = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await sleep(60);
+    c = cells(row(b, "smtp-relay"));
+    console.log("smtp-relay, build after a release:", c.slice(2, 6).map((x) => x.textContent.trim()).join(" | "));
+    assert.deepStrictEqual(c.slice(2, 6).map((x) => x.textContent.trim()), ["latest", "?", "Build nach 5.1.0", "Aktuell"]);
+    assert.strictEqual(iconOf(c[4]), "check-circle");
+    tip = c[4].querySelector(".dm-uptodate").title;
+    assert(tip.startsWith("latest zeigt auf keinen Release-Tag, sondern auf einen Build, den Docker Hub am 13.10.2026 bekam, " +
+                          "nach dem neuesten Release 5.1.0 (21.09.2026)."), tip);
+    assert(tip.endsWith("\nDer Container läuft auf diesem Build: Mit diesem Tag gibt es nichts Neueres."), tip);
+    // the tag moved on to another build: the note stays, the status is unknown
+    pf.tag_now.digest = "sha256:" + "9".repeat(64);
+    const m = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await sleep(60);
+    c = cells(row(m, "smtp-relay"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Build nach 5.1.0", "Unbekannt"]);
+    assert(c[4].querySelector(".dm-muted").title.endsWith("\nDer Container läuft auf einem anderen Build von latest."));
+    // a newer release than the one the radar noted: the newest release again
+    pf.newest = "5.2.0";
+    const r2 = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await sleep(60);
+    assert.deepStrictEqual(cells(row(r2, "smtp-relay")).slice(4, 6).map((x) => x.textContent.trim()), ["neueste: 5.2.0", "Unbekannt"]);
+    pf.newest = "5.1.0";
+    pf.tag_now.digest = "sha256:aafc772384232497bed875e1eb66b4d3e54ba1ebc86e2e185a6dc1dbc48182ef";
+    const be = boot("en", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await sleep(60);
+    c = cells(row(be, "smtp-relay"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["build after 5.1.0", "Up to date"]);
+    tip = c[4].querySelector(".dm-uptodate").title;
+    // (ICU versions abbreviate September as "Sep" or "Sept")
+    assert(/^latest points to no release tag but to a build Docker Hub got on 13 Oct 2026, after the newest release 5\.1\.0 \(21 Sept? 2026\)\./.test(tip), tip);
+
     // English
     const e = boot("en", FILES);
     await sleep(60);

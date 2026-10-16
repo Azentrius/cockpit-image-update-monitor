@@ -61,7 +61,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 |---|---|
 | Configured | The tag as written in the compose file or with `docker run`, e.g. `latest`, `16-alpine`, `v2.1.4`. For tags without a full version it adds what the tag points to in the registry right now: `latest = 6.0.2`. |
 | Installed | The version that really runs, e.g. `0.30.11`. The tooltip names the source (see below) and the digest. `16.14 → 16.15` means: 16.15 is already on the server but does not run yet. `?` means: cannot be determined, or not covered by the radar yet. |
-| Newest version | Newer versions relative to the **installed** version, one label per level (patch / minor / major, the level as a word). A check mark (`check-circle`) with `6.2.0` = the installed version is the newest. `newest: 6.0.2` appears when the installed version is unknown. `not in a registry`: no registry shows the image, because it was built or tagged on the server or is private; there is nothing newer to find. |
+| Newest version | Newer versions relative to the **installed** version, one label per level (patch / minor / major, the level as a word). A check mark (`check-circle`) with `6.2.0` = the installed version is the newest. `newest: 6.0.2` appears when the installed version is unknown. `build after v4.5.3`: a tag like `latest` points to no release tag but to a build Docker Hub got at least a day after the newest release, often a development build (MobSF does this); with a check mark when the container runs exactly that build. `not in a registry`: no registry shows the image, because it was built or tagged on the server or is private; there is nothing newer to find. |
 | Status | see the next table |
 
 **Status**
@@ -71,8 +71,8 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | ⓘ Update available | Diun reported a new build of **the same tag**. | Update, Dismiss (✓) |
 | ⓘ Roll-out pending | The newer image is already local, the container still runs the old one. | Roll out image |
 | ⓘ New version | The radar knows a newer version. The level labels show whether the Update button delivers it. | – |
-| ✓ Up to date | The radar compared the installed version with the registry and knows nothing newer. | – |
-| ⊘ Unknown | Installed version cannot be determined (e.g. `latest` from a development build), or the radar could not compare it: the image is in no registry, or the registry did not answer and there is no earlier result. | – |
+| ✓ Up to date | The radar compared the installed version with the registry and knows nothing newer, or the container runs the very build a tag like `latest` points to, a build after the newest release. | – |
+| ⊘ Unknown | Installed version cannot be determined (e.g. `latest` from a development build on a registry other than Docker Hub), or the radar could not compare it: the image is in no registry, or the registry did not answer and there is no earlier result. | – |
 
 The labels use the shared status language: a hint in violet with `info-circle`, good in green with
 `check-circle`, unknown without judgement with `ban`. Gold is never a status.
