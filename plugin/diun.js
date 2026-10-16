@@ -119,6 +119,10 @@
             "ver.upToDateTip": "Installed = newest version (same tag scheme).",
             "ver.newestOnly": "newest: {v}",
             "ver.newestOnlyTip": "Installed version unknown – no comparison possible.",
+            "ver.buildAfter": "build after {tag}",
+            "ver.buildAfterTip": "{cfg} points to no release tag but to a build Docker Hub got on {pushed}, after the newest release {tag} ({released}). Often a development build; its version number is not known.",
+            "ver.buildAfterRuns": "The container runs this build: there is nothing newer with this tag.",
+            "ver.buildAfterOther": "The container runs a different build of {cfg}.",
             "ver.stale": "(older data)",
             "ver.levelTip": "{level} update",
             "ver.reachYes": "The tag {tag} delivers this with the Update button.",
@@ -435,6 +439,10 @@
             "ver.upToDateTip": "Installiert = neueste Version (gleiches Tag-Schema).",
             "ver.newestOnly": "neueste: {v}",
             "ver.newestOnlyTip": "Installierte Version unbekannt – kein Vergleich möglich.",
+            "ver.buildAfter": "Build nach {tag}",
+            "ver.buildAfterTip": "{cfg} zeigt auf keinen Release-Tag, sondern auf einen Build, den Docker Hub am {pushed} bekam, nach dem neuesten Release {tag} ({released}). Oft ist das ein Entwicklungsstand; seine Versionsnummer ist nicht bekannt.",
+            "ver.buildAfterRuns": "Der Container läuft auf diesem Build: Mit diesem Tag gibt es nichts Neueres.",
+            "ver.buildAfterOther": "Der Container läuft auf einem anderen Build von {cfg}.",
             "ver.stale": "(Stand älter)",
             "ver.levelTip": "{level}-Update",
             "ver.reachYes": "Der Tag {tag} liefert das per Update-Knopf.",
@@ -773,6 +781,10 @@
         while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
         return (i === 0 ? n.toFixed(0) : n.toFixed(2)).replace(".", LANG === "de" ? "," : ".") + " " + units[i];
     }
+    function fmtDay(iso) {
+        const d = new Date(iso || "");
+        return isNaN(d) ? "?" : d.toLocaleDateString(LOCALE, { dateStyle: "medium" });
+    }
     function fmtDate(d) {
         if (!d || isNaN(d)) return "—";
         return d.toLocaleString(LOCALE, { dateStyle: "short", timeStyle: "short" });
@@ -1003,6 +1015,28 @@
     const REACH = { update: ["az-label az-label--info", "info-circle"], tag: ["az-label", ""],
                     migration: ["az-label", "ban"] };
 
+    // A tag like latest that no release tag shares a digest with, pushed to
+    // Docker Hub after the newest release (radar: tag_now.after; MobSF's latest
+    // is a 4.5.4 build while v4.5.3 is the newest release). Only while that
+    // release is still the newest the radar knows.
+    function buildAfter(rec) {
+        const tn = rec.tag_now;
+        const a = tn && !tn.version && tn.after;
+        return a && a.tag && a.tag === rec.newest ? a : null;
+    }
+    // "build after v4.5.3": up to date (check-circle) when the container runs
+    // the build the tag points to now; the version number stays unknown.
+    function buildAfterCell(ctn, rec, after, muted) {
+        const same = !!ctn.digest && ctn.digest === rec.tag_now.digest;
+        const text = t("ver.buildAfter", { tag: after.tag });
+        const tip = [t("ver.buildAfterTip", { cfg: ctn.tag, tag: after.tag, pushed: fmtDay(rec.tag_now.pushed),
+                                              released: fmtDay(after.pushed) }),
+                     t(same ? "ver.buildAfterRuns" : "ver.buildAfterOther", { cfg: ctn.tag })].join("\n");
+        if (!same) return { ...muted(text, tip), compared: false };
+        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(text)}</span></span>`,
+                 news: false, compared: true, sameBuild: true };
+    }
+
     function versionCell(ctn, rec, inst, radarOk, pick) {
         const muted = (text, title) => ({
             html: `<span class="dm-muted"${title ? ` title="${esc(title)}"` : ""}>${esc(text)}</span>`,
@@ -1016,6 +1050,8 @@
             const detail = (key, vars) => [t(key, vars), rec.error].filter(Boolean).join("\n");
             if (rec.status === "unlisted") return muted(t("ver.unlisted"), detail("ver.unlistedTip", { image: ctn.image }));
             if (rec.status === "error") return muted(t("ver.registryError"), detail("ver.registryErrorTip"));
+            const after = buildAfter(rec);
+            if (after) return buildAfterCell(ctn, rec, after, muted);
             if (rec.newest) return muted(t("ver.newestOnly", { v: rec.newest }), t("ver.newestOnlyTip"));
             return muted("—", t("ver.notCovered"));
         }
@@ -1110,8 +1146,9 @@
         // Without a known installed version, or when the radar compared
         // nothing (no registry shows the image, a registry error), "up to
         // date" would be a guess: Docker gives locally built images a digest
-        // too, and Diun reports nothing for them.
-        if (kind === "ok" && radarOk && rec && (!inst.v || !ver.compared)) kind = "unknown";
+        // too, and Diun reports nothing for them. Not a guess: the container
+        // runs the build a tag like latest points to now (sameBuild).
+        if (kind === "ok" && radarOk && rec && ((!inst.v && !ver.sameBuild) || !ver.compared)) kind = "unknown";
         const failedBuild = kind === "update" ? sameFailedBuild(ctn, ev) : null;
         rowFailed.set(ctn.name, failedBuild);
         const note = failedBuild

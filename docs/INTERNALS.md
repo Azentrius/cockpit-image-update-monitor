@@ -132,6 +132,7 @@ Inputs are checked by regex:
 | `reach` | levels the configured tag delivers with the Update button. |
 | `newest` | highest plain version tag. Shown when the installed version is unknown. |
 | `tag_now` | (since 0.10.0) only for floating tags (fewer than two version blocks: `latest`, `16-alpine`, `5`): the digest the tag has in the registry right now (Docker Hub API or `skopeo inspect --raw`, no pull) and the version tag with the same digest (`version` / `tag`, `null` if none). Reused while the digest stays the same; missing when the lookup failed. |
+| `tag_now.pushed` / `tag_now.after` | only for a tag without numbers (`latest`, `main`) whose digest no version tag shares, and only on Docker Hub, the one registry that says when a tag was pushed: `after` = the newest release (`newest`) as `{"tag": "v4.5.3", "pushed": "…"}` and `pushed` = when the tag itself was pushed, at least a day later (two builds of one release are minutes apart). MobSF builds `latest` from its development branch. Asked again on every run, also while the digest stays the same. Missing in data from older radars. |
 | `status` | `major`, `minor`, `patch`, `current`, `unknown`, `error` or `unlisted`, for sorting and for the table. |
 | `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. |
 | `status: "unlisted"` | (since 0.12.2) no registry shows the repository; skopeo answers `requested access to the resource is denied` (Docker Hub, for names it does not have and for private ones), `unauthorized` or `name unknown`. The image was built or tagged on the server (`hibiscus-server:2.12.4` means `docker.io/library/hibiscus-server`), or it is private and the radar has no login. Only `installed` and `error` are set. With a good earlier run the entry is kept like a registry error (`stale`). Timeouts, rate limits and server errors stay `error`. |
@@ -445,6 +446,11 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   - `target_version` as a row (“Brings”), with the size of the jump.
   - A `reason` in the result fills `#dm-dialog-reason` (`az-alert--danger`) above the log; every new
     run hides it again.
+- **Build after a release:** with `tag_now.after` and the installed version unknown, the newest column
+  says “build after v4.5.3” instead of “newest: v4.5.3”, only while `after.tag` is still `newest`. If
+  the running image's digest is `tag_now.digest`, it carries `check-circle` and the status is “up to
+  date” (`sameBuild`): the container runs what the tag points to, and that is newer than every
+  release. Otherwise the text is muted and the status stays unknown.
 - **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`), by the
   same rule as `target_version`: not when the installed version is known but not among the tags.
 - **Together:** rows of the same compose project with the same image and tag name each other under
@@ -491,7 +497,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 
 | File | Checks |
 |---|---|
-| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, cache, outage) |
+| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, a build after the newest release, cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker |
 | `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
@@ -501,7 +507,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
-| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend |
+| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
 | `test/contrast_test.py` | WCAG contrast of every colour pair the page uses, light and dark (text 4.5:1, borders and icons 3:1) |
 | `tools/check-design-files.sh` | the shared design files match `tools/design-files.sha256` |

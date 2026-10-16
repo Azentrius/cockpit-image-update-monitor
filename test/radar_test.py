@@ -216,6 +216,55 @@ except ValueError:
     bad_tag = "refused"
 check("a tag outside Docker's grammar never reaches a URL", bad_tag, "refused")
 
+# A latest no version tag shares a digest with: pushed after the newest
+# release? (a test host, 2026-10-16: MobSF's latest is a 4.5.4 build of its
+# development branch, v4.5.3 the newest release)
+MOBSF = "opensecurity/mobile-security-framework-mobsf"
+D_MOBSF = "sha256:69851c52cca7b726b84278404c1d3d387a4937cd3770dccbf16f3e0dc00f2c7b"
+MOBSF_TAGS = ["latest", "v4.5.3", "v4.5.2", "v4.4.6"]
+HUB_TAGS = {"latest": {"digest": D_MOBSF, "tag_last_pushed": "2026-10-13T05:15:45.204517Z"},
+            "v4.5.3": {"digest": "sha256:5113fbad", "tag_last_pushed": "2026-09-21T03:04:04.81Z"}}
+hub_urls.clear()
+
+
+def hub_tags(req, timeout=0):
+    hub_urls.append(req.full_url)
+    name = req.full_url.rsplit("/", 1)[1]
+    if name not in HUB_TAGS:
+        raise RuntimeError("HTTP Error 404: Not Found")
+    return io.BytesIO(json.dumps(HUB_TAGS[name]).encode())
+
+
+R.urllib.request.urlopen = hub_tags
+real_md, R.match_digest = R.match_digest, lambda repo, digest, created, tags, limit=20: None
+AFTER = {"pushed": "2026-10-13T05:15:45Z", "after": {"tag": "v4.5.3", "pushed": "2026-09-21T03:04:04Z"}}
+check("latest pushed weeks after the newest release", R.build_after(MOBSF, "latest", MOBSF_TAGS), AFTER)
+check("... asked Docker Hub for both tags", sorted(u.rsplit("/", 1)[1] for u in hub_urls), ["latest", "v4.5.3"])
+tn = R.resolve_tag(MOBSF, "latest", MOBSF_TAGS, None)
+check("tag_now without a version notes the release before", tn, {"digest": D_MOBSF, "version": None, "tag": None, **AFTER})
+check("same digest from a radar before the note: the note is added",
+      R.resolve_tag(MOBSF, "latest", MOBSF_TAGS, {"digest": D_MOBSF, "version": None, "tag": None}), tn)
+HUB_TAGS["v4.5.4"] = {"digest": "sha256:5114", "tag_last_pushed": "2026-10-20T00:00:00Z"}
+check("a release after the build: no note, from a reused result neither",
+      R.resolve_tag(MOBSF, "latest", MOBSF_TAGS + ["v4.5.4"], tn), {"digest": D_MOBSF, "version": None, "tag": None})
+HUB_TAGS["v4.5.4"] = {"digest": "sha256:5114", "last_updated": "2026-10-13T05:05:00Z"}
+check("two builds of one release, minutes apart, do not count", R.build_after(MOBSF, "latest", MOBSF_TAGS + ["v4.5.4"]), None)
+del HUB_TAGS["v4.5.4"]
+hub_urls.clear()
+check("not on Docker Hub, a tag with numbers, no release: Docker Hub not asked",
+      (R.build_after("ghcr.io/a/b", "latest", MOBSF_TAGS), R.build_after(MOBSF, "16-alpine", MOBSF_TAGS),
+       R.build_after(MOBSF, "latest", ["latest", "edge"]), hub_urls), (None, None, None, []))
+del HUB_TAGS["v4.5.3"]
+check("the note's lookup fails: tag_now without it",
+      R.resolve_tag(MOBSF, "latest", MOBSF_TAGS, None), {"digest": D_MOBSF, "version": None, "tag": None})
+R.match_digest = lambda repo, digest, created, tags, limit=20: "v4.5.3"
+hub_urls.clear()
+check("a version tag with the digest: no note, no further request",
+      (R.resolve_tag(MOBSF, "latest", MOBSF_TAGS, None), len(hub_urls)),
+      ({"digest": D_MOBSF, "version": "4.5.3", "tag": "v4.5.3"}, 1))
+R.match_digest = real_md
+R.urllib.request.urlopen = real_urlopen
+
 # ---------------------------------------------------------------- analyse
 TAGS = {
     "postgres": PG_TAGS,

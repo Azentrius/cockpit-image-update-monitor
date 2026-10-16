@@ -25,7 +25,9 @@ Installed version, first match wins:
 What a floating tag (latest, stable, 16-alpine, 5) points to right now is
 resolved the same way, without a pull: its digest in the registry and the
 version tag with that digest ("tag_now", e.g. latest = 6.0.2). Reused while
-the digest stays the same.
+the digest stays the same. A latest that no version tag shares a digest with
+is often a development build: on Docker Hub the radar notes the newest release
+it was pushed after (MobSF: latest = a build after v4.5.3).
 
 Newer versions are compared in the scheme of the installed version
 (prefix + number of numeric blocks + suffix): 16-alpine with 16.14
@@ -97,6 +99,7 @@ TAG_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 UNLISTED_RE = re.compile(r"requested access to the resource is denied|unauthorized|authentication required"
                          r"|name unknown|repository name not known", re.I)
 RETRY_MISS = timedelta(days=7)
+BUILD_AFTER_GAP = timedelta(days=1)   # see build_after
 LEVELS = ("patch", "minor", "major")
 ORDER = {"major": 0, "minor": 1, "patch": 2, "current": 3, "unknown": 4, "error": 5, "unlisted": 6}
 
@@ -234,6 +237,15 @@ def match_digest(repo, digest, created, tags, limit=REGISTRY_CANDIDATES):
     return registry_match(qualify(repo), digest, tags, limit)
 
 
+def hub_tag(path, tag):
+    """One tag on Docker Hub: its digest, when it was pushed, ..."""
+    if not TAG_NAME_RE.match(tag):
+        raise ValueError(f"not a tag name: {tag!r}")
+    req = urllib.request.Request(f"{HUB}{path}/tags/{tag}", headers={"User-Agent": "diun-radar"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
 def tag_digest(repo, tag):
     """Registry digest a tag points to right now, without a pull: the Docker
     Hub API (no pull quota) or the manifest (skopeo inspect --raw)."""
@@ -241,24 +253,53 @@ def tag_digest(repo, tag):
         raise ValueError(f"not a tag name: {tag!r}")
     path = hub_path(repo)
     if path:
-        req = urllib.request.Request(f"{HUB}{path}/tags/{tag}", headers={"User-Agent": "diun-radar"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.load(r).get("digest") or ""
+        return hub_tag(path, tag).get("digest") or ""
     raw = run(["skopeo", "inspect", "--raw", f"docker://{qualify(repo)}:{tag}"], binary=True)
     return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def build_after(repo, tag, tags):
+    """A tag without numbers (latest, main) that no version tag shares a
+    digest with: was it pushed after the newest release? MobSF builds latest
+    from its development branch, 4.5.4 while v4.5.3 is the newest release.
+    Returns {"pushed": <tag>, "after": {"tag": <release>, "pushed": <release>}}
+    or None. Only Docker Hub tells when a tag was pushed. A day apart at
+    least, so that two builds of one release (latest a few minutes after
+    v4.5.3) do not count."""
+    path = hub_path(repo)
+    release = newest_plain(tags)
+    if not path or not release or tag_digits(tag):
+        return None
+
+    def pushed(t):
+        info = hub_tag(path, t)
+        return parse_iso(info.get("tag_last_pushed") or info.get("last_updated"))
+    own, rel = pushed(tag), pushed(release)
+    if not own or not rel or own - rel < BUILD_AFTER_GAP:
+        return None
+    return {"pushed": iso(own), "after": {"tag": release, "pushed": iso(rel)}}
 
 
 def resolve_tag(repo, tag, tags, prev):
     """What a floating tag points to now: {"digest", "version", "tag"}, the
     version from the version tag with the same digest (None if there is
-    none). The previous result is reused while the digest stays the same."""
+    none). The previous result is reused while the digest stays the same.
+    Without a version, build_after is asked again on every run: a new
+    release can come out while the tag stays where it is."""
     digest = tag_digest(repo, tag)
     if not digest:
         return None
     if prev and prev.get("digest") == digest:
-        return prev
-    found = match_digest(repo, digest, None, tags)
-    return {"digest": digest, "version": core(found) if found else None, "tag": found}
+        res = {k: v for k, v in prev.items() if k not in ("pushed", "after")}
+    else:
+        found = match_digest(repo, digest, None, tags)
+        res = {"digest": digest, "version": core(found) if found else None, "tag": found}
+    if not res.get("version"):
+        try:
+            res.update(build_after(repo, tag, tags) or {})
+        except Exception:  # Hub API down: the digest still counts, without the note
+            pass
+    return res
 
 
 # ------------------------------------------------------------ comparison ----
@@ -536,7 +577,9 @@ def table(recs):
             if r.get("db") and cmp.get("major"):
                 status += " [DB]"
             tn = (r.get("tag_now") or {}).get("version")
-            rows.append((", ".join(r["containers"]), r["image"], r["tag"] + (f" (={tn})" if tn else ""), v or "?",
+            after = ((r.get("tag_now") or {}).get("after") or {}).get("tag")
+            note = f" (={tn})" if tn else f" (>{after})" if after else ""
+            rows.append((", ".join(r["containers"]), r["image"], r["tag"] + note, v or "?",
                          (x.get("src") or "-") + (f" ({x['tag']})" if x.get("tag") else ""),
                          cmp.get("patch") or "-", cmp.get("minor") or "-", cmp.get("major") or "-",
                          status if v or cmp else status + f"; neueste: {r.get('newest') or '-'}"))
