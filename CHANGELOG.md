@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.16.0 – 2026-10-17
+
+Containers of running CI jobs are counted above the table instead of listed, and updating a CI runner
+while jobs run asks first, because those jobs break off.
 
 - **CI jobs:** the containers of running jobs of a Forgejo runner or Gitea's act_runner
   (`FORGEJO-ACTIONS-TASK-2415_WORKFLOW-…_JOB-unit`) were listed as rows with “not in a registry” and
