@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 – 2026-10-16
+
+An update takes only the services started from the same compose files, so a project split over several
+files can be updated, and a pull that fails is reported as such instead of “no newer image”.
 
 - **Fix: update of a project split over compose files.** On a CI host one compose project ran from
   two files started one by one: `docker-compose.yml` with three runners, `docker-compose.emu.yml`
