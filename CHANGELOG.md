@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **CI jobs:** the containers of running jobs of a Forgejo runner or Gitea's act_runner
+  (`FORGEJO-ACTIONS-TASK-2415_WORKFLOW-…_JOB-unit`) were listed as rows with “not in a registry” and
+  “Unknown”; they live as long as the job and cannot be updated. They are no longer listed: the line
+  above the table counts them and its tooltip names them. The inventory marks them (`ci_job`).
+- **Warning before updating a runner while jobs run:** the plan of a runner image lists the running
+  CI jobs (`ci_jobs`), and the update waits for a tick box. On a CI host two jobs kept running without
+  a runner after the runners were updated. CI job containers are also left out of the shared network
+  hint.
+
 ## 0.15.0 – 2026-10-17
 
 An update takes only the services started from the same compose files, so a project split over several

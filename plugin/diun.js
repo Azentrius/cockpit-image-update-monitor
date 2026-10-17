@@ -135,6 +135,8 @@
             "meta.updates": { one: "{n} update", other: "{n} updates" },
             "meta.newver": { one: "{n} new version", other: "{n} new versions" },
             "meta.containers": { one: "{n} container", other: "{n} containers" },
+            "meta.ciJobs": { one: "{n} CI job hidden", other: "{n} CI jobs hidden" },
+            "meta.ciJobsTip": "Containers of running CI jobs (Forgejo or Gitea Actions) are not listed: they live as long as the job and cannot be updated.",
             "meta.radar": "Radar {ago}",
             "meta.radarNone": "Radar: no data yet",
             "meta.radarBad": "Radar: unreadable timestamp",
@@ -265,6 +267,10 @@
             "upd.failedBuildTitle": "This build failed before",
             "upd.failedBuild": "The update to exactly this build failed on {date}. Try again only if the cause is fixed, for example a setting in the compose file.",
             "upd.retryConfirm": "Try this build again anyway.",
+            "upd.ciJobsTitle": "CI jobs are running",
+            "upd.ciJobs": "The update restarts the runners. These jobs run now and break off; their containers stay behind without a runner: {jobs}. Wait until they are done, or cancel them under Actions in Forgejo or Gitea.",
+            "upd.ciJobsConfirm": "Running jobs may break off.",
+            "ci.job": "{job} (task {task}, started {ago})",
             "row.failedBuild": "The update to this build failed on {date}.",
             "btn.retag": "Change version",
             "rt.title": "Change the version of {name}?",
@@ -456,6 +462,8 @@
             "meta.updates": { one: "{n} Update", other: "{n} Updates" },
             "meta.newver": { one: "{n} neue Version", other: "{n} neue Versionen" },
             "meta.containers": { one: "{n} Container", other: "{n} Container" },
+            "meta.ciJobs": { one: "{n} CI-Job ausgeblendet", other: "{n} CI-Jobs ausgeblendet" },
+            "meta.ciJobsTip": "Container laufender CI-Jobs (Forgejo oder Gitea Actions) stehen nicht in der Tabelle: Sie leben so lange wie der Job und lassen sich nicht aktualisieren.",
             "meta.radar": "Radar {ago}",
             "meta.radarNone": "Radar: noch keine Daten",
             "meta.radarBad": "Radar: Zeitstempel unlesbar",
@@ -586,6 +594,10 @@
             "upd.failedBuildTitle": "Dieser Build ist schon einmal gescheitert",
             "upd.failedBuild": "Das Update auf genau diesen Build ist am {date} gescheitert. Versuchen Sie es nur erneut, wenn die Ursache behoben ist, etwa eine Einstellung in der Compose-Datei.",
             "upd.retryConfirm": "Diesen Build trotzdem erneut versuchen.",
+            "upd.ciJobsTitle": "CI-Jobs laufen",
+            "upd.ciJobs": "Das Update startet die Runner neu. Diese Jobs laufen gerade und brechen dann ab; ihre Container bleiben ohne Runner stehen: {jobs}. Warten Sie, bis sie fertig sind, oder brechen Sie sie unter Actions in Forgejo oder Gitea ab.",
+            "upd.ciJobsConfirm": "Laufende Jobs dürfen abbrechen.",
+            "ci.job": "{job} (Task {task}, gestartet {ago})",
             "row.failedBuild": "Das Update auf diesen Build ist am {date} gescheitert.",
             "btn.retag": "Version ändern",
             "rt.title": "Version von {name} ändern?",
@@ -801,6 +813,15 @@
         if (h < 48) return { text: t("ago.h", { n: h }), hours: h };
         const d = Math.round(h / 24);
         return { text: t("ago.d", { n: d }), hours: h };
+    }
+    // "unit (task 2415, started 21 min ago)" from a CI job container's name
+    // (FORGEJO-ACTIONS-TASK-2415_WORKFLOW-…_JOB-unit); other names as they are.
+    function ciJobText(name, started) {
+        const m = /^(?:FORGEJO|GITEA)-ACTIONS-TASK-(\d+)_.*?(?:_JOB-(.+))?$/i.exec(name || "");
+        if (!m) return name;
+        const a = started ? ago(started) : null;
+        const job = m[2] || name;
+        return a ? t("ci.job", { job, task: m[1], ago: a.text }) : `${job} (${m[1]})`;
     }
     // Every root action goes through here: fixed script + fixed verbs.
     function spawnHelper(argv, superuser) {
@@ -1201,8 +1222,12 @@
     }
 
     // fromEvents: no inventory, the rows come from Diun's events alone.
-    function render(containers, events, radarDoc, fromEvents) {
-        lastRender = [containers, events, radarDoc, fromEvents];
+    function render(all, events, radarDoc, fromEvents) {
+        lastRender = [all, events, radarDoc, fromEvents];
+        // Containers of CI jobs come and go with the job and cannot be
+        // updated: counted in the meta line, not listed (ci_job, inventory).
+        const ciJobs = all.filter((c) => c.ci_job);
+        const containers = all.filter((c) => !c.ci_job);
         rowFailed.clear();
         retagInfo.clear();
         // An update recreates every service of the project with the same image
@@ -1234,8 +1259,9 @@
             t("meta.updates", { n: updates }),
             t("meta.newver", { n: newver }),
             t("meta.containers", { n: containers.length }),
-            radarMeta(radarDoc),
-        ].join(" · ");
+        ].concat(ciJobs.length ? [t("meta.ciJobs", { n: ciJobs.length })] : [], [radarMeta(radarDoc)]).join(" · ");
+        $("dm-meta").title = ciJobs.length
+            ? [t("meta.ciJobsTip")].concat(ciJobs.map((c) => ciJobText(c.name, null))).join("\n") : "";
 
         if (containers.length === 0) {
             $("dm-table").hidden = true;
@@ -1617,6 +1643,12 @@
                          (cause ? `<span class="dm-reason-line dm-alert-line">${esc(cause)}</span>` : ""),
                          "dm-retry-check", t("upd.retryConfirm"));
         }
+        // A CI runner with running jobs: they break off.
+        if ((plan.ci_jobs || []).length) {
+            html += gate(t("upd.ciJobsTitle"), esc(t("upd.ciJobs", {
+                jobs: plan.ci_jobs.map((j) => ciJobText(j.name, j.started)).join(", ") })),
+                         "dm-ci-check", t("upd.ciJobsConfirm"));
+        }
         const jobs = plan.jobs || [];
         const COND = { service_healthy: "cond.healthy", service_started: "cond.started",
                        service_completed_successfully: "cond.completed" };
@@ -1692,7 +1724,7 @@
                     title, desc, body: planBody(plan, failed),
                     confirm: {
                         label,
-                        disabled: !!plan.jump_unknown || !!failed || plan.jump === "major",
+                        disabled: !!plan.jump_unknown || !!failed || plan.jump === "major" || (plan.ci_jobs || []).length > 0,
                         argv: () => [UPDATE_CMD, "update", name].concat(dumpArgs()),
                     },
                     onDone: (o) => updateOutcome(o, name),

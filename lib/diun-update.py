@@ -78,7 +78,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from diunlib import core, local_version, nums_of, tag_digits  # noqa: E402
+from diunlib import CI_JOB_RE, CI_RUNNER_RE, core, is_ci_job, local_version, nums_of, tag_digits  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
@@ -410,7 +410,8 @@ def make_plan(name):
             "pulled": False, "old_image": c["Image"],
             "installed_version": None, "tag_digits": None, "jump_unknown": False,
             "target_version": None, "jump": None,
-            "jobs": [], "depends_on": [], "dependents": [], "job_order": [], "shared_networks": []}
+            "jobs": [], "depends_on": [], "dependents": [], "job_order": [], "shared_networks": [],
+            "ci_jobs": []}
 
     ctx = compose_ctx(c)
     if not ctx:
@@ -512,9 +513,25 @@ def make_plan(name):
                 db["size"] = None
         plan["dbs"].append(db)
 
+    # A CI runner: its running jobs break off when it is recreated.
+    if CI_RUNNER_RE.search(norm_ref(split_ref(ref)[0]).lower()):
+        plan["ci_jobs"] = running_ci_jobs()
+
     plan["free_bytes"] = shutil.disk_usage(BASE if os.path.isdir(BASE) else os.path.dirname(BASE)).free
     plan["updatable"] = True
     return plan, ctx
+
+
+def running_ci_jobs():
+    """The containers of CI jobs that run now: [{"name", "image", "started"}]."""
+    try:
+        ids = run(["docker", "ps", "-q"]).split()
+        found = json.loads(run(["docker", "inspect", *ids])) if ids else []
+    except (subprocess.CalledProcessError, ValueError):
+        return []
+    return sorted(({"name": c["Name"].lstrip("/"), "image": c["Config"]["Image"],
+                    "started": (c.get("State") or {}).get("StartedAt") or ""}
+                   for c in found if is_ci_job(c)), key=lambda j: j["name"])
 
 
 def is_job(c):
@@ -574,7 +591,7 @@ def relations(plan, cfg, members, same, services, project):
         others = set()
         for line in out.splitlines():
             name, _, proj = line.partition("\t")
-            if proj != project:
+            if proj != project and (proj or not CI_JOB_RE.match(name)):   # CI jobs come and go
                 others.add(proj or name)
         if others:
             plan["shared_networks"].append({"network": n, "projects": sorted(others)})

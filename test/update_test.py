@@ -185,6 +185,8 @@ class Docker:
             if len(found) != len(names):
                 return "", 1, "Error: No such object"
             return json.dumps(found), 0, ""
+        if cmd[:3] == ["docker", "ps", "-q"]:
+            return "".join(n + "\n" for n, c in self.containers.items() if c["State"]["Running"]), 0, ""
         if cmd[:3] == ["docker", "ps", "-a"]:
             filters = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--filter"]
             want = [f[len("label="):].split("=", 1) for f in filters if f.startswith("label=")]
@@ -387,6 +389,19 @@ p = plan("forgejo-runner")
 check("plan: a service the compose files no longer define", (p["updatable"], p["reason"], p["missing"]),
       (False, "service-missing", ["runner-2"]))
 D.undefined = set()
+# The plan of a runner names the CI jobs that run now: they break off when it
+# is recreated (2026-10-17). On the shared network they are no "project".
+for n in ("forgejo-runner", "forgejo-runner-2"):
+    D.containers[n]["NetworkSettings"]["Networks"] = {"edge": {}}
+D.add(ctn("caddy", "caddy:2", "sha256:cd", project="caddy", networks=("edge",)))
+JOB = "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit"
+D.add(ctn(JOB, "sanctum-ci:1", "sha256:ci", networks=("edge",)))
+D.containers[JOB]["State"]["StartedAt"] = "2026-10-17T10:35:00Z"
+D.add(ctn("FORGEJO-ACTIONS-TASK-2399_WORKFLOW-b1_JOB-done", "sanctum-ci:1", "sha256:ci", running=False))
+p = plan("forgejo-runner")
+check("plan: a runner names the CI jobs that run, not the finished ones", p["ci_jobs"],
+      [{"name": JOB, "image": "sanctum-ci:1", "started": "2026-10-17T10:35:00Z"}])
+check("plan: CI jobs are left out of the shared network", p["shared_networks"], [{"network": "edge", "projects": ["caddy"]}])
 
 fresh_docker()
 PG_ENV = ["PG_MAJOR=16", "PG_VERSION=16.14"]
@@ -408,6 +423,7 @@ check("plan: services with the same image", (p["services"], p["containers"]),
 check("plan: databases of the project", sorted((d["name"], d["kind"], d["size"]) for d in p["dbs"]),
       [("glitchtip-postgres", "postgres", 52428800), ("glitchtip-redis", "unsupported", None)])
 check("plan: compose changed + pulled", (p["config_changed"], p["pulled"]), (True, True))
+check("plan: no runner, no look for CI jobs", (p["ci_jobs"], ["docker", "ps", "-q"] in D.calls), ([], False))
 check("plan: version from the variable, the tag fixes one block -> size of the jump known",
       (p["installed_version"], p["tag_digits"], p["jump_unknown"]), ("16.14", 1, False))
 check("plan: pulled already -> the target is the pulled image (16.14 -> 16.15)",
