@@ -21,12 +21,18 @@ COMPOSE = {"com.docker.compose.project": "glitchtip", "com.docker.compose.servic
            "com.docker.compose.project.working_dir": "/opt/g",
            "com.docker.compose.project.config_files": "/opt/g/compose.yml"}
 C = [{"Name": "/glitchtip-postgres", "Image": "sha256:old", "Config": {"Image": "postgres:16-alpine", "Labels": COMPOSE}},
-     {"Name": "/ollama", "Image": "sha256:oll", "Config": {"Image": "ollama/ollama:latest", "Labels": {}}}]
+     {"Name": "/ollama", "Image": "sha256:oll", "Config": {"Image": "ollama/ollama:latest", "Labels": {}}},
+     # a CI job of the Forgejo runner (a CI host, 2026-10-17): no labels, a volume at /var/run/act
+     {"Name": "/FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", "Image": "sha256:ci",
+      "Config": {"Image": "sanctum-ci:1", "Labels": {}},
+      "Mounts": [{"Type": "volume", "Destination": "/workspace/Azentrius/sanctum"},
+                 {"Type": "volume", "Destination": "/var/run/act"}]}]
 IMAGES = {
     "sha256:old": {"Id": "sha256:old", "RepoDigests": ["postgres@sha256:16bc"], "Config": {"Env": ["PG_VERSION=16.14"]}},
     "sha256:new": {"Id": "sha256:new", "RepoDigests": ["postgres@sha256:7218"], "Config": {"Env": ["PG_VERSION=16.15"]}},
     "sha256:oll": {"Id": "sha256:oll", "RepoDigests": ["ollama/ollama@sha256:c484"],
                    "Config": {"Env": [], "Labels": {"org.opencontainers.image.version": "24.04"}}},
+    "sha256:ci": {"Id": "sha256:ci", "RepoDigests": [], "Config": {"Env": []}},
 }
 
 
@@ -38,7 +44,7 @@ def docker(*a):
     if a[:2] == ("image", "ls"):
         return "postgres:16-alpine sha256:new\nollama/ollama:latest sha256:oll\n"
     if a[:2] == ("image", "inspect"):
-        assert sorted(a[2:]) == ["sha256:new", "sha256:old", "sha256:oll"], a   # one call for all
+        assert sorted(a[2:]) == ["sha256:ci", "sha256:new", "sha256:old", "sha256:oll"], a   # one call for all
         return json.dumps([IMAGES[x] for x in a[2:]])
     raise AssertionError(a)
 
@@ -68,5 +74,16 @@ check("ollama: inherited label ignored", (ol["version"], ol["version_src"]), (No
 check("ollama not pulled, not managed", (ol["pulled"], ol["managed"]), (False, False))
 check("compose files: the label as a list, none without compose", (pg["files"], ol["files"]),
       (["/opt/g/compose.yml"], []))
+check("CI job container marked, the others not",
+      (rows["FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit"]["ci_job"], pg["ci_job"], ol["ci_job"]),
+      (True, False, False))
+ci = inv.is_ci_job
+check("CI jobs: by name (Gitea too), by the act volume, never a compose service",
+      [ci({"Name": "/GITEA-ACTIONS-TASK-7_WORKFLOW-x_JOB-build", "Config": {"Labels": {}}}),
+       ci({"Name": "/job-svc", "Config": {"Labels": None}, "Mounts": [{"Destination": "/var/run/act"}]}),
+       ci({"Name": "/FORGEJO-ACTIONS-TASK-1_x", "Config": {"Labels": COMPOSE}}),
+       ci({"Name": "/forgejo-runner", "Config": {"Labels": {}}, "Mounts": [{"Destination": "/data"}]}),
+       ci({"Name": "/FORGEJO-ACTIONS-TASK-x", "Config": {}})],
+      [True, True, False, False, False])
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

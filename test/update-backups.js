@@ -118,6 +118,20 @@ const BASE_SCRIPT = {
     const togetherIn = (d, n) => { const x = rowOf(d, n).querySelector("td .dm-row-note"); return x && x.textContent; };
     assert.deepStrictEqual([togetherIn(sp.d, "hbbr"), togetherIn(sp.d, "hbbs"), togetherIn(sp.d, "glitchtip-web")],
                            [null, null, "zusammen mit glitchtip-worker"], "other compose files: not together");
+    // Containers of CI jobs (Forgejo runner, a CI host, 2026-10-17) are not
+    // listed: the meta line counts them, its tooltip names them.
+    const JOB = { name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "sanctum-ci", tag: "1", digest: "",
+                  imgid: "sha256:ci", tagid: "", pulled: false, project: "", service: "", managed: false, files: [], ci_job: true };
+    for (const [lang, word] of [["de", "1 CI-Job ausgeblendet"], ["en", "1 CI job hidden"]]) {
+        const cj = boot(lang, { ...BASE_SCRIPT, "diun-inventory.py": { out: inventory + JSON.stringify(JOB) + "\n" } });
+        await sleep(80);
+        const meta = cj.d.getElementById("dm-meta");
+        console.log("CI jobs " + lang + ":", meta.textContent, "|", meta.title.replace(/\n/g, " / "));
+        assert.strictEqual(rowOf(cj.d, JOB.name), undefined, "not a row");
+        assert(meta.textContent.includes(word) && meta.textContent.includes(lang === "de" ? "31 Container" : "31 containers"), meta.textContent);
+        assert(meta.title.endsWith("\nunit (2415)"), meta.title);
+    }
+    assert(!a.d.getElementById("dm-meta").textContent.includes("CI") && !a.d.getElementById("dm-meta").title, "no CI jobs: no word");
     console.log("meta:", a.d.getElementById("dm-meta").textContent);
     // The buttons line up from row to row: a missing icon button keeps its place,
     // invisible and as large as the button (2026-10-16: in rows without "Change
@@ -499,6 +513,27 @@ const BASE_SCRIPT = {
         assert.strictEqual(x.d.getElementById("dm-dialog-confirm").disabled, gate);
         if (plan.jump_unknown) assert(xb.querySelector(".az-alert--warning .az-alert__body").textContent.endsWith("latest zeigt gerade auf 6.0.2."));
     }
+    // A CI runner whose jobs run now: a warning with a tick box (a CI host,
+    // 2026-10-17: two jobs kept running without a runner after its update).
+    const started = "2026-10-12T02:29:00Z";
+    const ci = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, config_changed: false,
+        ci_jobs: [{ name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "sanctum-ci:1", started },
+                  { name: "FORGEJO-ACTIONS-TASK-2417_WORKFLOW-9cbae90a_JOB-gitleaks", image: "sanctum-seccan:1", started }] }) } });
+    await sleep(80);
+    ci.d.querySelector('button[data-update="ollama"]').click();
+    await sleep(40);
+    const ciAlert = [...ci.d.querySelectorAll("#dm-dialog-body .az-alert--warning")]
+        .find((x) => x.querySelector(".az-alert__title").textContent === "CI-Jobs laufen");
+    console.log("CI jobs warning:", ciAlert && ciAlert.querySelector(".az-alert__body").textContent);
+    assert(ciAlert.querySelector(".az-alert__body").textContent.includes(
+        ": unit (Task 2415, gestartet vor 21 min), gitleaks (Task 2417, gestartet vor 21 min)."));
+    const cc = ci.d.getElementById("dm-dialog-confirm");
+    assert(cc.disabled, "Update waits for the tick box");
+    const cbox = ci.d.getElementById("dm-ci-check");
+    assert.strictEqual(cbox.parentElement.textContent.trim(), "Laufende Jobs dürfen abbrechen.");
+    cbox.checked = true;
+    cbox.dispatchEvent(new ci.w.Event("change"));
+    assert(!cc.disabled);
     // a database that does not run: an error in the plan, with its icon (.dm-error), not colour alone
     const ds = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
         { ...PLAN_OLLAMA, config_changed: false, dbs: [{ name: "actual-db", kind: "postgres", running: false, size: null }] }) } });

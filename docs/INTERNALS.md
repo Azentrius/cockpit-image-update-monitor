@@ -82,7 +82,7 @@ Inputs are checked by regex:
  "version": "16.14", "version_src": "env:PG_VERSION",
  "tagid": "sha256:7218…", "pulled": true, "pulled_version": "16.15",
  "project": "glitchtip", "service": "glitchtip-postgres", "managed": true,
- "files": ["/opt/glitchtip/docker-compose.yml"]}
+ "files": ["/opt/glitchtip/docker-compose.yml"], "ci_job": false}
 ```
 
 - `image` is the repo without the tag, as written in the compose file.
@@ -92,6 +92,10 @@ Inputs are checked by regex:
 - `files`: the compose files the container was started from (the label, `[]` without compose). One
   project can be started from several sets of files one by one; an update takes only the containers
   that share them (see `plan`).
+- `ci_job`: the container of a CI job (`diunlib.is_ci_job`): no compose project, and the name
+  `FORGEJO-ACTIONS-TASK-<n>_…` / `GITEA-ACTIONS-TASK-<n>_…` (Forgejo runner, Gitea's act_runner; a job's
+  service containers carry the prefix too) or a volume at `/var/run/act`. Such containers live as long
+  as the job and cannot be updated; the plugin does not list them (see “CI jobs” below).
 - With Docker's containerd image store `imgid` equals the index digest. That is normal.
 
 ### `versions.json` (radar)
@@ -206,6 +210,11 @@ status    = "Unknown" instead of "Up to date" when nothing was compared: install
     `condition: service_completed_successfully`.
   - `shared_networks`: `[{"network", "projects"}]`, other compose projects (or container names
     without a project) on the user-defined networks of these containers, except `<project>_default`.
+    CI job containers are left out: they come and go.
+- `ci_jobs`: only for an image of a CI runner (`forgejo/runner`, `gitea/act_runner`,
+  `diunlib.CI_RUNNER_RE`): the CI job containers that run now, `[{"name", "image", "started"}]`. The
+  update restarts the runners and those jobs break off; their containers stay behind without a runner
+  (seen on a CI host, 2026-10-17). `[]` otherwise.
 
 ### `retag --dry-run` (diun-update.py, since 0.11.0)
 
@@ -451,7 +460,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   - A plan that arrives after the dialog was closed is dropped (`planSeq`).
   - `jump_unknown` in the plan: the warning comes first in the body. A build that failed before (see
     below) adds its own warning with the cause. The confirm button stays disabled until every tick box
-    (`.dm-gate`: `#dm-jump-check`, `#dm-major-check`, `#dm-retry-check`) is set. Each warning and its
+    (`.dm-gate`: `#dm-jump-check`, `#dm-major-check`, `#dm-retry-check`, `#dm-ci-check`) is set. Each warning and its
     tick box form one `.dm-gate-group`; the blocks of the body (groups, plan, dump box, notes) are
     spaced by the flex gap of `.dm-dialog-body`, not by their own margins.
   - `target_version` as a row (“Brings”), with the size of the jump.
@@ -464,6 +473,10 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   release. Otherwise the text is muted and the status stays unknown.
 - **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`), by the
   same rule as `target_version`: not when the installed version is known but not among the tags.
+- **CI jobs:** rows with `ci_job` are not listed. The meta line counts them (“2 CI jobs hidden”) and
+  its tooltip names them (“unit (2415)”, from `…_JOB-<job>` and the task number). A plan with `ci_jobs`
+  gets the warning “CI jobs are running” with the jobs and how long they have run, and the tick box
+  `#dm-ci-check`.
 - **Together:** rows of the same compose project with the same image and tag and the same compose
   files (`files`) name each other under the container name (“together with …”, three names at most). The name itself is `.dm-name`.
 - **Plan groups:** recreated (`containers` without `jobs`), one-off jobs, waits for (`depends_on`),
@@ -509,12 +522,12 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | File | Checks |
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, a build after the newest release, cache, outage) |
-| `test/inv_test.py` | inventory with fake Docker, compose files per container |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
+| `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
-| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, output button, a build that failed before (row note, second tick box), “together with” in the rows, plan groups and dependencies, delete |
+| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, output button, a build that failed before (row note, second tick box), “together with” in the rows, CI job containers left out, the warning for running CI jobs, plan groups and dependencies, delete |
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |

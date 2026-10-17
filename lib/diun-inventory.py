@@ -19,6 +19,8 @@ Emits one JSON object per running container:
            can recreate it with docker compose
   files    the compose files it was started from ([] without compose); an
            update recreates the containers of the project that share them
+  ci_job   the container of a CI job (Forgejo / Gitea Actions): lives as
+           long as the job, the plugin lists it apart
 
 Invoked by the plugin via cockpit.spawn (superuser) on every load, so it
 uses a handful of docker calls instead of several per container.
@@ -32,7 +34,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from diunlib import local_version, norm, split_ref  # noqa: E402
+from diunlib import is_ci_job, local_version, norm, split_ref  # noqa: E402
 
 LOCK = "/run/lock/diun-inventory.lock"
 L_PROJECT = "com.docker.compose.project"
@@ -104,6 +106,7 @@ def main():
             "service": service,
             "managed": bool(project and service and labels.get(L_WORKDIR) and labels.get(L_FILES)),
             "files": [f for f in (labels.get(L_FILES) or "").split(",") if f],
+            "ci_job": is_ci_job(c),
         }, ensure_ascii=False), flush=True)
     return 0
 

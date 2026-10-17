@@ -132,3 +132,21 @@ def reachable(tag):
     pull of the same tag) - the rest needs a changed tag in the compose file."""
     k = tag_digits(tag)
     return [lvl for lvl, need in (("patch", 2), ("minor", 1), ("major", 0)) if k <= need]
+
+
+# Containers of CI jobs: the Forgejo runner and Gitea's act_runner name them
+# FORGEJO-ACTIONS-TASK-<n>_WORKFLOW-<id>_JOB-<job> (a job's service containers
+# carry the same prefix) and mount a volume at /var/run/act. They live as long
+# as the job, belong to no compose project and cannot be updated.
+CI_JOB_RE = re.compile(r"^(FORGEJO|GITEA)-ACTIONS-TASK-[0-9]+_", re.I)
+# Images of the runners that start them: updating one ends its running jobs.
+CI_RUNNER_RE = re.compile(r"(^|/)(forgejo/runner|gitea/act_runner)$")
+
+
+def is_ci_job(c):
+    """c: `docker inspect` of a container."""
+    if ((c.get("Config") or {}).get("Labels") or {}).get("com.docker.compose.project"):
+        return False
+    if CI_JOB_RE.match((c.get("Name") or "").lstrip("/")):
+        return True
+    return any((m or {}).get("Destination") == "/var/run/act" for m in c.get("Mounts") or [])

@@ -78,6 +78,8 @@ The labels use the shared status language: a hint in violet with `info-circle`, 
 `check-circle`, unknown without judgement with `ban`. Gold is never a status.
 
 Update buttons exist only for containers started with **docker compose** (“manual only” otherwise).
+
+**CI jobs:** containers of running jobs of a Forgejo runner or Gitea's act_runner (`FORGEJO-ACTIONS-TASK-…`) are not listed; they live as long as the job. The line above the table counts them, its tooltip names them. Updating a runner while jobs run shows a warning with the jobs and a tick box: the update restarts the runners, and running jobs break off.
 Such rows also get **Change version** (⇄) when the installed version is known and the radar has versions to offer for it.
 
 **Levels in “Newest version”**
