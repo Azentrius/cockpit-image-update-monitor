@@ -18,6 +18,10 @@ plugin/DMSerifDisplay-Italic.woff2, subset to the name suffix "monitor")
   Reserved Font Name 'Source'. Copyright 2019 Google LLC.
   SIL Open Font License 1.1, see plugin/OFL.txt
 
+Red Hat Mono (plugin/RedHatMono.woff2, a Latin subset)
+  Copyright 2024 The Red Hat Project Authors (https://github.com/RedHatOfficial/RedHatFont)
+  SIL Open Font License 1.1, see plugin/OFL.txt
+
 Icons (plugin/icons.js): Font Awesome Free 5.15.4 (Solid) by Fonticons, Inc.
   (https://fontawesome.com), as shipped in @patternfly/react-icons 6.4.0
   (Red Hat, Inc.); the path data is unchanged.
@@ -25,7 +29,3 @@ Icons (plugin/icons.js): Font Awesome Free 5.15.4 (Solid) by Fonticons, Inc.
   plugin/CC-BY-4.0-Font-Awesome.txt (installed next to the page and as
   /usr/share/doc/cockpit-image-update-monitor/CC-BY-4.0-Font-Awesome.txt) and
   https://creativecommons.org/licenses/by/4.0/
-
-The shared stylesheet plugin/azentrius.css declares Red Hat Mono from Cockpit's
-own static files; this page does not use it (plugin/diun.css sets the system's
-monospace font for code), and it is not part of this project.

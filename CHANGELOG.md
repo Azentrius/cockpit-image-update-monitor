@@ -98,8 +98,11 @@ its derivatives, openSUSE Leap 15.6) the package manager refuses the update.
   keeps the release and the patch it had, marked as older data.
 - **Fix: a font request that failed on Ubuntu.** The shared stylesheet asked Cockpit for Red Hat
   Mono (`static/fonts/RedHatMono`), which Ubuntu 24.04's Cockpit 314 does not ship: HTTP 404 on every
-  load of the page, found by the Cockpit session. Code and versions now use the system's monospace
-  font; `test/fonts_test.py` checks that every font the page uses ships with the add-on.
+  load of the page, found by the Cockpit session, and code was shown in a fallback (Courier New or the
+  browser's monospace font). The page now brings Red Hat Mono itself, as the design system asks:
+  `RedHatMono.woff2` (a Latin subset, SIL Open Font License 1.1, in `OFL.txt` and NOTICE) comes with
+  the new shared design files from Cron Jobs (`azentrius.css`, `OFL.txt`). `test/fonts_test.py`
+  checks that every font the page uses ships with the add-on.
 - **Fix: a killed update kept no output.** The output of an update was written to its log file only
   at the end. A run killed after the restart (SIGKILL) stayed in the history with its rollback, but
   without its output. It now goes to the file as it is printed once the run is in the history, so it is

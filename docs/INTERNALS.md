@@ -554,11 +554,10 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   `src/` in Azentrius/cockpit-cronjobs, pinned in `tools/design-files.sha256` and never edited here;
   `diun.css` holds only what this page needs on top. Icons are inline SVG from `icon(name)` in
   `diun.js`, all from the shared set.
-- **Fonts:** DM Sans and DM Serif Display ship with the add-on. Code and versions use the system's
-  monospace font: `diun.css` sets `--font-mono`, because `azentrius.css` names Red Hat Mono from
-  Cockpit's static files, which not every Cockpit ships (Ubuntu 24.04's Cockpit 314 answers 404). A
-  family that no stack names is never requested; `test/fonts_test.py` checks that every font the page
-  uses ships with it.
+- **Fonts:** DM Sans, DM Serif Display and Red Hat Mono (code and versions) ship with the add-on.
+  The page requests no font from Cockpit: its static files differ between Cockpit builds (Ubuntu
+  24.04's Cockpit 314 has no Red Hat Mono and answered 404 when `azentrius.css` took it from there).
+  `test/fonts_test.py` checks that every font the page uses ships with it.
 - **Frame:** header (`az-page-header`, the only `az-btn--primary` is Refresh), tabs (`az-tabs`,
   WAI-ARIA keyboard), `#dm-status` and `#dm-deps` under the tabs, the panels, the signature (version,
   host from `/etc/hostname`). Both tabs are loaded together with every load; switching loads nothing.
@@ -663,7 +662,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the revision of a development build, the bases of an image built here, a line tag refined by the radar, and kept with its patch when the registry failed |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
-| `test/fonts_test.py` | every font family the stylesheets name (custom properties resolved, in the order `index.html` loads them) that has an `@font-face` has its file in `plugin/`: no request for a font outside the add-on; counter-check that `azentrius.css` alone would name Red Hat Mono from Cockpit's files |
+| `test/fonts_test.py` | every font family the stylesheets name (custom properties resolved, in the order `index.html` loads them) that has an `@font-face` has its file in `plugin/`: no request for a font outside the add-on; Red Hat Mono is the code font, from `RedHatMono.woff2`; counter-check that a font from Cockpit's files and a missing file are caught |
 | `test/contrast_test.py` | WCAG contrast of every colour pair the page uses, light and dark (text 4.5:1, borders and icons 3:1) |
 | `tools/check-design-files.sh` | the shared design files match `tools/design-files.sha256` |
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |

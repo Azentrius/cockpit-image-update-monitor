@@ -726,6 +726,6 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 
 The add-on contains no code from Cockpit (LGPL-2.1+); it only uses Cockpit's API `cockpit.js` at runtime, which Cockpit itself ships.
 
-Third-party material keeps its own license, see [NOTICE](NOTICE): the fonts DM Sans and DM Serif Display (SIL Open Font License 1.1, [plugin/OFL.txt](plugin/OFL.txt)) and the icons, Font Awesome Free 5.15.4 by Fonticons, Inc. as shipped in `@patternfly/react-icons` 6.4.0 (CC BY 4.0, [plugin/CC-BY-4.0-Font-Awesome.txt](plugin/CC-BY-4.0-Font-Awesome.txt)). The packages install both license texts with the add-on.
+Third-party material keeps its own license, see [NOTICE](NOTICE): the fonts DM Sans, DM Serif Display and Red Hat Mono (SIL Open Font License 1.1, [plugin/OFL.txt](plugin/OFL.txt)) and the icons, Font Awesome Free 5.15.4 by Fonticons, Inc. as shipped in `@patternfly/react-icons` 6.4.0 (CC BY 4.0, [plugin/CC-BY-4.0-Font-Awesome.txt](plugin/CC-BY-4.0-Font-Awesome.txt)). The packages install both license texts with the add-on.
 
 Please report security issues privately, see [SECURITY.md](SECURITY.md).

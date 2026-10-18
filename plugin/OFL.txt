@@ -5,6 +5,9 @@ DM Serif Display (DMSerifDisplay-Regular.woff2, subset to the glyphs of "Azentri
 Copyright 2014 - 2017 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name 'Source'.
 Copyright 2019 Google LLC.
 
+Red Hat Mono (RedHatMono.woff2, a Latin subset):
+Copyright 2024 The Red Hat Project Authors (https://github.com/RedHatOfficial/RedHatFont)
+
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
 https://openfontlicense.org
