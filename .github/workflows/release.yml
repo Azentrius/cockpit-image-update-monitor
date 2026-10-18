@@ -28,7 +28,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - name: Only from main
         if: github.ref != 'refs/heads/main'
@@ -69,6 +69,12 @@ jobs:
       - name: Tests
         run: make check
 
+      # The release acceptance: the helpers against the real Docker Engine of this throw-away
+      # runner (test/e2e-server.sh), as in the e2e job of the test workflow.
+      - name: End-to-end test on the runner's Docker
+        shell: bash
+        run: sudo env E2E_LIB="$PWD/lib" bash test/e2e-server.sh 2>&1 | tee e2e.log
+
       - name: Packages (.deb, .rpm) and source archive
         run: |
           sudo apt-get update -qq
@@ -98,7 +104,7 @@ jobs:
             echo
             echo "From the Azentrius package repository: set up https://packages.azentrius.de once, then install Image Update Monitor in Cockpit under Applications, or with \`sudo apt install cockpit-image-update-monitor\` or \`sudo dnf install cockpit-image-update-monitor\`. The repository takes this release within an hour."
             echo
-            echo "From the files of this release: Debian and Ubuntu \`sudo apt install ./$deb\`, Fedora, RHEL and openSUSE \`sudo dnf install ./$rpm\`."
+            echo "From the files of this release: Debian and Ubuntu \`sudo apt install ./$deb\`, Fedora and RHEL \`sudo dnf install ./$rpm\`, openSUSE \`sudo zypper install --allow-unsigned-rpm ./$rpm\`."
             echo "The package takes over an installation made with install.sh (up to 0.11)."
             echo
             echo "Check the download against \`SHA256SUMS\`, and that it was built by this repository's release workflow:"

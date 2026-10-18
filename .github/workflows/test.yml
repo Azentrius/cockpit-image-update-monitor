@@ -86,3 +86,159 @@ jobs:
         with:
           name: screenshots
           path: test/shots/
+
+  # The helpers against a real Docker Engine on a throw-away runner: updates and rollbacks,
+  # pulls against a local registry, the update lock, tag changes, and every dump restored
+  # into a fresh Postgres, MariaDB and MySQL. No other containers run on the runner.
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Docker and Compose on the runner
+        run: |
+          docker version --format 'Docker {{.Server.Version}}'
+          docker compose version
+      - name: End-to-end test (test/e2e-server.sh as root, helpers from the checkout)
+        shell: bash
+        run: sudo env E2E_LIB="$PWD/lib" bash test/e2e-server.sh 2>&1 | tee e2e.log
+      - name: Keep the end-to-end log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-log
+          path: e2e.log
+
+  # The oldest Python the helpers support (README, Requirements): the offline tests of the
+  # helpers on Python 3.8, as Debian and RHEL derivatives may still have it.
+  python-min:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Helper tests on Python 3.8
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src/test python:3.8-slim sh -ec '
+            python3 --version
+            for t in radar_test.py inv_test.py update_test.py proc_test.py; do python3 "$t" > "/tmp/$t.log" || { cat "/tmp/$t.log"; exit 1; }; echo "PASS $t"; done'
+
+  # The packages on more distributions than the test job: install (the package manager
+  # resolves the dependencies from the distribution), the helpers answer, removal. An
+  # installed package is not yet a supported system (README, Supported systems).
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:12", kind: deb }
+          - { image: "ubuntu:22.04", kind: deb }
+          - { image: "ubuntu:24.04", kind: deb }
+          - { image: "rockylinux/rockylinux:9", kind: rpm }
+          - { image: "rockylinux/rockylinux:10", kind: rpm }
+          - { image: "opensuse/leap:16.0", kind: zypper }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
+          make packages
+      - name: Install, check and remove on ${{ matrix.image }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          KIND: ${{ matrix.kind }}
+        run: |
+          docker run --rm -e KIND -v "$PWD/dist:/dist:ro" "$IMAGE" sh -ec '
+            case "$KIND" in
+              deb) apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/*.deb > /dev/null ;;
+              rpm) dnf install -y -q /dist/*.rpm ;;
+              zypper) zypper --non-interactive --quiet install --allow-unsigned-rpm /dist/*.rpm ;;
+            esac
+            python3 --version
+            test -f /usr/share/cockpit/image-updates/manifest.json
+            test -f /usr/lib/cockpit-image-updates/diunproc.py
+            /usr/lib/cockpit-image-updates/diun-deps.sh check | python3 -c "import json, sys; json.load(sys.stdin)"
+            case "$KIND" in
+              deb) apt-get remove -y -qq cockpit-image-update-monitor > /dev/null ;;
+              rpm) dnf remove -y -q cockpit-image-update-monitor ;;
+              zypper) zypper --non-interactive --quiet remove cockpit-image-update-monitor ;;
+            esac
+            test ! -e /usr/lib/cockpit-image-updates'
+
+  # An upgrade from the newest release over this build, and the removal, on Debian and Fedora:
+  # the release files are checked against their SHA256SUMS first.
+  upgrade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Packages of this build and of the newest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
+          make packages
+          mkdir prev
+          gh release download --repo "$GITHUB_REPOSITORY" --dir prev --pattern '*.deb' --pattern '*.rpm' --pattern SHA256SUMS
+          (cd prev && sha256sum --ignore-missing -c SHA256SUMS)
+          ls prev dist
+      - name: Upgrade and remove on Debian 13 and Fedora 43
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/prev:/prev:ro" debian:13 sh -ec '
+            apt-get update -qq
+            apt-get install -y -qq /prev/*.deb > /dev/null
+            old=$(dpkg-query -W -f="\${Version}" cockpit-image-update-monitor)
+            mkdir -p /var/backups/image-updates
+            echo "{\"id\": \"20260101-000000-x\", \"kind\": \"update\", \"status\": \"ok\"}" > /var/backups/image-updates/operations.jsonl
+            apt-get install -y -qq /dist/*.deb > /dev/null
+            new=$(dpkg-query -W -f="\${Version}" cockpit-image-update-monitor)
+            echo "upgraded $old -> $new"
+            test "$old" != "$new"
+            test -f /usr/lib/cockpit-image-updates/diunproc.py
+            grep -q 20260101-000000-x /var/backups/image-updates/operations.jsonl
+            apt-get remove -y -qq cockpit-image-update-monitor > /dev/null
+            test ! -e /usr/lib/cockpit-image-updates
+            test -f /var/backups/image-updates/operations.jsonl'
+          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/prev:/prev:ro" fedora:43 sh -ec '
+            dnf install -y -q /prev/*.rpm
+            old=$(rpm -q cockpit-image-update-monitor)
+            dnf install -y -q /dist/*.rpm
+            new=$(rpm -q cockpit-image-update-monitor)
+            echo "upgraded $old -> $new"
+            test "$old" != "$new"
+            rpm -V cockpit-image-update-monitor
+            test -f /usr/lib/cockpit-image-updates/diunproc.py
+            dnf remove -y -q cockpit-image-update-monitor
+            test ! -e /usr/lib/cockpit-image-updates'
+
+  # Secrets in the files and in the whole history (gitleaks, pinned with its checksum). The
+  # findings are redacted in the log; GitHub's own secret scanning with push protection runs
+  # as well (repository settings).
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks 8.21.2 over the history and the files
+        run: |
+          curl -fsSLo gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+          echo "5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba  gitleaks.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          tar -xzf gitleaks.tar.gz -C "$RUNNER_TEMP/gitleaks" gitleaks
+          rm gitleaks.tar.gz
+          "$RUNNER_TEMP/gitleaks/gitleaks" git --redact --no-banner --verbose .
+          "$RUNNER_TEMP/gitleaks/gitleaks" dir --redact --no-banner .
