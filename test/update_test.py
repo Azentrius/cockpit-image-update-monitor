@@ -1016,6 +1016,27 @@ check("iso_time: docker image ls -> ISO 8601",
       ("2026-10-12T03:15:00+02:00", "2026-10-12T03:15:00-04:30", ""))
 check("backups: history with versions, without paths",
       [(o["from_version"], o["to_version"], "workdir" in o, "new_id" in o) for o in bk["ops"]], [("16.3", "16.4", False, False)])
+# Versions the update could not tell (latest without a version variable): the radar's since
+U.record({"id": "20261004-030000-ollama", "ts": "x", "kind": "update", "container": "ollama", "project": "o",
+          "image": "ollama/ollama:latest", "old_id": "sha256:oll", "new_id": "sha256:oll2",
+          "from_version": "0.30.11", "to_version": None, "rollback": None, "dumps": [], "status": "ok"})
+U.record({"id": "20261004-040000-mcp", "ts": "x", "kind": "update", "container": "mcp", "project": "o",
+          "image": "x/mcp:latest", "old_id": "sha256:mcp1", "new_id": "sha256:mcp2",
+          "from_version": None, "to_version": None, "rollback": None, "dumps": [], "status": "ok"})
+vers = lambda: {o["id"]: (o["from_version"], o["to_version"])
+                for o in json.loads(quiet(U.cmd_backups)[1])["ops"] if o["project"] == "o"}
+check("backups: broken radar file -> versions stay unknown", vers(),
+      {"20261004-030000-ollama": ("0.30.11", None), "20261004-040000-mcp": (None, None)})
+with open(U.VERSIONS, "w") as f:
+    json.dump({"images": [{"image": "ollama/ollama", "tag": "latest",
+                           "installed": {"sha256:oll2": {"version": "0.40.6", "src": "digest"}}},
+                          {"image": "x/mcp", "tag": "latest",
+                           "installed": {"sha256:mcp2": {"version": "0.199.4", "src": "label"},
+                                         "sha256:mcp1": {"version": None, "src": None}}}]}, f)
+check("backups: missing versions from the radar, known ones kept", vers(),
+      {"20261004-030000-ollama": ("0.30.11", "0.40.6"), "20261004-040000-mcp": (None, "0.199.4")})
+check("backups: the history file itself is not changed",
+      (ops()["20261004-030000-ollama"]["to_version"], ops()["20261004-040000-mcp"]["from_version"]), (None, None))
 U.record({"id": "20261006-030000-a-db", "ts": "x", "kind": "update", "container": "a-db", "project": "a",
           "image": "postgres:16", "rollback": None, "dumps": [], "status": "failed",
           "reason": {"container": "a-db", "state": "exited", "exit_code": 1, "oom": False, "source": "log",
