@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Feature request
+description: Suggest an idea or an improvement for Image Update Monitor.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Planned stages are in
+        [ROADMAP.md](https://github.com/Azentrius/cockpit-image-update-monitor/blob/main/ROADMAP.md);
+        please check there and in the open issues first. This issue is public: leave out host names,
+        credentials and other private data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What do you want to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How should the add-on solve it? What would the page show, what would the helpers do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other solutions or workarounds you have considered.
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you help?
+      options:
+        - "Yes, with a pull request"
+        - "Yes, by testing it on my server"
+        - "No"
+    validations:
+      required: false

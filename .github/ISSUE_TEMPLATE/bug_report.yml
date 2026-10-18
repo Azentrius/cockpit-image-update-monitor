@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Bug report
+description: Something in Image Update Monitor does not work as described.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problems do not belong here.** Report them privately as described in
+        [SECURITY.md](https://github.com/Azentrius/cockpit-image-update-monitor/blob/main/SECURITY.md).
+
+        This issue is public. Remove passwords, tokens, registry credentials, host names, IP addresses
+        and other private data from everything you paste.
+  - type: input
+    id: version
+    attributes:
+      label: Add-on version
+      description: >-
+        Shown in the page footer ("Image Update Monitor X.Y.Z"), or the output of
+        `dpkg -s cockpit-image-update-monitor` or `rpm -q cockpit-image-update-monitor`.
+      placeholder: "0.18.1"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: "Debian 13"
+    validations:
+      required: true
+  - type: input
+    id: cockpit
+    attributes:
+      label: Cockpit version
+      description: In Cockpit under Help › About Web Console, or `cockpit-bridge --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: docker
+    attributes:
+      label: Docker and Compose version
+      description: The output of `docker version` and `docker compose version`.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: The output of `python3 --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Image Update Monitor in Cockpit
+        2. Click "Update" for a container started with docker compose
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: >-
+        For example the live output or "Show output" of an update, the browser console,
+        `sudo /usr/lib/cockpit-image-updates/diun-update.py plan <container>` or
+        `journalctl -u diun-radar.service -n 20`.
+        **Before pasting, remove passwords, tokens, registry credentials, host names, IP addresses and
+        any other private data.** Compose files and container environments often contain secrets.
+      render: shell
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Private data
+      options:
+        - label: >-
+            I have removed passwords, tokens, registry credentials and any other secrets or private
+            data from everything above.
+          required: true
