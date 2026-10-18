@@ -82,7 +82,8 @@ Inputs are checked by regex:
  "version": "16.14", "version_src": "env:PG_VERSION",
  "tagid": "sha256:7218…", "pulled": true, "pulled_version": "16.15",
  "project": "glitchtip", "service": "glitchtip-postgres", "managed": true,
- "files": ["/opt/glitchtip/docker-compose.yml"], "ci_job": false, "created": "2026-08-14T02:11:09.512433187Z"}
+ "files": ["/opt/glitchtip/docker-compose.yml"], "ci_job": false, "created": "2026-08-14T02:11:09.512433187Z",
+ "revision": ""}
 ```
 
 - `image` is the repo without the tag, as written in the compose file.
@@ -99,6 +100,9 @@ Inputs are checked by regex:
   service containers carry the prefix too) or a volume at `/var/run/act`. Such containers live as long
   as the job and cannot be updated; the plugin does not list them (see “CI jobs” below).
 - `created`: when the image the container runs on was built (Docker's `Created`, `""` if unknown).
+- `revision`: the source revision the image names (label `org.opencontainers.image.revision`, else
+  `org.label-schema.vcs-ref`; `""` if none). Development builds such as `pomerium:main` carry no
+  version, but their commit says which build runs.
 - With Docker's containerd image store `imgid` equals the index digest. That is normal.
 
 ### `versions.json` (radar)
@@ -489,6 +493,9 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   release. Otherwise the text is muted and the status stays unknown.
 - **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`), by the
   same rule as `target_version`: not when the installed version is known but not among the tags.
+- **Development builds:** without an installed version, a row whose image names a `revision` shows
+  “<tag> @<7 characters>” in the installed column (“main @35b2a97”), with the full revision and the
+  build date in the tooltip. A known version always wins.
 - **CI jobs:** rows with `ci_job` are not listed. The meta line counts them (“2 CI jobs hidden”) and
   its tooltip names them (“unit (2415)”, from `…_JOB-<job>` and the task number). A plan with `ci_jobs`
   gets the warning “CI jobs are running” with the jobs and how long they have run, and the tick box
@@ -538,7 +545,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | File | Checks |
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
-| `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time |
+| `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
 | `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
@@ -547,7 +554,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, no update for the same build under a new digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
-| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the bases of an image built here |
+| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the revision of a development build, the bases of an image built here |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
 | `test/contrast_test.py` | WCAG contrast of every colour pair the page uses, light and dark (text 4.5:1, borders and icons 3:1) |
 | `tools/check-design-files.sh` | the shared design files match `tools/design-files.sha256` |

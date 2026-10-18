@@ -6,6 +6,10 @@
   epoch (`MARIADB_VERSION=1:11.8.9+maria~ubu2404`), which the helpers did not read: the version came
   only from the radar, and the history of an update to 11.8.9 showed no new version because the
   radar did not know the new image yet. The epoch is now skipped.
+- **Development builds show their commit:** an image without a version that names its source revision
+  (label `org.opencontainers.image.revision`), such as `pomerium:main`, shows “main @35b2a97” in the
+  installed column instead of “?”, with the full revision and the build date in the tooltip. The
+  inventory names it (`revision`).
 - **Images built on the server:** an image built by compose (`build:`) is in no registry and showed
   “not in a registry”. The radar now reads its Dockerfile's `FROM` lines and checks those images: what
   their tag points to and when the registry got it for this server's platform (`built` and `base` in

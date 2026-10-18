@@ -109,6 +109,8 @@
             "inst.unknown": "Cannot be determined: the image names no version and no version tag in the registry points to it.",
             "inst.pending": "Not determined yet – the version radar runs every 6 hours.",
             "inst.digestLine": "Digest: {d}",
+            "inst.revision": "No version number: the image names only the source revision it was built from, {rev}.",
+            "inst.built": "Built on {date}.",
             "inst.pulledTip": "{v} is already on the server but not rolled out yet.",
             "ver.noRadar": "The version radar has no data yet",
             "ver.notCovered": "Not covered by the radar yet (runs every 6 h)",
@@ -450,6 +452,8 @@
             "inst.unknown": "Nicht ermittelbar: Das Image nennt keine Version, und kein Versions-Tag in der Registry zeigt darauf.",
             "inst.pending": "Noch nicht ermittelt – der Versions-Radar läuft alle 6 Stunden.",
             "inst.digestLine": "Digest: {d}",
+            "inst.revision": "Keine Versionsnummer: Das Image nennt nur den Quellstand, aus dem es gebaut wurde, {rev}.",
+            "inst.built": "Gebaut am {date}.",
             "inst.pulledTip": "{v} liegt schon auf dem Server, ist aber noch nicht ausgerollt.",
             "ver.noRadar": "Versions-Radar hat noch keine Daten",
             "ver.notCovered": "Noch nicht vom Radar erfasst (nächster Lauf alle 6 h)",
@@ -981,14 +985,28 @@
         return "";
     }
 
+    // A source revision as people quote it: 7 characters of a commit hash,
+    // anything else as it is (at most 12 characters).
+    function shortRevision(rev) {
+        const r = String(rev || "").trim();
+        return /^[0-9a-f]{7,64}$/i.test(r) ? r.slice(0, 7) : r.slice(0, 12);
+    }
+
     // "Installed" column: exact version + where it comes from (tooltip);
     // "→ 16.15" when a newer image is already pulled but not rolled out.
+    // Without a version, a development build that names its source revision
+    // shows it: "main @35b2a97" (pomerium:main on a test host, 2026-10-18).
     function installedCell(ctn, rec, inst) {
-        const lines = [inst.v ? sourceText(inst) : t(inst.looked ? "inst.unknown" : "inst.pending")];
+        const rev = !inst.v && ctn.revision ? shortRevision(ctn.revision) : "";
+        const lines = [inst.v ? sourceText(inst)
+            : rev ? t("inst.revision", { rev: ctn.revision })
+            : t(inst.looked ? "inst.unknown" : "inst.pending")];
+        if (rev && ctn.created && !isNaN(new Date(ctn.created))) lines.push(t("inst.built", { date: fmtDate(new Date(ctn.created)) }));
         if (ctn.digest) lines.push(t("inst.digestLine", { d: shortDigest(ctn.digest) }));
         const title = esc(lines.filter(Boolean).join("\n"));
         let html = inst.v
             ? `<span class="dm-ver" title="${title}">${esc(inst.v)}</span>`
+            : rev ? `<span class="dm-ver" title="${title}">${esc(ctn.tag)} @${esc(rev)}</span>`
             : `<span class="dm-muted" title="${title}">?</span>`;
         const pv = ctn.pulled ? pulledVersionOf(ctn, rec) : null;
         if (pv && pv !== inst.v) {
