@@ -41,7 +41,19 @@ const BACKUPS = {
                dumps: ["glitchtip/20260901-031500_glitchtip-postgres.sql.gz"], images: ["postgres:rollback-20260901-031500"],
                bytes: 3 * 2 ** 20 },
 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Answers of the stubbed helpers that have not arrived yet, for every page of this file.
+const pending = new Set();
+// Waits until every stubbed answer has arrived and the page has handled it (also the calls
+// those answers lead to), instead of a fixed number of milliseconds. Fails after a bounded
+// number of rounds, so a page that keeps calling cannot hang the test.
+async function settle() {
+    for (let round = 0; round < 500; round++) {
+        if (pending.size) await Promise.all([...pending]);
+        await new Promise((r) => setImmediate(r));
+        if (!pending.size) return;
+    }
+    throw new Error("the page did not settle: helper calls keep coming");
+}
 
 function boot(language, script) {
     // outside-only: the page's own <script> tags never run; diun.js is evaluated below.
@@ -68,6 +80,9 @@ function boot(language, script) {
                 r.fail ? reject(r.fail) : resolve(r.out ?? "");
             }, 10));
             p.stream = (f) => { cb = f; return p; };
+            const done = p.then(() => {}, () => {});
+            pending.add(done);
+            done.then(() => pending.delete(done));
             return p;
         },
         transport: { wait() {} },
@@ -87,13 +102,13 @@ const BASE = {
     // 1. Run radar now: one run, button busy until it ends, double click ignored, then reload
     let finish;
     const a = boot("de", { ...BASE, "diun-update.py radar": () => new Promise((r) => { finish = r; }) });
-    await sleep(80);
+    await settle();
     const btn = a.d.getElementById("dm-radar");
     console.log("radar button:", !btn.hidden, "|", a.text("dm-radar"), "|", btn.title);
     assert(!btn.hidden && !btn.disabled && a.text("dm-radar") === "Radar jetzt starten");
     btn.click();
     btn.click();
-    await sleep(30);
+    await settle();
     console.log("while running:", a.text("dm-radar"), "| disabled:", btn.disabled, "| runs:", a.count("diun-update.py radar"));
     assert(btn.disabled && a.text("dm-radar") === "Radar läuft …" && a.count("diun-update.py radar") === 1);
     const call = a.calls.find((c) => c.cmd[1] === "radar");
@@ -101,16 +116,16 @@ const BASE = {
     assert.strictEqual(call.opts.superuser, "require");
     const loadsBefore = a.count("diun-inventory.py");
     finish("");
-    await sleep(80);
+    await settle();
     console.log("after the run:", a.text("dm-radar"), "| reloaded:", a.count("diun-inventory.py") > loadsBefore);
     assert(!btn.disabled && a.text("dm-radar") === "Radar jetzt starten" && a.count("diun-inventory.py") > loadsBefore);
 
     // 2. Radar not set up -> no button; a run in progress (timer, after an update) -> busy
     const b = boot("de", { ...BASE, "diun-deps.sh check": { out: deps({ radar: { state: "missing", can_install: true } }) } });
-    await sleep(80);
+    await settle();
     assert(b.d.getElementById("dm-radar").hidden, "hidden without radar");
     const c = boot("en", { ...BASE, "diun-deps.sh check": { out: deps({ radar: { state: "active", running: true } }) } });
-    await sleep(80);
+    await settle();
     console.log("run in progress:", c.text("dm-radar"), "| disabled:", c.d.getElementById("dm-radar").disabled);
     assert(c.d.getElementById("dm-radar").disabled && c.text("dm-radar") === "Radar running …");
 
@@ -120,9 +135,9 @@ const BASE = {
         [{ exit_status: 2 }, "The version radar is not set up", "Set it up under “Missing requirements”.", undefined],
         [{ problem: "access-denied" }, "Administrative access needed", "Denied: this needs administrative access. Switch it on at the top of Cockpit.", undefined]]) {
         const e = boot("en", { ...BASE, "diun-update.py radar": { fail } });
-        await sleep(80);
+        await settle();
         e.d.getElementById("dm-radar").click();
-        await sleep(60);
+        await settle();
         const st = e.d.getElementById("dm-status");
         const got = [st.querySelector(".az-alert__title").textContent, st.querySelector(".az-alert__body").textContent];
         console.log("radar fails", JSON.stringify(fail).padEnd(28), "->", got.join(" / "));
@@ -136,9 +151,9 @@ const BASE = {
     const g = boot("de", { ...BASE, "diun-update.py cleanup": { chunks: ["Regeln (Standard): …\n", "Dump gelöscht: …\n",
         '@@RESULT {"status":"ok","dumps":["glitchtip/20260901-031500_glitchtip-postgres.sql.gz"],"images":["postgres:rollback-20260901-031500"],"bytes":3145728,"failed":[]}\n'] },
         "diun-deps.sh install": { chunks: ["+ systemctl enable --now diun-cleanup.timer\n"] } });
-    await sleep(80);
+    await settle();
     g.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(80);
+    await settle();
     console.log("\nrules  :", g.text("dm-cleanup-rules"));
     console.log("timer  :", g.text("dm-cleanup-timer"));
     console.log("preview:", g.text("dm-cleanup-preview"), "| button:", !g.d.getElementById("dm-cleanup-btn").hidden);
@@ -167,10 +182,10 @@ const BASE = {
     console.log("setup dialog:", g.text("dm-dialog-title"));
     assert.strictEqual(g.text("dm-dialog-title"), "Tägliches Aufräumen einrichten?");
     g.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     assert.strictEqual(JSON.stringify(g.calls.find((x) => x.cmd[1] === "install").cmd.slice(1)), JSON.stringify(["install", "cleanup"]));
     g.d.getElementById("dm-dialog-cancel").click();
-    await sleep(80);
+    await settle();
 
     // 6. Clean up dumps and images: dialog lists what goes, runs `cleanup`, result from @@RESULT
     assert.strictEqual(g.text("dm-cleanup-btn"), "Dumps und Images aufräumen");
@@ -181,7 +196,7 @@ const BASE = {
     assert(g.text("dm-dialog-body").includes("glitchtip/20260901-031500_glitchtip-postgres.sql.gz"));
     assert(g.text("dm-dialog-body").includes("postgres:rollback-20260901-031500"));
     g.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     const cl = g.calls.find((x) => x.cmd[1] === "cleanup");
     console.log("spawn :", JSON.stringify(cl.cmd.slice(1)), cl.opts.superuser, "| result:", g.text("dm-dialog-result"));
     assert.strictEqual(JSON.stringify(cl.cmd), JSON.stringify([UPDATE, "cleanup"]));
@@ -192,9 +207,9 @@ const BASE = {
                                             dumps: [], images: [], keep_dumps: null, image_days: null } };
     const h = boot("en", { ...BASE, "diun-update.py backups": { out: JSON.stringify(broken) },
                            "diun-deps.sh check": { out: deps({ cleanup: { state: "active", can_install: true } }) } });
-    await sleep(80);
+    await settle();
     h.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(80);
+    await settle();
     console.log("\nbroken rules:", h.text("dm-cleanup-rules"), "| timer:", h.text("dm-cleanup-timer"));
     assert(h.text("dm-cleanup-rules").startsWith("Cleanup rules: /etc/image-updates.conf, line 2"));
     assert(h.d.querySelector("#dm-cleanup-rules .dm-error"), "an error with its icon, not colour alone");
@@ -205,9 +220,9 @@ const BASE = {
     const old = { ...BACKUPS };
     delete old.cleanup;
     const k = boot("en", { ...BASE, "diun-update.py backups": { out: JSON.stringify(old) } });
-    await sleep(80);
+    await settle();
     k.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(80);
+    await settle();
     assert(k.d.getElementById("dm-cleanup").hidden);
 
     // 9. Update result names the versions
@@ -216,19 +231,19 @@ const BASE = {
         dbs: [], free_bytes: 40 * 2 ** 30 };
     const m = boot("de", { ...BASE, "diun-update.py plan": { out: JSON.stringify(PLAN) },
         "diun-update.py update": { chunks: ['@@RESULT {"op":"x","status":"ok","rollback":"postgres:rollback-20261012-040000","from_version":"16.14","to_version":"16.15"}\n'] } });
-    await sleep(80);
+    await settle();
     m.d.querySelector('button[data-update="glitchtip-postgres"]').click();
-    await sleep(40);
+    await settle();
     m.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     console.log("\nupdate result:", m.text("dm-dialog-result"));
     assert.strictEqual(m.text("dm-dialog-result"), "Update erfolgreich: 16.14 → 16.15. Rollback-Kopie: postgres:rollback-20261012-040000");
 
     // 10. English: no German in the header, the backups tab and the cleanup dialog
     const n = boot("en", BASE);
-    await sleep(80);
+    await settle();
     n.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(80);
+    await settle();
     n.d.getElementById("dm-cleanup-btn").click();
     const all = n.d.documentElement.outerHTML;
     const german = ["Radar jetzt", "läuft", "Aufräumen", "aufräumen", "Regeln", "behält", "Datenbank", "Tagen", "Standardwerte",

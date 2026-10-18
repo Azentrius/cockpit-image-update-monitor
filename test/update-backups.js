@@ -54,7 +54,19 @@ const BACKUPS = {
             rollback_reason: { container: "y", state: "unhealthy", exit_code: 0, oom: false, source: "health",
                                line: "curl: (7) Failed to connect to localhost port 8000" } }],
 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Answers of the stubbed helpers that have not arrived yet, for every page of this file.
+const pending = new Set();
+// Waits until every stubbed answer has arrived and the page has handled it (also the calls
+// those answers lead to), instead of a fixed number of milliseconds. Fails after a bounded
+// number of rounds, so a page that keeps calling cannot hang the test.
+async function settle() {
+    for (let round = 0; round < 500; round++) {
+        if (pending.size) await Promise.all([...pending]);
+        await new Promise((r) => setImmediate(r));
+        if (!pending.size) return;
+    }
+    throw new Error("the page did not settle: helper calls keep coming");
+}
 const kvRows = (el) => [...el.querySelectorAll(".dm-kv li")].map((li) => [...li.children].map((x) => x.textContent).join(": "));
 
 function boot(language, script) {
@@ -79,6 +91,9 @@ function boot(language, script) {
                 r.fail ? reject(r.fail) : resolve(r.out ?? "");
             }, 10));
             p.stream = (f) => { cb = f; return p; };
+            const done = p.then(() => {}, () => {});
+            pending.add(done);
+            done.then(() => pending.delete(done));
             return p;
         },
         transport: { wait() {} },
@@ -96,7 +111,7 @@ const BASE_SCRIPT = {
 (async () => {
     // 1. Rows: buttons per kind
     const a = boot("de", BASE_SCRIPT);
-    await sleep(80);
+    await settle();
     const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector(".dm-name").textContent === name);
     const describe = (tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent.trim()).filter(Boolean).join(" | ");
     for (const n of ["ollama", "glitchtip-postgres", "actual-ai", "calcom"]) console.log("row:", describe(rowOf(a.d, n)));
@@ -114,7 +129,7 @@ const BASE_SCRIPT = {
     const split = inventory.trim().split("\n").map((l) => JSON.parse(l)).map((c) => c.project !== "rustdesk" ? c
         : { ...c, files: [c.name === "hbbr" ? "/opt/rustdesk/relay.yml" : "/opt/rustdesk/compose.yml"] });
     const sp = boot("de", { ...BASE_SCRIPT, "diun-inventory.py": { out: split.map((c) => JSON.stringify(c)).join("\n") + "\n" } });
-    await sleep(80);
+    await settle();
     const togetherIn = (d, n) => { const x = rowOf(d, n).querySelector("td .dm-row-note"); return x && x.textContent; };
     assert.deepStrictEqual([togetherIn(sp.d, "hbbr"), togetherIn(sp.d, "hbbs"), togetherIn(sp.d, "glitchtip-web")],
                            [null, null, "zusammen mit glitchtip-worker"], "other compose files: not together");
@@ -124,7 +139,7 @@ const BASE_SCRIPT = {
                   imgid: "sha256:ci", tagid: "", pulled: false, project: "", service: "", managed: false, files: [], ci_job: true };
     for (const [lang, word] of [["de", "1 CI-Job ausgeblendet"], ["en", "1 CI job hidden"]]) {
         const cj = boot(lang, { ...BASE_SCRIPT, "diun-inventory.py": { out: inventory + JSON.stringify(JOB) + "\n" } });
-        await sleep(80);
+        await settle();
         const meta = cj.d.getElementById("dm-meta");
         console.log("CI jobs " + lang + ":", meta.textContent, "|", meta.title.replace(/\n/g, " / "));
         assert.strictEqual(rowOf(cj.d, JOB.name), undefined, "not a row");
@@ -152,9 +167,9 @@ const BASE_SCRIPT = {
                              '@@RESULT {"op":"20261012-032000-ollama","status":"ok","rollback":"ollama/ollama:rollback-20261012-032000"}\n'] };
     const b = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_OLLAMA) },
                                            "diun-update.py update": runOk });
-    await sleep(80);
+    await settle();
     b.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     const body = b.d.getElementById("dm-dialog-body").textContent.replace(/\s+/g, " ");
     console.log("\ndialog:", b.d.getElementById("dm-dialog-title").textContent, "|", b.d.getElementById("dm-dialog-desc").textContent);
     console.log("body  :", body);
@@ -163,7 +178,7 @@ const BASE_SCRIPT = {
     assert(!b.d.getElementById("dm-jump-check") && !body.includes("Installierte Version"),
            "an older plan without version fields: no warning, no row");
     b.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     const up = b.last("update");
     console.log("spawn :", JSON.stringify(up.cmd), up.opts.superuser);
     assert.strictEqual(JSON.stringify(up.cmd), JSON.stringify(["/usr/lib/cockpit-image-updates/diun-update.py", "update", "ollama"]));
@@ -177,20 +192,20 @@ const BASE_SCRIPT = {
     const c = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_GLITCH) },
         "diun-update.py update": { chunks: ["…\n", '@@RESULT {"op":"20261012-033000-glitchtip-postgres","status":"failed"}\n'], fail: { exit_status: 4 } },
         "diun-update.py rollback": { chunks: ["Rollback …\n", '@@RESULT {"op":"20261012-033000-glitchtip-postgres","status":"ok"}\n'] } });
-    await sleep(80);
+    await settle();
     c.d.querySelector('button[data-update="glitchtip-postgres"]').click();
-    await sleep(40);
+    await settle();
     console.log("\ndialog:", c.d.getElementById("dm-dialog-title").textContent, "|", c.d.getElementById("dm-dialog-desc").textContent);
     c.d.getElementById("dm-dump-check").checked = false;
     c.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     console.log("spawn :", JSON.stringify(c.last("update").cmd.slice(1)));
     assert.strictEqual(JSON.stringify(c.last("update").cmd.slice(1)), JSON.stringify(["update", "glitchtip-postgres", "--no-dump"]));
     const extra = c.d.getElementById("dm-dialog-extra");
     console.log("result:", c.d.getElementById("dm-dialog-result").textContent, "| extra:", !extra.hidden, extra.textContent.trim());
     assert(!extra.hidden && extra.textContent.trim() === "Update zurückrollen");
     extra.click();
-    await sleep(60);
+    await settle();
     console.log("spawn :", JSON.stringify(c.last("rollback").cmd.slice(1)), "| result:", c.d.getElementById("dm-dialog-result").textContent);
     assert.strictEqual(c.d.getElementById("dm-dialog-result").textContent, "Rollback erfolgreich.");
 
@@ -199,48 +214,48 @@ const BASE_SCRIPT = {
     for (const dbs of [[], [{ name: "cache", kind: "unsupported", running: true, size: null }]]) {
         const nd = boot("de", { ...BASE_SCRIPT, "diun-update.py update": runOk,
             "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, config_changed: false, dbs }) } });
-        await sleep(80);
+        await settle();
         nd.d.querySelector('button[data-update="ollama"]').click();
-        await sleep(40);
+        await settle();
         const ndBody = nd.d.getElementById("dm-dialog-body");
         console.log("no db :", kvRows(ndBody).find((r) => r.startsWith("Datenbank-Dump")), "| tick box:",
                     !!nd.d.getElementById("dm-dump-check"));
         assert(!nd.d.getElementById("dm-dump-check") && !ndBody.querySelector(".dm-check"));
         nd.d.getElementById("dm-dialog-confirm").click();
-        await sleep(60);
+        await settle();
         assert.deepStrictEqual(nd.last("update").cmd.slice(1), ["update", "ollama"]);
     }
 
     // 3b. Dialog closed while the plan is still loading -> must stay closed
     const s = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_OLLAMA) } });
-    await sleep(80);
+    await settle();
     s.d.querySelector('button[data-update="ollama"]').click();
     s.d.getElementById("dm-dialog-cancel").click();
-    await sleep(40);
+    await settle();
     console.log("\nclosed during plan -> open:", s.d.getElementById("dm-dialog").hasAttribute("open"));
     assert(!s.d.getElementById("dm-dialog").hasAttribute("open"));
 
     // 4. Not updatable / no admin
     const e = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, updatable: false, reason: "not-compose" }) } });
-    await sleep(80);
+    await settle();
     e.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     console.log("\nnot updatable:", e.d.getElementById("dm-dialog-desc").textContent, "| confirm hidden:", e.d.getElementById("dm-dialog-confirm").hidden);
     assert(e.d.getElementById("dm-dialog-confirm").hidden);
     for (const [lang, want] of [["de", "Die Compose-Dateien, aus denen der Container gestartet wurde, enthalten runner-2 nicht (mehr)."],
                                 ["en", "the compose files the container was started from do not define runner-2 (any more)."]]) {
         const m = boot(lang, { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, updatable: false,
             reason: "service-missing", missing: ["runner-2"] }) } });
-        await sleep(80);
+        await settle();
         m.d.querySelector('button[data-update="ollama"]').click();
-        await sleep(40);
+        await settle();
         const desc = m.d.getElementById("dm-dialog-desc").textContent;
         assert(desc.includes(want) && m.d.getElementById("dm-dialog-confirm").hidden, desc);
     }
     const f = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { fail: { problem: "access-denied" } } });
-    await sleep(80);
+    await settle();
     f.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     console.log("no admin     :", f.d.getElementById("dm-dialog-desc").textContent);
     assert(f.d.getElementById("dm-dialog-desc").textContent.startsWith("Denied"));
 
@@ -248,9 +263,9 @@ const BASE_SCRIPT = {
     const g = boot("de", { ...BASE_SCRIPT,
         "diun-update.py delete-dump": { chunks: ["Gelöscht: …\n"] },
         "diun-update.py rollback": { chunks: ['@@RESULT {"status":"ok"}\n'] } });
-    await sleep(80);
+    await settle();
     g.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(80);
+    await settle();
     assert(!g.d.getElementById("dm-tab-backups").hidden && g.d.getElementById("dm-tab-updates").hidden);
     console.log("\nbackups summary:", g.d.getElementById("dm-bk-summary").textContent);
     ["dm-ops", "dm-dumps", "dm-images"].forEach((id) =>
@@ -269,7 +284,7 @@ const BASE_SCRIPT = {
                             g.d.querySelector("#dm-dialog-desc code").textContent],
                            ["Dump löschen", "glitchtip/20261012-031500_glitchtip-postgres.sql.gz"]);
     g.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     console.log("spawn :", JSON.stringify(g.last("delete-dump").cmd.slice(1)), g.last("delete-dump").opts.superuser,
                 "| result:", g.d.getElementById("dm-dialog-result").textContent);
     assert.strictEqual(g.last("delete-dump").cmd[2], "glitchtip/20261012-031500_glitchtip-postgres.sql.gz");
@@ -277,7 +292,7 @@ const BASE_SCRIPT = {
     g.d.querySelector('#dm-ops button[data-op="0"]').click();
     console.log("rollback dialog:", g.d.getElementById("dm-dialog-title").textContent, "|", g.d.getElementById("dm-dialog-desc").textContent);
     g.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     assert.strictEqual(JSON.stringify(g.last("rollback").cmd.slice(1)), JSON.stringify(["rollback", "20261012-031500-glitchtip-postgres"]));
     console.log("result:", g.d.getElementById("dm-dialog-result").textContent);
     const causes = [...g.d.querySelectorAll("#dm-ops .dm-op-reason")].map((x) => x.textContent);
@@ -289,7 +304,7 @@ const BASE_SCRIPT = {
     for (const [fail, body] of [[{ problem: "access-denied" }, "Die Backup-Übersicht braucht administrativen Zugriff: Schalten Sie ihn oben in Cockpit ein."],
                                 [{ message: "docker: not found" }, "Prüfen Sie, ob Docker auf diesem Server läuft, und wählen Sie dann „Aktualisieren“. Details: docker: not found"]]) {
         const bf = boot("de", { ...BASE_SCRIPT, "diun-update.py backups": { fail } });
-        await sleep(80);
+        await settle();
         const err = bf.d.getElementById("dm-bk-error");
         console.log("backups fail:", err.textContent);
         assert.deepStrictEqual([err.hidden, err.getAttribute("role"), err.classList.contains("az-alert--danger"),
@@ -303,9 +318,9 @@ const BASE_SCRIPT = {
     // 7. Unknown jump size: the warning comes first, Update waits for the tick box
     const j = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_JUMP) },
                                            "diun-update.py update": runOk });
-    await sleep(80);
+    await settle();
     j.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     const jbody = j.d.getElementById("dm-dialog-body");
     console.log("\njump  :", jbody.textContent.replace(/\s+/g, " ").slice(0, 150), "…");
     const first = jbody.firstElementChild;
@@ -326,14 +341,14 @@ const BASE_SCRIPT = {
     assert(jc.disabled, "untick: disabled again");
     toggle(true);
     jc.click();
-    await sleep(60);
+    await settle();
     assert.strictEqual(j.last("update").cmd[2], "ollama");
     console.log("jump  : confirmed after the tick box ->", JSON.stringify(j.last("update").cmd.slice(1)));
     const kn = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
         { ...PLAN_OLLAMA, installed_version: "0.30.11", tag_digits: 0, jump_unknown: false }) } });
-    await sleep(80);
+    await settle();
     kn.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     assert(!kn.d.getElementById("dm-jump-check") && !kn.d.getElementById("dm-dialog-confirm").disabled);
     assert(kvRows(kn.d.getElementById("dm-dialog-body")).includes("Installierte Version: 0.30.11"));
 
@@ -342,13 +357,13 @@ const BASE_SCRIPT = {
         "diun-update.py update": { chunks: ["…\n", "@@RESULT " + JSON.stringify(
             { op: "20261012-232502-formbricks-app", status: "failed", reason: REASON }) + "\n"], fail: { exit_status: 4 } },
         "diun-update.py rollback": { chunks: ["Rollback …\n", '@@RESULT {"op":"20261012-232502-formbricks-app","status":"ok"}\n'] } });
-    await sleep(80);
+    await settle();
     k.d.querySelector('button[data-update="glitchtip-postgres"]').click();
-    await sleep(40);
+    await settle();
     const box = k.d.getElementById("dm-dialog-reason");
     assert(box.hidden, "no cause before the run");
     k.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     console.log("\ncause :", box.textContent.replace(/\s+/g, " ").trim());
     assert(!box.hidden && box.classList.contains("az-alert--danger"));
     assert.strictEqual(box.querySelector(".az-alert__title").textContent, "Vermutliche Ursache (formbricks-app)");
@@ -357,7 +372,7 @@ const BASE_SCRIPT = {
            "the cause stands above the log");
     assert(!k.d.getElementById("dm-dialog-extra").hidden, "rollback offered");
     k.d.getElementById("dm-dialog-extra").click();
-    await sleep(60);
+    await settle();
     assert(box.hidden, "a new run hides the old cause");
     assert.strictEqual(k.d.getElementById("dm-dialog-result").textContent, "Rollback erfolgreich.");
     // a failed rollback names its own cause; without a log line the state speaks
@@ -365,12 +380,12 @@ const BASE_SCRIPT = {
         "diun-update.py rollback": { chunks: ["…\n", "@@RESULT " + JSON.stringify({ op: "x", status: "failed",
             reason: { container: "glitchtip-postgres", state: "starting", exit_code: 0, oom: false, source: null, line: null } }) + "\n"],
             fail: { exit_status: 4 } } });
-    await sleep(80);
+    await settle();
     m.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(40);
+    await settle();
     m.d.querySelector('#dm-ops button[data-op="0"]').click();
     m.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     console.log("rollback cause:", m.d.getElementById("dm-dialog-reason").textContent.replace(/\s+/g, " ").trim());
     assert.strictEqual(m.d.querySelector("#dm-dialog-reason .dm-reason-line").textContent,
                        "In der Wartezeit nicht bereit geworden; im Log steht keine Fehlerzeile.");
@@ -395,9 +410,9 @@ const BASE_SCRIPT = {
     const rt = boot("de", { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: RETRY_OPS }) },
         "diun-update.py rollback": { chunks: ["…\n", "@@RESULT " + JSON.stringify({ op: "20261012-030000-d", status: "failed",
             reason: RETRY_OPS[3].reason }) + "\n"], fail: { exit_status: 4 } } });
-    await sleep(80);
+    await settle();
     rt.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(40);
+    await settle();
     const rtRows = [...rt.d.querySelectorAll("#dm-ops tr")].map((tr) =>
         [tr.querySelector('td[data-label="Ergebnis"] .az-label').textContent, !!tr.querySelector("button[data-op]"),
          (tr.querySelector(".dm-op-reason") || {}).textContent || null]);
@@ -409,7 +424,7 @@ const BASE_SCRIPT = {
         ["fehlgeschlagen", true, RETRY_OPS[3].reason.line]]);
     rt.d.querySelector('#dm-ops button[data-op="3"]').click();
     rt.d.getElementById("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     assert.strictEqual(rt.d.querySelector("#dm-dialog-reason .az-alert__title").textContent, "Ursache (Update-Helfer)");
 
     // 9. The kept output: a button per history entry, the dialog shows it
@@ -417,15 +432,15 @@ const BASE_SCRIPT = {
     const lg = boot("de", { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify(withLog) },
         "diun-update.py log": (cmd) => cmd[2] === withLog.ops[0].id
             ? { out: "Updating postgres:16-alpine …\n--- Rollback ---\nRolling …\n" } : { fail: { exit_status: 2 } } });
-    await sleep(80);
+    await settle();
     lg.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(40);
+    await settle();
     const logBtns = [...lg.d.querySelectorAll("#dm-ops button[data-log]")];
     assert.strictEqual(logBtns.length, 1, "a button only where output is kept");
     assert.deepStrictEqual(places(lg.d.querySelector("#dm-ops tr")), ["rollback", "log"]);
     assert.strictEqual(logBtns[0].getAttribute("aria-label"), "Ausgabe anzeigen");
     logBtns[0].click();
-    await sleep(40);
+    await settle();
     console.log("\nlog   :", lg.d.getElementById("dm-dialog-title").textContent, "|",
                 JSON.stringify(lg.d.getElementById("dm-dialog-log").textContent));
     assert.strictEqual(JSON.stringify(lg.last("log").cmd.slice(1)), JSON.stringify(["log", withLog.ops[0].id]));
@@ -447,11 +462,11 @@ const BASE_SCRIPT = {
     const FB_DATE = new Date("2026-10-12T02:00:00Z").toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
     const noteOf = (d) => { const n = rowOf(d, "ollama").querySelector(".dm-row-note"); return n && n.textContent; };
     const fb = boot("de", withFailed([failedOp(OLLAMA_DIGEST), ...BACKUPS.ops]));
-    await sleep(120);
+    await settle();
     console.log("\nfailed build row:", describe(rowOf(fb.d, "ollama")));
     assert.strictEqual(noteOf(fb.d), `Das Update auf diesen Build ist am ${FB_DATE} gescheitert.`);
     fb.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     const fbBody = fb.d.getElementById("dm-dialog-body");
     const warns = [...fbBody.querySelectorAll(".az-alert--warning .az-alert__body")].map((x) => x.textContent);
     console.log("failed build dialog:", warns[1]);
@@ -467,14 +482,14 @@ const BASE_SCRIPT = {
     assert(fc.disabled);
     // a different build, or a later successful update, clears it
     const nb = boot("de", withFailed([failedOp("sha256:another-build"), ...BACKUPS.ops]));
-    await sleep(120);
+    await settle();
     assert.strictEqual(noteOf(nb.d), null, "a new build is not marked");
     nb.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     assert(!nb.d.getElementById("dm-retry-check"));
     const ok = boot("de", withFailed([{ ...failedOp(OLLAMA_DIGEST), id: "20261012-050000-ollama", status: "ok",
                                          rolled_back: false, reason: null }, failedOp(OLLAMA_DIGEST), ...BACKUPS.ops]));
-    await sleep(120);
+    await settle();
     assert.strictEqual(noteOf(ok.d), null, "a later successful update clears the mark");
 
     // 11. What else the update touches: groups, dependencies, warnings
@@ -488,9 +503,9 @@ const BASE_SCRIPT = {
         shared_networks: [{ network: "mailrelay", projects: ["calcom", "smtp-relay"] }],
         installed_version: "6.2.6", tag_digits: 0, jump_unknown: false };
     const rl = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_REL) } });
-    await sleep(80);
+    await settle();
     rl.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     const rlBody = rl.d.getElementById("dm-dialog-body");
     const rows11 = kvRows(rlBody);
     console.log("\nrelations:", rows11.join(" | "));
@@ -518,9 +533,9 @@ const BASE_SCRIPT = {
     const mj = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
         { ...PLAN_OLLAMA, config_changed: false, installed_version: "5.0.2", tag_digits: 0, jump_unknown: false,
           target_version: "6.0.2", jump: "major" }) }, "diun-update.py update": runOk });
-    await sleep(80);
+    await settle();
     mj.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     const mjBody = mj.d.getElementById("dm-dialog-body");
     console.log("major :", kvRows(mjBody).filter((r) => r.startsWith("Bringt") || r.startsWith("Installierte")).join(" | "));
     assert(kvRows(mjBody).includes("Bringt: 6.0.2 Major"));
@@ -541,9 +556,9 @@ const BASE_SCRIPT = {
                                      [{ target_version: "6.0.2", jump: null, installed_version: null, jump_unknown: true }, "Bringt: 6.0.2", true]]) {
         const x = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
             { ...PLAN_OLLAMA, config_changed: false, installed_version: "5.0.2", tag_digits: 0, jump_unknown: false, ...plan }) } });
-        await sleep(80);
+        await settle();
         x.d.querySelector('button[data-update="ollama"]').click();
-        await sleep(40);
+        await settle();
         const xb = x.d.getElementById("dm-dialog-body");
         assert(kvRows(xb).includes(row), row);
         assert.strictEqual(!!x.d.getElementById("dm-major-check"), false);
@@ -556,9 +571,9 @@ const BASE_SCRIPT = {
     const ci = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, config_changed: false,
         ci_jobs: [{ name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "sanctum-ci:1", started },
                   { name: "FORGEJO-ACTIONS-TASK-2417_WORKFLOW-9cbae90a_JOB-gitleaks", image: "sanctum-seccan:1", started }] }) } });
-    await sleep(80);
+    await settle();
     ci.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     const ciAlert = [...ci.d.querySelectorAll("#dm-dialog-body .az-alert--warning")]
         .find((x) => x.querySelector(".az-alert__title").textContent === "CI-Jobs laufen");
     console.log("CI jobs warning:", ciAlert && ciAlert.querySelector(".az-alert__body").textContent);
@@ -574,9 +589,9 @@ const BASE_SCRIPT = {
     // a database that does not run: an error in the plan, with its icon (.dm-error), not colour alone
     const ds = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
         { ...PLAN_OLLAMA, config_changed: false, dbs: [{ name: "actual-db", kind: "postgres", running: false, size: null }] }) } });
-    await sleep(80);
+    await settle();
     ds.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(40);
+    await settle();
     const stopped = ds.d.querySelector("#dm-dialog-body .dm-error");
     assert(stopped && stopped.textContent === "actual-db läuft nicht – das Update würde abbrechen");
 
@@ -588,11 +603,11 @@ const BASE_SCRIPT = {
           dependents: [{ service: "side", containers: ["glitchtip-side"] }],
           job_order: [{ job: "glitchtip-migrate", services: ["glitchtip-web"] }],
           shared_networks: [{ network: "mailrelay", projects: ["calcom"] }] }) } });
-    await sleep(80);
+    await settle();
     h.d.querySelector('button[data-update="glitchtip-postgres"]').click();
-    await sleep(40);
+    await settle();
     h.d.getElementById("dm-tab-btn-backups").click();
-    await sleep(80);
+    await settle();
     const all = h.d.documentElement.outerHTML;
     const german = ["Aktualisieren", "Lädt", "Übersicht", "Installierte", "Ausrollen", "ausstehend", "Erledigt", "Zurückrollen",
                     "Löschen", "Datenbank", "Betroffene", "Rollback-Kopie", "Erstellt", "Größe", "Zeitpunkt", "Ergebnis",
