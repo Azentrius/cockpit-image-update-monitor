@@ -314,6 +314,22 @@ def version_of(ref, image_id):
     return None
 
 
+def radar_versions():
+    """{image ID: version} from the radar's last run, for history entries
+    whose versions the update could not tell yet: the radar the update starts
+    names them by label or digest a few minutes later. {} without the file."""
+    known = {}
+    try:
+        with open(VERSIONS) as f:
+            for r in json.load(f).get("images") or []:
+                for iid, v in (r.get("installed") or {}).items():
+                    if isinstance(v, dict) and v.get("version"):
+                        known.setdefault(iid, v["version"])
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    return known
+
+
 PG_SERVER = {"postgres", "postmaster"}
 MY_SERVER = {"mysqld", "mariadbd", "mysqld_safe"}
 
@@ -1841,6 +1857,7 @@ def cmd_backups():
     images = rollback_images()
     rb_refs = {i["ref"] for i in images}
     all_ops = load_ops()
+    known = radar_versions()
 
     ops = sorted((dict(o) for o in all_ops.values()), key=lambda o: o.get("id", ""), reverse=True)[:30]
     for o in ops:
@@ -1851,6 +1868,10 @@ def cmd_backups():
                              and not o["active"]
                              and not (o.get("rolled_back") and o.get("rollback_status") != "failed")
                              and norm_ref(o.get("rollback") or "") in rb_refs)
+        if not o.get("from_version") and known.get(o.get("old_id")):
+            o["from_version"] = known[o["old_id"]]
+        if not o.get("to_version") and known.get(o.get("new_id")):
+            o["to_version"] = known[o["new_id"]]
         for k in ("workdir", "files", "env_files", "old_id", "new_id", "backup_files", "pid"):
             o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))

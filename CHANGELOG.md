@@ -22,6 +22,11 @@
   so compose exited 0 when the registry failed, and with the old image still there the update ended as
   “no change”. The pull now reports the error: the update stops before any change and names it, unless
   the newer image is on the server already, which is then rolled out with a warning.
+- **History: versions the radar finds later.** An update of an image whose version only the radar
+  can tell (`ollama:latest`, an image with a version label) recorded no new version, because the
+  radar names a new image a few minutes after the update. The history kept showing “0.30.11 → ?” or no
+  versions at all. The backups tab now fills a missing version from the radar's last run for that image ID; the
+  history file itself stays as written.
 
 ## 0.18.0 – 2026-10-18
 
