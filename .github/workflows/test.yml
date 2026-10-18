@@ -255,6 +255,69 @@ jobs:
               -v "$PWD/test/package-upgrade.sh:/package-upgrade.sh:ro" "${kind_image#*:}" sh /package-upgrade.sh "${kind_image%%:*}"
           done
 
+  # The add-on in a real Cockpit with systemd and Docker, on this throw-away runner and never
+  # on a server with real containers (test/cockpit-setup.sh, test/cockpit-session.py,
+  # Playwright with Chromium): this build installed with apt over the newest older release,
+  # the page reloaded and logged in again after that upgrade; the page in Cockpit's menu,
+  # loaded without JavaScript or resource errors; with and without administrative access;
+  # skopeo and the radar set up from the page, then a radar run; on a throw-away compose
+  # project an update with its plan, live output and result, and its rollback. Versions,
+  # steps and results: the job summary and the artifact cockpit-session (with screenshots).
+  cockpit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Cockpit, the packages of this build and of the release to upgrade from
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends cockpit-ws cockpit-system cockpit-bridge rpm > /dev/null
+          sudo systemctl start cockpit.socket
+          make packages
+          sh tools/upgrade-base.sh prev >> "$GITHUB_ENV"
+          {
+            echo "NEW_VERSION=$(sh tools/check-version.sh)"
+            echo "NEW_DEB=$(ls "$PWD"/dist/*.deb)"
+            echo "OLD_DEB=$(ls "$PWD"/prev/*.deb 2> /dev/null || true)"
+          } >> "$GITHUB_ENV"
+      - name: Browser (Playwright, pinned in test/requirements.txt)
+        run: |
+          pip install -q -r test/requirements.txt
+          python -m playwright install --with-deps chromium > /dev/null
+      - name: Two users and a throw-away compose project
+        run: |
+          admin_pw=$(openssl rand -hex 16)
+          plain_pw=$(openssl rand -hex 16)
+          echo "::add-mask::$admin_pw"
+          echo "::add-mask::$plain_pw"
+          printf 'ADMIN_USER=imgadmin\nADMIN_PW=%s\nPLAIN_USER=imgplain\nPLAIN_PW=%s\n' "$admin_pw" "$plain_pw" >> "$GITHUB_ENV"
+          sudo env ADMIN_USER=imgadmin ADMIN_PW="$admin_pw" PLAIN_USER=imgplain PLAIN_PW="$plain_pw" \
+            sh test/cockpit-setup.sh >> "$GITHUB_ENV"
+      - name: The add-on in Cockpit (test/cockpit-session.py)
+        run: python test/cockpit-session.py cockpit-session
+      - name: Report and logs
+        if: always()
+        run: |
+          mkdir -p cockpit-session
+          [ ! -f cockpit-session/report.md ] || cat cockpit-session/report.md >> "$GITHUB_STEP_SUMMARY"
+          sudo journalctl -u cockpit.service -u diun-radar.service --no-pager -n 200 > cockpit-session/journal.txt || true
+      - name: Keep screenshots, report and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cockpit-session
+          path: cockpit-session/
+
   # Secrets in the files and in the whole history (gitleaks, pinned with its checksum). The
   # findings are redacted in the log; GitHub's own secret scanning with push protection runs
   # as well (repository settings).
