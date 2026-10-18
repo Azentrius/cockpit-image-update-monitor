@@ -25,8 +25,8 @@ its derivatives, openSUSE Leap 15.6) the package manager refuses the update.
 - **The page in a real Cockpit, in CI.** The new job `cockpit` installs Cockpit on a throw-away GitHub
   runner (Ubuntu 24.04, with systemd and Docker) and drives the page through Cockpit's login in
   Chromium: this build installed with apt over the release before, the page reloaded and logged in
-  again after that upgrade, found in the menu, without JavaScript or resource errors, with and
-  without administrative access; skopeo and the radar set up from the page and a radar run; on a
+  again after that upgrade, found in the menu, without JavaScript or resource errors of its own (and
+  none in Cockpit beyond those it shows without the add-on), with and without administrative access; skopeo and the radar set up from the page and a radar run; on a
   throw-away compose project an update with its plan, live output and result, and its rollback.
   The job summary lists the versions and every step, the artifact `cockpit-session` has screenshots.
 - **More checks in CI:** the helper tests on Python 3.8; the packages installed and removed on
