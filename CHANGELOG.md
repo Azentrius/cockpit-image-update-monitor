@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Red Hat Mono comes with the page:** versions, the live output and file names are set in Red Hat
+  Mono, as the design system asks, from the page's own `RedHatMono.woff2` (a Latin subset, SIL Open Font
+  License 1.1, in `OFL.txt` and NOTICE). Until now the shared `azentrius.css` took the font from
+  Cockpit's `/cockpit/static/fonts/RedHatMono/RedHatMonoVF.woff2`, which Cockpit 314 from Ubuntu 24.04
+  does not have: every load of the page got a 404 for it, and code was shown in a fallback (Courier New
+  or the browser's monospace font). Shared design files from Cron Jobs: `azentrius.css` and `OFL.txt`,
+  and the new `RedHatMono.woff2`.
 - **Fix: a line tag showed its own number as the installed version.** A tag such as `cubejs/cube:v1.6`,
   `onlyoffice/documentserver:10.0`, `clickhouse/clickhouse-server:24.12-alpine` or
   `pomerium/pomerium:v0.33` names a line, not a release: the registry has `v1.6.74`, `10.0.0.1`,

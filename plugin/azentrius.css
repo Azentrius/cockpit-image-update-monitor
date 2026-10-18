@@ -5,7 +5,7 @@
 
 @font-face { font-family: "DM Sans"; src: url("DMSans.woff2") format("woff2"); font-weight: 400 600; font-style: normal; font-display: swap; }
 @font-face { font-family: "DM Serif Display"; src: url("DMSerifDisplay-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
-@font-face { font-family: "Red Hat Mono"; src: url("../../static/fonts/RedHatMono/RedHatMonoVF.woff2") format("woff2"); font-weight: 300 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Red Hat Mono"; src: url("RedHatMono.woff2") format("woff2"); font-weight: 300 700; font-style: normal; font-display: swap; }
 
 :root {
   color-scheme: light;
