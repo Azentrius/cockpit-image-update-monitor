@@ -43,6 +43,7 @@ run "plugin: version columns"           node version-cols.js
 run "plugin: Diun events per tag"      node diun-events.js
 run "plugin: page frame, tabs, labels"  node page-frame.js
 run "design: contrast (light + dark)"   python3 contrast_test.py
+run "design: fonts ship with the add-on" python3 fonts_test.py
 run "plugin: whole table (smoke)"       node harness.js
 run "repo:   version + changelog"       sh ../tools/check-version.sh
 run "repo:   shared design files"       sh ../tools/check-design-files.sh

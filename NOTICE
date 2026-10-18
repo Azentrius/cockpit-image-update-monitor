@@ -26,5 +26,6 @@ Icons (plugin/icons.js): Font Awesome Free 5.15.4 (Solid) by Fonticons, Inc.
   /usr/share/doc/cockpit-image-update-monitor/CC-BY-4.0-Font-Awesome.txt) and
   https://creativecommons.org/licenses/by/4.0/
 
-The page uses Red Hat Mono from Cockpit's own static files; it is not part of
-this project.
+The shared stylesheet plugin/azentrius.css declares Red Hat Mono from Cockpit's
+own static files; this page does not use it (plugin/diun.css sets the system's
+monospace font for code), and it is not part of this project.
