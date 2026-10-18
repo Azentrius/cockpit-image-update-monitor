@@ -6,12 +6,6 @@
 /* The name suffix "monitor": DM Serif Display italic, subset to its letters. */
 @font-face { font-family: "DM Serif Display"; src: url("DMSerifDisplay-Italic.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
 
-/* Code and versions in the system's monospace font. azentrius.css names Red Hat Mono from
- * Cockpit's static files, which not every Cockpit ships (Ubuntu 24.04's Cockpit 314 answers
- * 404 on every load of the page); a family that no stack names is never requested.
- * test/fonts_test.py keeps every font the page uses inside the add-on. */
-:root { --font-mono: ui-monospace, "SFMono-Regular", "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; }
-
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { background: var(--bg-page); }
