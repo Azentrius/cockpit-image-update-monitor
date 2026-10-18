@@ -87,6 +87,8 @@ Inputs are checked by regex:
 
 - `image` is the repo without the tag, as written in the compose file.
 - `version_src` is `tag`, `env:<NAME>` or `null`. Only the radar knows the label and digest sources.
+- A version variable may carry the Debian epoch: `MARIADB_VERSION=1:11.8.9+maria~ubu2404` is 11.8.9
+  (`diunlib.core`). Up to 0.17.0 such a variable gave no version.
 - `pulled` means: the local tag points to a different image than the running one.
 - `managed` means: the compose labels for project, service, working directory and files are present.
 - `files`: the compose files the container was started from (the label, `[]` without compose). One

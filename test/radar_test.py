@@ -53,6 +53,13 @@ check("socket-proxy ignores VERSION=1", lv("ghcr.io/tecnativa/docker-socket-prox
 check("env not fitting the tag", lv("postgres", "16-alpine", img(["PG_VERSION=17.2"])), (None, None))
 check("python 3.12-slim -> env more exact", lv("python", "3.12-slim", img(["PYTHON_VERSION=3.12.12"])), ("3.12.12", "env:PYTHON_VERSION"))
 check("valkey latest", lv("valkey/valkey", "latest", img(["VALKEY_VERSION=9.1.0"])), ("9.1.0", "env:VALKEY_VERSION"))
+# mariadb names its package version with the Debian epoch "1:" (a test host,
+# 2026-10-18: the history showed "11.8.8 -> -" after an update to 11.8.9)
+check("mariadb 11 + MARIADB_VERSION with the epoch",
+      lv("mariadb", "11", img(["GOSU_VERSION=1.19", "MARIADB_VERSION=1:11.8.9+maria~ubu2404"])), ("11.8.9", "env:MARIADB_VERSION"))
+check("core: epoch skipped, nothing else changes",
+      [L.core(x) for x in ("1:11.8.9+maria~ubu2404", "2:1.2", "v6.2.0", "17.10-1.pgdg12+1", "1:", "1:16", "16", "master")],
+      ["11.8.9", "1.2", "6.2.0", "17.10", None, None, None, None])
 check("clickhouse pinned 4 blocks", lv("clickhouse/clickhouse-server", "24.3.3.102-alpine", img()), ("24.3.3.102", "tag"))
 check("reach latest", L.reachable("latest"), ["patch", "minor", "major"])
 check("reach 16-alpine", L.reachable("16-alpine"), ["patch", "minor"])
