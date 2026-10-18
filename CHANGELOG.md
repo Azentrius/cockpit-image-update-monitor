@@ -2,8 +2,10 @@
 
 ## 0.18.1 – 2026-10-18
 
-The history fills versions the radar finds later, and an image built on Eclipse Temurin says which Java
-version it carries.
+Updates stay recoverable: one cut off after the restart keeps its history and rollback, a rollback
+checks what compose would start and what runs afterwards and can be tried again after a failure, and a
+registry error no longer looks like “no newer image”. The history fills versions the radar finds
+later, and an image built on Eclipse Temurin says which Java version it carries.
 
 - **Fix: an update cut off after the restart kept no history.** The operation was written only after
   the containers were recreated and checked. If the helper stopped in between (Docker not answering,
@@ -28,8 +30,8 @@ version it carries.
 - **History: versions the radar finds later.** An update of an image whose version only the radar
   can tell (`ollama:latest`, an image with a version label) recorded no new version, because the
   radar names a new image a few minutes after the update. The history kept showing “0.30.11 → ?” or no
-  versions at all. The backups tab now fills a missing version from the radar's last run for that image ID; the
-  history file itself stays as written.
+  versions at all. The backups tab now fills a missing version from the radar's last run for that
+  image ID; the history file itself stays as written.
 - **Fix: Java version of an Eclipse Temurin base.** For an image built on the server from
   `eclipse-temurin:21-jre-jammy` the radar could only tell that the base was published after the
   build, not which Java version the build carries: Temurin names its release
