@@ -417,11 +417,29 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 
 ## Requirements
 
-- Linux server with **Cockpit ≥ 266** (systemd)
-- **Docker Engine** with **Compose v2** (`docker compose`)
-- **Python ≥ 3.8** (standard library only) and `bash`
-- For the radar: **skopeo** (the add-on installs it on request with `apt-get` or `dnf`)
+- Linux with **systemd** and **Cockpit 264** or newer (`plugin/manifest.json` makes Cockpit check it)
+- **Docker Engine** with the **Docker Compose plugin 2.8** or newer (`docker compose`; Compose counts
+  5.x since 2025, that is fine). The helpers run `up --pull never`, which came with Compose 2.8.0. The
+  standalone `docker-compose` 1.x is not supported; Debian 12's own `docker.io` brings only that, so
+  use Docker's packages there.
+- **Python 3.8** or newer, standard library only; `/bin/sh`, `flock`, `timeout` (coreutils), `systemctl`
+- For the radar: **skopeo** (the add-on installs it on request with `apt-get`, `dnf` or `zypper`)
 - For digest updates: **Diun** (the add-on sets up `/opt/diun` on request)
+
+### Supported systems
+
+What CI really runs, and what is expected but not tested. A package that builds or installs is not a
+tested system by itself.
+
+| | Systems | What is checked |
+|---|---|---|
+| **Tested** | Ubuntu 24.04 (GitHub runner) with Docker Engine and Compose from the runner image | every helper against the real Docker Engine: updates, rollbacks, pulls against a registry, dumps and their restore into Postgres 16, MariaDB 11 and MySQL 8 (job `e2e`, also before every release) |
+| **Tested** | Python 3.8 and 3.12 | the helper tests (fake Docker); 3.8 is the oldest supported |
+| **Package installs** | Debian 12 and 13, Ubuntu 22.04 and 24.04, Fedora 43, Rocky Linux 9 and 10 (for RHEL 9 and 10), openSUSE Leap 16.0 | the package installs with the distribution's own dependencies, the helpers answer, the package removes cleanly; on Debian 13 and Fedora 43 also an upgrade from the newest release. No Cockpit, Docker or systemd runs there. |
+| **Expected, untested** | the systems of the row above with Cockpit 264 or newer and Docker's Engine and Compose packages (on RHEL: `docker-ce` and `docker-compose-plugin` from Docker's repository; on openSUSE: `docker`, `docker-compose` with zypper) | the page in a real Cockpit, Diun, the radar's registry access |
+| **Not supported** | Podman (also with `podman-docker`), Compose 1.x and below 2.8, Swarm, Kubernetes, rootless Docker, systems without systemd, openSUSE Leap 15.6 (Python 3.6, end of life) | |
+
+Containers not started by Compose are shown, but not updated.
 
 ---
 
@@ -436,10 +454,14 @@ curl -fsSLO https://packages.azentrius.de/azentrius-repository.deb
 sudo apt install ./azentrius-repository.deb
 sudo apt update
 
-# Fedora, RHEL and openSUSE
+# Fedora and RHEL (Rocky, Alma)
 sudo rpm --import https://packages.azentrius.de/azentrius.asc
 sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
 ```
+
+On openSUSE (untested, see [Supported systems](#supported-systems)) install the `.rpm` of a release with
+`sudo zypper install --allow-unsigned-rpm ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm` after
+checking it as described below.
 
 Then install **Image Update Monitor** in Cockpit under **Applications** (with administrative access), or on the
 console with `sudo apt install cockpit-image-update-monitor` or `sudo dnf install cockpit-image-update-monitor`. The
@@ -451,7 +473,8 @@ repository's release workflow built it.
 
 ```bash
 sudo apt install ./cockpit-image-update-monitor_X.Y.Z-1_all.deb     # Debian, Ubuntu
-sudo dnf install ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm  # Fedora, RHEL, openSUSE
+sudo dnf install ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm  # Fedora, RHEL
+sudo zypper install --allow-unsigned-rpm ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm  # openSUSE
 sha256sum --ignore-missing -c SHA256SUMS                     # check a download
 gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor   # built by the release workflow
 ```
@@ -645,7 +668,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 
 ## Known limits
 
-- **Docker with Compose v2 only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated.
+- **Docker with Compose 2.8 or newer only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated. See [Supported systems](#supported-systems).
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “not in a registry”, like images built on the server.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Database majors** are manual (dump, new instance, restore), see stage 5.

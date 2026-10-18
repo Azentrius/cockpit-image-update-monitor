@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Supported systems defined.** The README names what CI tests (every helper against the real Docker
+  Engine of a GitHub runner, Python 3.8 and 3.12), where the packages install (Debian 12/13, Ubuntu
+  22.04/24.04, Fedora 43, Rocky Linux 9/10, openSUSE Leap 16.0) and what is expected but untested.
+  Minimums: Cockpit 264, Docker Compose 2.8 (`up --pull never`; 5.x included), Python 3.8.
+- **Fix: Cockpit never checked the minimum version.** `plugin/manifest.json` said `require`, a key
+  Cockpit does not read; it is now `requires` (Cockpit 264, Ubuntu 22.04's).
+- **Compose older than 2.8 counts as missing.** The requirements check and the Diun setup now say
+  "Docker Compose 2.8 or newer" instead of failing later in an update.
+- **openSUSE:** skopeo installs with zypper as well; the README and the release notes name
+  `zypper install` for the `.rpm`. Leap 15.6 (Python 3.6) is not supported.
 - **Time limits for docker commands and dumps.** A `docker compose pull`, `docker compose up`,
   `docker rmi` or database dump that hung held the update lock for good: no other update, rollback or
   cleanup could run. Each now has a limit, `DOCKER_TIMEOUT` (default 1800 s) and `DUMP_TIMEOUT`
