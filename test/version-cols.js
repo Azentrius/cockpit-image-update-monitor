@@ -213,6 +213,52 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     // (ICU versions abbreviate September as "Sep" or "Sept")
     assert(/^latest points to no release tag but to a build Docker Hub got on 13 Oct 2026, after the newest release 5\.1\.0 \(21 Sept? 2026\)\./.test(tip), tip);
 
+    // An image built on the server (a test host, 2026-10-18: caddy-caddy is
+    // xcaddy on caddy:2-builder, copied onto caddy:2): no registry shows it,
+    // the radar checks the bases of its Dockerfile instead.
+    const bases = (newer, extra) => {
+        const r = JSON.parse(JSON.stringify(radar));
+        const pm = r.images.find((x) => x.image === "ghcr.io/cbcoutinho/nextcloud-mcp-server");
+        ["versions", "by_tag", "newest", "tag_now"].forEach((k) => delete pm[k]);
+        Object.assign(pm, { status: "unlisted", error: "requested access to the resource is denied", built: "2026-06-15T18:35:36Z",
+            base: [{ image: "caddy", tag: "2-builder", final: false, now: "2.11.7", pushed: "2026-10-14T00:25:00Z", newer },
+                   { image: "caddy", tag: "2", final: true, version: "2.11.4", now: "2.11.7", pushed: "2026-10-14T00:20:11Z", newer, ...extra }] });
+        return { ...FILES, "/var/lib/diun-radar/versions.json": r };
+    };
+    let bb = boot("de", bases(true));
+    await sleep(60);
+    c = cells(row(bb, "prod-mcp-1"));
+    console.log("built here, newer base:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
+    assert.deepStrictEqual(c.slice(3, 6).map((x) => x.textContent.trim()), ["?", "Basis neuer: caddy:2 = 2.11.7", "Neue Version"]);
+    tip = c[4].querySelector(".dm-level").title.split("\n");
+    console.log("  " + tip.join(" / "));
+    assert.deepStrictEqual(tip, [
+        "Auf diesem Server gebaut am 15.06.2026. Keine Registry zeigt das Image selbst, wohl aber die Images, auf denen sein Dockerfile aufbaut:",
+        "caddy:2-builder (Build-Stufe): jetzt 2.11.7, veröffentlicht am 14.10.2026 – neuer als der Build",
+        "caddy:2 (Laufzeit): jetzt 2.11.7, veröffentlicht am 14.10.2026; der Build enthält 2.11.4 – neuer als der Build",
+        "Neu bauen bringt es: docker compose build --pull prod-mcp-1, dann docker compose up -d prod-mcp-1, in /opt/prod."]);
+    assert.strictEqual(iconOf(c[4]), "info-circle");
+    // every base older than the build: up to date, though the version is unknown
+    bb = boot("de", bases(false));
+    await sleep(60);
+    c = cells(row(bb, "prod-mcp-1"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Basis aktuell", "Aktuell"]);
+    assert.strictEqual(iconOf(c[4]), "check-circle");
+    assert(c[4].querySelector(".dm-uptodate").title.endsWith("Eigene Änderungen im Projekt prüft der Radar nicht."));
+    // the registry did not answer for any base: nothing claimed
+    const errs = bases(false);
+    errs["/var/lib/diun-radar/versions.json"].images.find((x) => x.image === "ghcr.io/cbcoutinho/nextcloud-mcp-server").base
+        .forEach((x) => { Object.keys(x).filter((k) => !["image", "tag", "final"].includes(k)).forEach((k) => delete x[k]); x.error = "registry down"; });
+    bb = boot("de", errs);
+    await sleep(60);
+    assert.deepStrictEqual(cells(row(bb, "prod-mcp-1")).slice(4, 6).map((x) => x.textContent.trim()), ["Basis nicht geprüft", "Unbekannt"]);
+    bb = boot("en", bases(true, { pinned: true, newer: false }));
+    await sleep(60);
+    c = cells(row(bb, "prod-mcp-1"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["base newer: caddy:2-builder = 2.11.7", "New version"],
+                           "a pinned base never counts; the build stage does");
+    assert(c[4].querySelector(".dm-level").title.includes("caddy:2: pinned by digest, does not move"));
+
     // English
     const e = boot("en", FILES);
     await sleep(60);

@@ -9,6 +9,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -401,6 +402,107 @@ check("a repository the registry no longer shows keeps its last good result, mar
       (gone["status"], gone.get("stale"), gone["error"], gone["versions"]["6.1.8"]["minor"]), ("major", True, DENIED, "6.2.0"))
 check("unlisted sorts after registry errors", sorted(["unlisted", "error", "current"], key=R.ORDER.get),
       ["current", "error", "unlisted"])
+
+# ------------------------------------------------------------ built images
+# An image built on the server (a test host, 2026-10-18: caddy-caddy is
+# xcaddy on caddy:2-builder, copied onto caddy:2): its Dockerfile's bases.
+CADDY = """FROM caddy:2-builder AS builder
+RUN xcaddy build --with github.com/caddy-dns/hetzner/v2
+
+FROM caddy:2
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+"""
+check("Dockerfile: the build stage and the base of the image that runs",
+      R.parse_from(CADDY), [{"image": "caddy", "tag": "2-builder", "final": False}, {"image": "caddy", "tag": "2", "final": True}])
+MULTI = """ARG PY=3.12
+FROM --platform=$BUILDPLATFORM golang:1.23 AS build
+FROM python:${PY}-slim AS base
+FROM base AS final
+FROM scratch AS empty
+FROM ghcr.io/acme/tool:v2@sha256:abc AS tool
+FROM ${UNSET}/x:1
+from final
+"""
+check("Dockerfile: ARG defaults, stages followed, scratch and unknown variables left out, pins marked",
+      R.parse_from(MULTI), [{"image": "golang", "tag": "1.23", "final": False},
+                            {"image": "python", "tag": "3.12-slim", "final": True},
+                            {"image": "ghcr.io/acme/tool", "tag": "v2", "final": False, "pinned": True}])
+check("Dockerfile: nothing external", R.parse_from("FROM scratch\nCOPY x /x\n"), [])
+check("times: offset, Z, Diun's form",
+      [R.iso(R.parse_ts(s)) for s in ("2026-06-15T20:35:36.213970238+02:00", "2026-10-14T00:20:11Z", "2026-10-14 01:36:06 +0000 UTC")],
+      ["2026-06-15T18:35:36Z", "2026-10-14T00:20:11Z", "2026-10-14T01:36:06Z"])
+
+old_caddy = img(["CADDY_VERSION=v2.11.4"], created="2026-06-15T20:35:36.213970238+02:00")
+old_caddy["Architecture"] = "amd64"
+new_caddy = img(["CADDY_VERSION=v2.11.7"], created="2026-10-18T02:59:10Z")
+new_caddy["Architecture"] = "amd64"
+HUB_INFO = {"caddy/2": {"tag_last_pushed": "2026-10-16T09:00:00Z",          # a new list of platforms
+                        "images": [{"architecture": "arm64", "os": "linux", "last_pushed": "2026-10-16T09:00:00Z"},
+                                   {"architecture": "amd64", "os": "linux", "last_pushed": "2026-10-14T00:20:11Z"}]},
+            "caddy/2-builder": {"tag_last_pushed": "2026-10-14T00:25:00Z", "images": []}}
+hub_asked = []
+R.hub_tag = lambda path, tag: (hub_asked.append(f"{path}:{tag}"), HUB_INFO[f"{path.split('/')[-1]}/{tag}"])[1]
+R.list_tags = lambda repo: ["2", "2-builder", "2.11.4", "2.11.7", "2.11.7-builder", "latest"]
+R.resolve_tag = lambda repo, tag, tags, prev: {"digest": "sha256:x", "version": "2.11.7", "tag": "2.11.7"}
+b = R.base_state({"image": "caddy", "tag": "2", "final": True}, old_caddy)
+check("base: built in June from 2.11.4, caddy:2 is 2.11.7 since 14 October -> newer",
+      (b["version"], b["now"], b["pushed"], b["newer"]), ("2.11.4", "2.11.7", "2026-10-14T00:20:11Z", True))
+b = R.base_state({"image": "caddy", "tag": "2", "final": True}, new_caddy)
+check("base: rebuilt after the push, same version -> not newer (amd64 counts, not the new list)",
+      (b["version"], b["now"], b["newer"]), ("2.11.7", "2.11.7", False))
+b = R.base_state({"image": "caddy", "tag": "2-builder", "final": False}, new_caddy)
+check("base: a build stage has no version of its own, only the push time counts", ("version" in b, b["newer"]), (False, False))
+hub_asked.clear()
+check("base: a pinned base never moves and asks nobody",
+      (R.base_state({"image": "caddy", "tag": "2", "final": True, "pinned": True}, old_caddy)["newer"], hub_asked), (False, []))
+skopeo_asked = []
+
+
+def fake_inspect(cmd, binary=False):
+    skopeo_asked.append(cmd[-1])
+    return json.dumps({"Created": "2026-10-10T08:00:00.5Z"})
+
+
+R.run = fake_inspect
+b = R.base_state({"image": "ghcr.io/acme/base", "tag": "1.4.2", "final": False}, new_caddy)
+check("base outside Docker Hub: the image's creation time; an exact tag is its own version",
+      (b["now"], b["pushed"], b["newer"], skopeo_asked), ("1.4.2", "2026-10-10T08:00:00Z", False, ["docker://ghcr.io/acme/base:1.4.2"]))
+R.list_tags = lambda repo: (_ for _ in ()).throw(RuntimeError("registry down"))
+b = R.base_state({"image": "caddy", "tag": "2", "final": True}, old_caddy)
+check("base: a registry error is kept, nothing is claimed", ("error" in b, "newer" in b), (True, False))
+
+# The radar: an unlisted image built by compose gets "built" and "base".
+WORK = tempfile.mkdtemp()
+with open(os.path.join(WORK, "Dockerfile"), "w") as f:
+    f.write(CADDY)
+COMPOSE_LABELS = {"com.docker.compose.project": "caddy", "com.docker.compose.service": "caddy",
+                  "com.docker.compose.project.working_dir": WORK,
+                  "com.docker.compose.project.config_files": os.path.join(WORK, "docker-compose.yml")}
+composed = []
+
+
+def fake_compose(cmd, binary=False):
+    composed.append(cmd)
+    return json.dumps({"services": {"caddy": {"build": {"context": WORK, "dockerfile": "Dockerfile"}}}})
+
+
+R.run = fake_compose
+R.list_tags = lambda repo: (_ for _ in ()).throw(R.subprocess.CalledProcessError(1, ["skopeo"], "", DENIED)) \
+    if repo == "caddy-caddy" else ["2", "2-builder", "2.11.7", "latest"]
+built = R.analyse((("caddy-caddy", "latest"), {"containers": ["caddy"], "labels": COMPOSE_LABELS,
+                                                "images": {"idc": old_caddy}}), {}, now)
+check("radar: unlisted, built here: build time and both bases",
+      (built["status"], built["built"], [(x["image"], x["tag"], x["final"], x.get("newer")) for x in built["base"]]),
+      ("unlisted", "2026-06-15T18:35:36Z", [("caddy", "2-builder", False, True), ("caddy", "2", True, True)]))
+check("radar: the compose file is read with its project and files",
+      composed[-1], ["docker", "compose", "-p", "caddy", "--project-directory", WORK,
+                     "-f", os.path.join(WORK, "docker-compose.yml"), "config", "--format", "json"])
+plain = R.analyse((("hibiscus-server", "2.12.4"), {"containers": ["hib"], "labels": {}, "images": {"idh": img()}}), {}, now)
+check("radar: an unlisted image without compose stays as it was", ("base" in plain, "built" in plain), (False, False))
+R.run = lambda cmd, binary=False: json.dumps({"services": {"caddy": {"image": "caddy:2"}}})
+check("radar: a compose service that is not built here has no bases",
+      "base" in R.analyse((("caddy-caddy", "latest"), {"containers": ["caddy"], "labels": COMPOSE_LABELS,
+                                                        "images": {"idc": old_caddy}}), {}, now), False)
 
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

@@ -151,6 +151,7 @@ Inputs are checked by regex:
 | `status` | `major`, `minor`, `patch`, `current`, `unknown`, `error` or `unlisted`, for sorting and for the table. |
 | `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. |
 | `status: "unlisted"` | (since 0.12.2) no registry shows the repository; skopeo answers `requested access to the resource is denied` (Docker Hub, for names it does not have and for private ones), `unauthorized` or `name unknown`. The image was built or tagged on the server (`hibiscus-server:2.12.4` means `docker.io/library/hibiscus-server`), or it is private and the radar has no login. Only `installed` and `error` are set. With a good earlier run the entry is kept like a registry error (`stale`). Timeouts, rate limits and server errors stay `error`. |
+| `built` / `base` | only for an `unlisted` image built on this server (a compose service with `build:`): `built` is the build time of the running image, `base` the images its Dockerfile starts `FROM` (read through `docker compose config`; stage names, `scratch` and unfilled variables left out; global `ARG` defaults filled in), each `{"image", "tag", "final", "version", "now", "pushed", "newer"}` or with `"pinned": true` (`FROM x@sha256:…`, never newer) or `"error"`. `final` marks the base of the image that runs; `version` is what the build carries (that base's version variable, final base only); `now` what the tag points to (`tag_now` rules, an exact tag is its own version); `pushed` when the registry got it for this server's platform (Docker Hub per platform, so a new list of platforms changes nothing; other registries: the image's creation time). `newer`: pushed more than an hour after the build, or `now` above `version`. Missing in data from older radars. |
 
 How the plugin computes:
 
@@ -478,6 +479,13 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   - `target_version` as a row (“Brings”), with the size of the jump.
   - A `reason` in the result fills `#dm-dialog-reason` (`az-alert--danger`) above the log; every new
     run hides it again.
+- **Built here (`base`):** for an `unlisted` record with `base`, the newest column says “base newer: caddy:2 = 2.11.7”
+  (`az-label--info`, the row counts as a new version) when a base is `newer`, the final one named first;
+  otherwise “base current” with `check-circle`, and the row is up to date although its version is
+  unknown (`baseChecked`). The tooltip names the build date, each base with its role, what it points to,
+  when it was published and what the build carries, and how to rebuild
+  (`docker compose build --pull <service>`, then `up -d`, in the directory of the compose file). With
+  no base checked (registry errors) it says “base not checked”.
 - **Build after a release:** with `tag_now.after` and the installed version unknown, the newest column
   says “build after v4.5.3” instead of “newest: v4.5.3”, only while `after.tag` is still `newest`. If
   the running image's digest is `tag_now.digest`, it carries `check-circle` and the status is “up to
@@ -536,7 +544,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 
 | File | Checks |
 |---|---|
-| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, a build after the newest release, cache, outage) |
+| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
 | `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
@@ -546,7 +554,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, no update for the same build under a new digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
-| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the revision of a development build |
+| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the revision of a development build, the bases of an image built here |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
 | `test/contrast_test.py` | WCAG contrast of every colour pair the page uses, light and dark (text 4.5:1, borders and icons 3:1) |
 | `tools/check-design-files.sh` | the shared design files match `tools/design-files.sha256` |

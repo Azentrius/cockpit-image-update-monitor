@@ -10,6 +10,12 @@
   (label `org.opencontainers.image.revision`), such as `pomerium:main`, shows “main @35b2a97” in the
   installed column instead of “?”, with the full revision and the build date in the tooltip. The
   inventory names it (`revision`).
+- **Images built on the server:** an image built by compose (`build:`) is in no registry and showed
+  “not in a registry”. The radar now reads its Dockerfile's `FROM` lines and checks those images: what
+  their tag points to and when the registry got it for this server's platform (`built` and `base` in
+  `versions.json`). A base that is newer than the build shows as “base newer: caddy:2 = 2.11.7”, a new
+  version, with the rebuild command in the tooltip; otherwise “base current”. Found on a test host,
+  where Caddy with a DNS plugin was built in June on Caddy 2.11.4 while caddy:2 had reached 2.11.7.
 
 ## 0.17.0 – 2026-10-18
 
