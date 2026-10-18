@@ -905,12 +905,17 @@ bad = []
 for line in ("DOCKER_TIMEOUT=30", "DUMP_TIMEOUT=999999", "DOCKER_TIMEOUT=ten", "DOCKER_TIMEOUT=-60"):
     with open(U.CONF, "w") as f:
         f.write(line + "\n")
-    bad.append(quiet(U.load_limits)[0])
+    bad.append(quiet(U.load_limits))
+check("limits out of range or no number -> exit 2 with the allowed range",
+      [(rc, "(60–86400 s) – nothing changed" in out or "(60–172800 s) – nothing changed" in out) for rc, out in bad],
+      [(2, True)] * 4)
+# Through main, as the page calls it (the file belongs to the test's user, so main,
+# as root, refuses it already for that; either way before anything changes).
 with as_uid(0):
     rc, out = quiet(U.main, ["update", "glitchtip-postgres"])
 release_lock()
-check("limits out of range or no number -> exit 2, an update stops before anything changes",
-      (bad, rc, "(60–86400 s) – nothing changed" in out), ([2, 2, 2, 2], 2, True))
+check("a settings file not understood stops an update before anything changes",
+      (rc, out.strip().endswith("– nothing changed.")), (2, True))
 os.unlink(U.CONF)
 U.LIMITS.update(docker=1800, dump=14400)
 
