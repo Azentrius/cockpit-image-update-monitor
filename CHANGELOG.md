@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: MariaDB version from its variable.** The official image names its version with the Debian
+  epoch (`MARIADB_VERSION=1:11.8.9+maria~ubu2404`), which the helpers did not read: the version came
+  only from the radar, and the history of an update to 11.8.9 showed no new version because the
+  radar did not know the new image yet. The epoch is now skipped.
+
 ## 0.17.0 – 2026-10-18
 
 A new digest of the build that already runs, as when a registry publishes an image's list of platforms
