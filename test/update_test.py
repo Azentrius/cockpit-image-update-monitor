@@ -14,10 +14,13 @@ import contextlib
 import gzip
 import hashlib
 import importlib.util
+import inspect as pyinspect
 import io
 import json
 import os
+import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1785,6 +1788,123 @@ with contextlib.redirect_stdout(out):
 check("stream: exit code, output passed through, last lines kept",
       (rc, "step 1\n" in out.getvalue(), "Error: boom\n" in out.getvalue(), U.STREAM_TAIL[-2:]),
       (3, True, True, ["step 1", "Error: boom"]))
+
+# ---------------------------------------------- a run killed after the restart
+# A real process with the fake Docker above, killed with SIGKILL once the
+# recreated containers are up: no finally runs there. The history entry and
+# its rollback copy are written before the restart; the output must be on
+# disk as well, line by line from that checkpoint on (Tee). The child says it
+# reached the checkpoint through one pipe and then blocks on another that the
+# test never writes to: fixed points, no sleeps. Only this child is killed.
+KILL_DRIVER = '''
+import importlib.util, json, os, subprocess, sys
+lib, base, tmp, state, docker_src, ready, hold = sys.argv[1:8]
+spec = importlib.util.spec_from_file_location("upd", os.path.join(lib, "diun-update.py"))
+U = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(U)
+U.BASE, U.LOCK = base, os.path.join(tmp, "update.lock")
+U.DUMPS, U.OPS, U.LOGS = [os.path.join(base, x) for x in ("dumps", "operations.jsonl", "logs")]
+U.CONF, U.VERSIONS = os.path.join(tmp, "image-updates.conf"), os.path.join(tmp, "versions.json")
+with open(docker_src, encoding="utf-8") as f:
+    exec(f.read())
+D = Docker()
+with open(state) as f:
+    st = json.load(f)
+D.containers, D.images, D.tags, D.pull_to = st["containers"], st["images"], st["tags"], tuple(st["pull_to"])
+
+
+def saved(fn):
+    """Every Docker call leaves the fake's state on disk, for the rollback after the kill."""
+    def call(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        finally:
+            with open(state + ".tmp", "w") as f:
+                json.dump({"containers": D.containers, "images": D.images, "tags": D.tags, "pull_to": None}, f)
+            os.replace(state + ".tmp", state)
+    return call
+
+
+def checkpoint(project, services):
+    print("Waiting for the recreated containers (test checkpoint)", flush=True)
+    os.write(int(ready), b"up")
+    os.read(int(hold), 1)
+
+
+U.run, U.stream = saved(D.run), saved(D.stream)
+U.systemctl = lambda *a, timeout=60: subprocess.CompletedProcess(["systemctl", *a], 1, "", "")
+U.wait_healthy = checkpoint
+os.geteuid = lambda: 0
+sys.exit(U.main(["update", "killed-app", "--no-dump"]))
+'''
+reset_fs()
+KILL_DIR = os.path.join(TMP, "killed")
+os.makedirs(KILL_DIR)
+kill_file = os.path.join(KILL_DIR, "compose.yml")
+open(kill_file, "w").close()
+kill_state = os.path.join(KILL_DIR, "docker.json")
+with open(kill_state, "w") as f:
+    json.dump({"containers": {"killed-app": ctn("killed-app", "acme/app:1", "sha256:app1", project="killp",
+                                                service="app", files=kill_file)},
+               "tags": {"acme/app:1": "sha256:app1"},
+               "images": {"sha256:app1": {"Id": "sha256:app1", "Config": {"Env": ["APP_VERSION=1.0.1"]}},
+                          "sha256:app2": {"Id": "sha256:app2", "Config": {"Env": ["APP_VERSION=1.0.2"]}}},
+               "pull_to": ["acme/app:1", "sha256:app2"]}, f)
+kill_src = os.path.join(KILL_DIR, "docker_fake.py")
+with open(kill_src, "w", encoding="utf-8") as f:
+    f.write(pyinspect.getsource(Docker))
+kill_driver = os.path.join(KILL_DIR, "driver.py")
+with open(kill_driver, "w", encoding="utf-8") as f:
+    f.write(KILL_DRIVER)
+ready_r, ready_w = os.pipe()
+hold_r, hold_w = os.pipe()
+kill_out = os.path.join(KILL_DIR, "stdout.txt")
+with open(kill_out, "w") as out_f:
+    child = subprocess.Popen([sys.executable, kill_driver, ROOT, U.BASE, TMP, kill_state, kill_src,
+                              str(ready_w), str(hold_r)], stdout=out_f, stderr=subprocess.STDOUT,
+                             pass_fds=(ready_w, hold_r), env={**os.environ, "DIUN_LANG": "en"})
+os.close(ready_w)
+os.close(hold_r)
+ready, _, _ = select.select([ready_r], [], [], 120)
+signalled = os.read(ready_r, 2) if ready else b""
+child.send_signal(signal.SIGKILL)
+rc = child.wait(timeout=60)
+os.close(ready_r)
+os.close(hold_w)
+with open(kill_out) as f:
+    child_out = f.read()
+op = ([o for o in ops().values() if o.get("container") == "killed-app"] or [{}])[0]
+logf = os.path.join(U.LOGS, op.get("id", "none") + ".log")
+kept = open(logf).read() if os.path.exists(logf) else ""
+check("killed after the restart: the child reached the checkpoint and died of SIGKILL",
+      (signalled, rc), (b"up", -signal.SIGKILL))
+if signalled != b"up":
+    print(child_out)
+check("killed after the restart: in the history as running, with the new image and its rollback copy",
+      (op.get("status"), op.get("new_id"), op.get("pid") == child.pid, bool(op.get("rollback"))),
+      ("running", "sha256:app2", True, True))
+check("killed after the restart: its output kept up to the checkpoint, root only, without @@RESULT",
+      ("Updating acme/app:1 in project killp" in kept, "Rollback image: acme/app:rollback-" in kept,
+       "Waiting for the recreated containers (test checkpoint)" in kept, "@@RESULT" in kept,
+       oct(os.stat(logf).st_mode & 0o777) if kept else None), (True, True, True, False, "0o600"))
+check("killed after the restart: the live output went through as before",
+      ("Updating acme/app:1" in child_out, "(test checkpoint)" in child_out), (True, True))
+fresh_docker()
+with open(kill_state) as f:
+    st = json.load(f)
+D.containers, D.images, D.tags = st["containers"], st["images"], st["tags"]
+U.wait_healthy = lambda project, services: (True, [], {})
+U.systemctl = Systemctl()
+h = history(op["id"])
+check("killed after the restart: the rollback is offered (its process is gone)",
+      (h["status"], h["active"], h["can_rollback"], D.containers["killed-app"]["Image"]),
+      ("running", False, True, "sha256:app2"))
+with as_uid(0):
+    rc, _ = quiet(U.main, ["rollback", op["id"]])
+release_lock()
+check("killed after the restart: rollback -> exit 0, the old image again, the update's output unchanged",
+      (rc, D.containers["killed-app"]["Image"], ops()[op["id"]]["rolled_back"], open(logf).read() == kept,
+       os.path.exists(os.path.join(U.LOGS, op["id"] + ".rollback.log"))), (0, "sha256:app1", True, True, True))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")

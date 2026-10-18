@@ -158,6 +158,21 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
         { "1.6": { patch: null, minor: "v1.8", major: null, status: "minor", as_tag: "v1.6" } }), lineInv);
     await sleep(60);
     assert.strictEqual(cells(row(lo, "formbricks-cube"))[3].textContent.trim(), "1.6", "an older radar: the tag's number");
+    // The registry failed in the last run: the radar kept the release and its
+    // patch from the run before, marked stale. The row still offers the patch
+    // and is not "up to date".
+    const ls = boot("de", lineRadar({ version: "1.6.74", src: "digest", tag: "v1.6.74" },
+        { "1.6.74": { patch: "v1.6.75", minor: "v1.8.8", major: null, status: "minor", as_tag: "v1.6.74" } },
+        { stale: true, error: "registry down", status: "minor",
+          by_tag: { patch: null, minor: null, major: null, status: "current" } }), lineInv);
+    await sleep(60);
+    c = cells(row(ls, "formbricks-cube"));
+    console.log("line tag, registry down:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
+    assert.strictEqual(c[3].textContent.trim(), "1.6.74");
+    assert.deepStrictEqual(levels(c[4]).map((x) => `${x.dataset.level}:${x.textContent.trim()}`),
+                           ["patch:Patch v1.6.75", "minor:Minor v1.8.8"]);
+    assert(c[4].textContent.includes("(Stand älter)"), "stale data is marked");
+    assert.notStrictEqual(c[5].textContent.trim(), "Aktuell", "a known patch is never 'up to date'");
 
     // stale registry data is marked
     assert(cells(row(d, "diun-socket-proxy"))[4].textContent.includes("(Stand älter)"));

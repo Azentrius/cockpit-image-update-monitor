@@ -10,7 +10,12 @@
   by those longer versions and names the release by digest (1.6.74), compares it in that scheme and
   shows what the line points to now (“v1.6 = 1.6.75”). The page, the update plan and the history take
   that version over the tag's number when it refines it. Exact tags (`16.14-alpine`, `v2.1.4`) stay
-  as they are, and a version variable in the image still wins.
+  as they are, and a version variable in the image still wins. When the registry fails, the same image
+  keeps the release and the patch it had, marked as older data.
+- **Fix: a killed update kept no output.** The output of an update was written to its log file only
+  at the end. A run killed after the restart (SIGKILL) stayed in the history with its rollback, but
+  without its output. It now goes to the file as it is printed once the run is in the history, so it is
+  kept up to the kill; after a power cut the last lines can be missing.
 
 ## 0.18.1 – 2026-10-18
 

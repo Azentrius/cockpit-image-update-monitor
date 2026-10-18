@@ -197,7 +197,9 @@ fixed.
 
 **An update that was cut off** (the helper killed, a power cut, Docker not answering after the
 restart) stays in the history with its rollback copy: the helper writes it there before any container
-changes. The backups tab shows it as “aborted” and offers the rollback.
+changes. The backups tab shows it as “aborted” and offers the rollback. Its output is kept up to the
+cut, because it goes to the log file as it is printed (after a power cut the last lines can be
+missing).
 
 **Unknown jump size:** if the installed version is unknown and the tag fixes no version number
 (`latest`, `stable` …), nobody can tell what the update brings. The plan says so first: it may be a new
