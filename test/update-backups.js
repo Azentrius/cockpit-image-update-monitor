@@ -374,6 +374,43 @@ const BASE_SCRIPT = {
     console.log("rollback cause:", m.d.getElementById("dm-dialog-reason").textContent.replace(/\s+/g, " ").trim());
     assert.strictEqual(m.d.querySelector("#dm-dialog-reason .dm-reason-line").textContent,
                        "In der Wartezeit nicht bereit geworden; im Log steht keine Fehlerzeile.");
+    // A failed rollback stays "rollback failed" and is offered again (up to 0.18.0 the
+    // helper marked it rolled_back). An update that ended without its last line
+    // ("running") shows as aborted, with its rollback; one whose process still runs
+    // as running, without. The helper's own failure has a title of its own.
+    const RB = (id) => id + ":rollback-20261012-060000";
+    const RETRY_OPS = [
+        { id: "20261012-060000-a", ts: "2026-10-12T04:00:00Z", kind: "update", container: "a", image: "a:latest",
+          services: ["a"], rollback: RB("a"), dumps: [], status: "ok", can_rollback: true, rolled_back: false,
+          rollback_status: "failed", rollback_reason: { container: "a", state: null, exit_code: null, oom: false,
+              source: "image", line: "läuft auf elsewhere statt auf der Rollback-Kopie " + RB("a") + " (old)" } },
+        { id: "20261012-050000-b", ts: "2026-10-12T03:00:00Z", kind: "update", container: "b", image: "b:latest",
+          services: ["b"], rollback: RB("b"), dumps: [], status: "running", active: false, can_rollback: true },
+        { id: "20261012-040000-c", ts: "2026-10-12T02:00:00Z", kind: "update", container: "c", image: "c:latest",
+          services: ["c"], rollback: RB("c"), dumps: [], status: "running", active: true, can_rollback: false },
+        { id: "20261012-030000-d", ts: "2026-10-12T01:00:00Z", kind: "update", container: "d", image: "d:latest",
+          services: ["d"], rollback: RB("d"), dumps: [], status: "failed", can_rollback: true,
+          reason: { container: null, state: null, exit_code: null, oom: false, source: "error",
+                    line: "Prüfung nach dem Neustart abgebrochen: Cannot connect to the Docker daemon" } }];
+    const rt = boot("de", { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: RETRY_OPS }) },
+        "diun-update.py rollback": { chunks: ["…\n", "@@RESULT " + JSON.stringify({ op: "20261012-030000-d", status: "failed",
+            reason: RETRY_OPS[3].reason }) + "\n"], fail: { exit_status: 4 } } });
+    await sleep(80);
+    rt.d.getElementById("dm-tab-btn-backups").click();
+    await sleep(40);
+    const rtRows = [...rt.d.querySelectorAll("#dm-ops tr")].map((tr) =>
+        [tr.querySelector('td[data-label="Ergebnis"] .az-label').textContent, !!tr.querySelector("button[data-op]"),
+         (tr.querySelector(".dm-op-reason") || {}).textContent || null]);
+    console.log("\nretry rows:", JSON.stringify(rtRows));
+    assert.deepStrictEqual(rtRows, [
+        ["Rollback fehlgeschlagen", true, "a: " + RETRY_OPS[0].rollback_reason.line],
+        ["abgebrochen", true, null],
+        ["läuft", false, null],
+        ["fehlgeschlagen", true, RETRY_OPS[3].reason.line]]);
+    rt.d.querySelector('#dm-ops button[data-op="3"]').click();
+    rt.d.getElementById("dm-dialog-confirm").click();
+    await sleep(60);
+    assert.strictEqual(rt.d.querySelector("#dm-dialog-reason .az-alert__title").textContent, "Ursache (Update-Helfer)");
 
     // 9. The kept output: a button per history entry, the dialog shows it
     const withLog = { ...BACKUPS, ops: BACKUPS.ops.map((o, i) => ({ ...o, log: i === 0, rollback_log: false })) };

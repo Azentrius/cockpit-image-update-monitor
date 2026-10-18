@@ -65,9 +65,9 @@ Inputs are checked by regex:
 | 0 | ok (also `nochange`; `cleanup` also when single items could not be removed, see `failed`) |
 | 1 | unexpected error of a subcommand (stderr in the output; `radar`: the run failed) |
 | 2 | not found / not possible (container, operation, rollback image gone, not updatable, radar not set up, cleanup rules not understood or not root-only) |
-| 3 | refused (already rolled back; file/container exists on `install`) |
+| 3 | refused (rolled back already, successfully; file/container exists on `install`) |
 | 4 | after update/rollback the containers do not run stably |
-| 5 | stopped before any change (dump failed, too little space, database not running, the pull failed and left the old image) |
+| 5 | stopped before any change (dump failed, too little space, database not running, the pull failed and left the old image; on `rollback`: a file of a tag change edited since, or the compose files giving the services another image) |
 | 64 | wrong call |
 | 75 | lock taken (already running) |
 | 77 | no root rights |
@@ -293,8 +293,30 @@ change is no longer possible or the fingerprint differs (a file edited since the
 
 A rollback of a tag change first checks every file against the checksum written (`new_sha256`) and
 every copy against the original's (`sha256`): a file edited after the change, or a damaged copy,
-stops it (exit 5 / 2) without touching anything. Then the copies go back, the old tag points to the
-rollback image again and the services are recreated. The copies stay with the history entry.
+stops it (exit 5 / 2) without touching anything. A file that has its old checksum already stays as it
+is (since 0.19.0: an earlier attempt put it back, or the run ended before writing it). Then the copies
+go back, the old tag points to the rollback image again and the services are recreated. The copies
+stay with the history entry.
+
+### `rollback <op-id>`
+
+Takes the update lock. Before anything changes (otherwise exit 2 / 3 / 5, nothing touched):
+
+- the operation is an `update` or `retag` that is not rolled back yet, or whose rollback failed: a
+  failed rollback may be tried again (since 0.19.0; up to 0.18.0 it was marked `rolled_back` too and
+  refused with exit 3);
+- the rollback image exists;
+- the files of a tag change (above);
+- since 0.19.0 `docker compose config` gives every service of the operation its `image`, for a tag
+  change once its copies are back (if not, the files are written again as they were before the
+  attempt). Otherwise compose would start another image than the rollback copy, which only takes
+  that tag back: an `image:` line changed after the update (`acme/app:latest` → `acme/app:2`), a
+  `.env` edited, a service removed. Exit 5 names the services and the images they get now.
+
+Then the tag points to the rollback image, `up -d --no-deps --pull never`, waiting for health, and
+since 0.19.0 every container of the services (one-off `compose run` containers aside) must run the
+rollback image's ID: one that runs another image fails the rollback (exit 4, `reason.source`
+`"image"`).
 
 ### `@@RESULT` (last line of `update` / `rollback` / `cleanup`)
 
@@ -324,7 +346,10 @@ with `op`. The versions can be `null` (unknown).
   `null` when `docker compose up` itself failed (`source: "compose"`, `exit_code` = its exit code).
 - `state`: the container state, or the health state `unhealthy` / `starting`.
 - `source`: `log` (the last 80 log lines), `health` (last output of the health check, for an
-  unhealthy container), `compose` (the last 50 lines `docker compose up` printed) or `null`.
+  unhealthy container), `compose` (the last 50 lines `docker compose up` printed), `error` (since
+  0.19.0: the helper itself stopped after the containers were recreated, e.g. Docker did not answer;
+  `container` is `null`), `image` (since 0.19.0, rollback only: the container runs another image than
+  the rollback copy) or `null`.
 - `line` (`reason_line`): the last line that names an error (`Error:`, `TypeError:`,
   `…Exception`, `error:`, `panic:`, `FATAL`, `PANIC`, `CRITICAL`), plus the next line when it ends in
   `:`; otherwise the last line that mentions a problem (`error`, `failed`, `refused`, `not found` …).
@@ -355,7 +380,8 @@ ROLLBACK_IMAGE_DAYS=14
 ### `operations.jsonl`
 
 One JSON line per operation. Later lines with the same `id` complete earlier ones; this is how a
-rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_status`.
+rollback marks the operation with `rolled_back`, `rollback_ts`, `rollback_status` and
+`rollback_reason`. Each line is flushed to disk (`fsync`) before the run goes on.
 
 ```json
 {"id": "20261012-015025-imgupd-test-db", "ts": "…", "kind": "update", "container": "imgupd-test-db",
@@ -371,9 +397,24 @@ rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_sta
   (label / digest), otherwise `null`. Older entries do not have them; the plugin shows “—”. Since the
   radar names a new image only after the update, `backups` fills a `null` version from the radar's
   `installed` entry for `old_id` / `new_id` (the history file stays as written).
-- `reason` (since 0.8.0): on a failed update, the same object as in `@@RESULT`. A failed rollback adds
-  `rollback_reason` with the line that marks it rolled back. The backups tab shows the cause under the
-  result (the rollback's if it failed, otherwise the update's).
+- `reason` (since 0.8.0): on a failed update, the same object as in `@@RESULT`. A rollback adds
+  `rollback_status` (`ok` / `failed`) and `rollback_reason` (`null` when it went through). Since 0.19.0
+  `rolled_back` is `true` only when it went through; a failed one may be tried again, and its output is
+  added to the first one's (`--- Tried again ---`). Up to 0.18.0 a failed rollback was marked
+  `rolled_back: true` too; `rollback` and `backups` treat such lines as failed. The backups tab shows
+  the cause under the result (the rollback's if it failed, otherwise the update's).
+- **`status`**: `running` from the start, then `ok`, `failed` or `nochange`. Since 0.19.0 the run is
+  in the history **before the first change a rollback has to undo**: a tag change before it writes
+  its files (with `backup` and `backup_files`), every update once more before `up` (with `new_id`).
+  Whatever ends the run from then on, the entry stays with its rollback image and copies:
+  - an exception after the containers were recreated (Docker does not answer) fails the update (exit
+    4) with `reason.source: "error"`;
+  - a run that ends without its last line (killed, power cut) stays `running`. `pid` names its process;
+    `backups` adds `active` (that process still runs this helper) and offers the rollback only when it
+    does not. The page shows such an entry as “aborted”, or “running” while it is active.
+  A run that stops before any container changed takes back what it did (files from their copies,
+  copies, rollback tag, dumps); if it was in the history already, a line with `status: "discarded"`
+  hides it (`load_ops` leaves it out) and no output is kept.
 - **Dependent services** (since 0.9.0): after the recreated containers are healthy, `update` checks
   the running containers of `dependents` five times, 3 seconds apart, against their state from before
   the update (`StartedAt`, `RestartCount`, not `unhealthy`). One that stopped, restarted or turned
@@ -389,8 +430,8 @@ rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_sta
   `@@RESULT`). Only runs that reach the history keep output; an update stopped before any change does
   not. The files stay with their history entry; nothing deletes them.
 
-`backups` returns the last 30 operations, with `can_rollback`, `log` and `rollback_log` (whether output
-is kept) added and without paths and image IDs.
+`backups` returns the last 30 operations, with `can_rollback`, `active`, `log` and `rollback_log`
+(whether output is kept) added and without paths, image IDs and `pid`.
 On top come `dumps[]` (`path`, `project`, `container`, `size`, `mtime`), `images[]` (`ref`, `id`,
 `size`, `created`, `in_use`), `dump_bytes`, `free_bytes`, `dir` and `cleanup`. An image's `size` is in
 bytes (`docker image inspect`, `null` if Docker does not say) and `created` is ISO 8601
@@ -550,11 +591,11 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback, cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
-| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes, output button, a build that failed before (row note, second tick box), “together with” in the rows, CI job containers left out, the warning for running CI jobs, plan groups and dependencies, delete |
+| `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes (a failed rollback offered again, an aborted and a running update, the helper's own cause), output button, a build that failed before (row note, second tick box), “together with” in the rows, CI job containers left out, the warning for running CI jobs, plan groups and dependencies, delete |
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, no update for the same build under a new digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
@@ -565,7 +606,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
 | `tools/check-units.sh` | `systemd-analyze verify` for the units (CI lint step, next to shellcheck and ruff) |
-| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again). `E2E_LIB=<folder>` runs helpers that are not installed yet. |
+| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again); since 0.19.0 a rollback refused while the compose file names another image. `E2E_LIB=<folder>` runs helpers that are not installed yet. |
 
 The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds
 `inventory3.jsonl` and `versions2.json` from `inventory2.jsonl`.

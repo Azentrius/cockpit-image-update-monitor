@@ -120,6 +120,10 @@ def say(de, en):
     print(de if LANG == "de" else en, flush=True)
 
 
+def pick(de, en):
+    return de if LANG == "de" else en
+
+
 class Abort(Exception):
     def __init__(self, code, de, en):
         super().__init__(de if LANG == "de" else en)
@@ -1207,24 +1211,42 @@ def failure_reason(names, compose_rc=0):
     return first
 
 
+def error_reason(e):
+    """The cause when the helper itself stopped after the containers were
+    recreated (Docker did not answer, a command failed): source "error"."""
+    text = (getattr(e, "stderr", None) or str(e) or type(e).__name__).strip()
+    line = (text.splitlines() or [type(e).__name__])[-1][:REASON_MAX]
+    return {"container": None, "state": None, "exit_code": None, "oom": False, "source": "error",
+            "line": pick(f"Prüfung nach dem Neustart abgebrochen: {line}", f"Check after the restart stopped: {line}")}
+
+
+def short_id(image):
+    return (image or "?").split(":")[-1][:12]
+
+
 def say_reason(reason):
     if reason and reason.get("line"):
-        who = reason.get("container") or "docker compose"
+        who = reason.get("container") or ("docker compose" if reason.get("source") == "compose" else "diun-update.py")
         say(f"Vermutliche Ursache ({who}): {reason['line']}", f"Most likely cause ({who}): {reason['line']}")
 
 
 # ------------------------------------------------------------ operations ----
 _log_name = None         # logs/<name> to keep once the operation is recorded
+_recorded = set()        # operations this process put into the history
 
 
 def record(entry, log=None):
-    """Append to operations.jsonl. log: the name under logs/ that keeps the
-    output of this run (see keep_output)."""
+    """Append to operations.jsonl (flushed to disk: what a rollback needs
+    must survive a crash). log: the name under logs/ that keeps the output
+    of this run (see keep_output)."""
     global _log_name
     ensure_base()
     fd = os.open(OPS, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    _recorded.add(entry.get("id"))
     if log:
         _log_name = log
 
@@ -1263,7 +1285,8 @@ def save_log(name, text):
 def keep_output(fn, *args, **kw):
     """Run update or rollback and keep its output with the history:
     logs/<op-id>.log and logs/<op-id>.rollback.log. An update that stops
-    before any change records nothing, so no output is kept either."""
+    before any change records nothing, so no output is kept either. A
+    rollback tried again after a failure adds its output to the first one's."""
     global _log_name
     tee = Tee(sys.stdout)
     sys.stdout, _log_name = tee, None
@@ -1275,6 +1298,14 @@ def keep_output(fn, *args, **kw):
             text = "".join(tee.parts)
             if tee.size >= LOG_MAX:
                 text += "\n[output cut at %d KiB]\n" % (LOG_MAX // 1024)
+            try:
+                with open(os.path.join(LOGS, _log_name), errors="replace") as f:
+                    before = f.read()
+            except OSError:
+                before = ""
+            if before:
+                text = (before + ("" if before.endswith("\n") else "\n")
+                        + pick("--- Erneuter Versuch ---\n", "--- Tried again ---\n") + text)
             try:
                 save_log(_log_name, text)
             except OSError:
@@ -1314,7 +1345,9 @@ def repo_digests(image_id):
 
 
 def load_ops():
-    """Fold operations.jsonl into {op_id: op}, later lines updating earlier ones."""
+    """Fold operations.jsonl into {op_id: op}, later lines updating earlier ones.
+    Runs that stopped before any container changed and took back what they
+    did (status "discarded") are left out."""
     ops = {}
     try:
         with open(OPS) as f:
@@ -1327,7 +1360,7 @@ def load_ops():
                     ops.setdefault(e["id"], {}).update(e)
     except FileNotFoundError:
         pass
-    return ops
+    return {k: o for k, o in ops.items() if o.get("status") != "discarded"}
 
 
 def result(**kw):
@@ -1372,17 +1405,40 @@ def discard(op):
             pass
 
 
+def drop_run(op):
+    """Take back what a run did before any container changed: the files of a
+    tag change (from their copies), the copies, the rollback tag, the dumps.
+    A run that is in the history already gets the status "discarded" there,
+    which hides it, and keeps no output. If the files cannot be put back,
+    everything stays: the history keeps the run, and its rollback restores
+    them."""
+    global _log_name
+    if op.get("backup_files"):
+        try:
+            restore_files(op["backup_files"])
+        except OSError as e:
+            raise Abort(1, f"Wiederherstellen fehlgeschlagen ({e}) – die alten Dateien liegen in {op['backup']}; "
+                           f"der Vorgang steht im Verlauf und lässt sich zurückrollen.",
+                        f"Restoring failed ({e}) – the old files are in {op['backup']}; the operation is in the "
+                        f"history and can be rolled back.")
+        drop_backup(op["backup"])
+    discard(op)
+    if op["id"] in _recorded:
+        record({"id": op["id"], "status": "discarded"})
+        _log_name = None
+
+
 def change_files(op, ctx, retag, services, st):
-    """Step 2b of a tag change: back up the files byte-exact, write the
-    planned lines, check with `docker compose config` that the services use
-    the new image. Anything wrong puts the files back and stops before a
-    container changes (exit 5)."""
+    """Step 2b of a tag change: back up the files byte-exact, put the run in
+    the history, write the planned lines, check with `docker compose config`
+    that the services use the new image. Anything wrong puts the files back
+    and stops before a container changes (exit 5)."""
     by_file = {}
     for c in retag["changes"]:
         by_file.setdefault(c["file"], []).append(c)
     new = {f: changed_bytes(f, cs) for f, cs in by_file.items()}
     if any(v is None for v in new.values()):
-        discard(op)
+        drop_run(op)
         raise Abort(5, "Die Dateien haben sich seit der Planung geändert – nichts geändert.",
                     "The files changed since planning – nothing changed.")
     op["backup"], saved = backup_files(op["project"], st, sorted(by_file))
@@ -1390,6 +1446,9 @@ def change_files(op, ctx, retag, services, st):
         x["new_sha256"] = hashlib.sha256(new[x["path"]]).hexdigest()
     op["backup_files"] = saved
     say(f"Sicherung der Dateien: {op['backup']}", f"Files backed up to {op['backup']}")
+    # In the history before the first file changes: should the run end here
+    # for good (killed, power cut), the rollback finds the copies.
+    record(op, log=op["id"] + ".log")
     try:
         for f in sorted(new):
             write_like(f, new[f])
@@ -1403,13 +1462,7 @@ def change_files(op, ctx, retag, services, st):
             raise ValueError("services on another image: " + ", ".join(wrong))
     except (subprocess.CalledProcessError, OSError, ValueError) as e:
         detail = (getattr(e, "stderr", None) or str(e)).strip()[-300:]
-        try:
-            restore_files(saved)
-        except OSError as e2:
-            raise Abort(1, f"Wiederherstellen fehlgeschlagen ({e2}) – die alten Dateien liegen in {op['backup']}.",
-                        f"Restoring failed ({e2}) – the old files are in {op['backup']}.")
-        drop_backup(op["backup"])
-        discard(op)
+        drop_run(op)
         raise Abort(5, f"Prüfung der geänderten Dateien fehlgeschlagen: {detail} – Dateien wiederhergestellt, "
                        f"nichts geändert.",
                     f"Check of the changed files failed: {detail} – files restored, nothing changed.")
@@ -1418,7 +1471,12 @@ def change_files(op, ctx, retag, services, st):
 
 def roll_out(name, plan, ctx, do_dump, retag=None):
     """The update itself. With retag (a tag change) the configured tag is
-    changed first (change_files) and the new tag is rolled out."""
+    changed first (change_files) and the new tag is rolled out.
+    The run is in the history (status "running") before the first change a
+    rollback has to undo: before a tag change writes its files and before the
+    containers are recreated. Whatever ends the run from then on, the entry
+    stays with its rollback copy and file copies. A run that stops before any
+    container changed takes back what it did (drop_run)."""
     st = stamp()
     op_id = f"{st}-{name}"
     ref = plan["image"]
@@ -1432,7 +1490,7 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
           "env_files": ctx["env_files"], "services": services,
           "containers": plan["containers"], "image": ref, "old_id": old_id,
           "from_version": version_of(ref, old_id), "to_version": None,
-          "rollback": None, "dumps": [], "status": "running"}
+          "rollback": None, "dumps": [], "status": "running", "pid": os.getpid()}
 
     if retag:
         op.update(to_image=new_ref, from_tag=retag["from_tag"], to_tag=retag["tag"],
@@ -1471,63 +1529,84 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
             say(f"Kein Dump für {d['name']} (Typ nicht unterstützt).",
                 f"No dump for {d['name']} (type not supported).")
 
-    # 2. Rollback tag for the image the container runs on now
-    rb = f"{repo}:rollback-{st}"
-    run(["docker", "tag", old_id, rb])
-    op["rollback"] = rb
-    say(f"Rollback-Sicherung: {rb}", f"Rollback image: {rb}")
+    # Up to the recreated containers, anything unexpected takes back what the
+    # run did, as a planned stop does.
+    try:
+        # 2. Rollback tag for the image the container runs on now
+        rb = f"{repo}:rollback-{st}"
+        run(["docker", "tag", old_id, rb])
+        op["rollback"] = rb
+        say(f"Rollback-Sicherung: {rb}", f"Rollback image: {rb}")
 
-    # 2b. Tag change: back up the files, write the planned lines, check them
-    if retag:
-        change_files(op, ctx, retag, services, st)
+        # 2b. Tag change: back up the files, write the planned lines, check them
+        if retag:
+            change_files(op, ctx, retag, services, st)
 
-    # 3. Pull (registry failures are reported, an already pulled image still counts)
-    base = compose_cmd(ctx)
-    pull_rc = stream(base + ["pull", "--ignore-pull-failures", *services])
-    new_id = image_id(new_ref)
-    if retag and not new_id:
-        restore_files(op["backup_files"])
-        drop_backup(op["backup"])
-        discard(op)
-        raise Abort(5, f"Das Image {new_ref} ist nicht verfügbar – Dateien wiederhergestellt, nichts geändert.",
-                    f"The image {new_ref} is not available – files restored, nothing changed.")
-    unchanged = bool(new_id) and all(v == new_id for v in old_ids.values())
-    if pull_rc != 0:
-        # A pull that failed and left the old image says nothing about newer
-        # ones: not "no newer image" (compose stops at once on a service its
-        # files do not define, and pulls nothing at all).
-        if not retag and (unchanged or not new_id):
-            discard(op)
-            raise Abort(5, "Der Pull ist fehlgeschlagen, und auf dem Server liegt kein neueres Image – nichts geändert.",
-                        "The pull failed and there is no newer image on the server – nothing changed.")
-        say("Warnung: Pull meldete Fehler – es wird mit dem lokal vorhandenen Image weitergemacht.",
-            "Warning: pull reported errors – continuing with the image available locally.")
-    # A tag change always recreates: the containers must carry the new tag.
-    if not retag and unchanged:
-        run(["docker", "rmi", rb], check=False)
-        op.update(status="nochange", rollback=None, new_id=new_id, to_version=op["from_version"])
+        # 3. Pull. Without --ignore-pull-failures: compose then exits 0 when the
+        # registry fails, and that looked like "no newer image". A failed pull
+        # goes on only with the image to roll out on the server already.
+        base = compose_cmd(ctx)
+        pull_rc = stream(base + ["pull", *services])
+        pull_error = (reason_line(STREAM_TAIL) or f"exit {pull_rc}") if pull_rc else None
+        new_id = image_id(new_ref)
+        if retag and not new_id:
+            drop_run(op)
+            raise Abort(5, f"Das Image {new_ref} ist nicht verfügbar – Dateien wiederhergestellt, nichts geändert.",
+                        f"The image {new_ref} is not available – files restored, nothing changed.")
+        unchanged = bool(new_id) and all(v == new_id for v in old_ids.values())
+        if pull_rc != 0:
+            # A pull that failed and left the old image says nothing about
+            # newer ones: not "no newer image".
+            if not retag and (unchanged or not new_id):
+                drop_run(op)
+                raise Abort(5, f"Der Pull ist fehlgeschlagen, und auf dem Server liegt kein neueres Image – nichts "
+                               f"geändert. Pull: {pull_error}",
+                            f"The pull failed and there is no newer image on the server – nothing changed. "
+                            f"Pull: {pull_error}")
+            say(f"Warnung: Der Pull ist fehlgeschlagen ({pull_error}). {new_ref} liegt schon auf dem Server "
+                f"({short_id(new_id)}) und wird ausgerollt.",
+                f"Warning: the pull failed ({pull_error}). {new_ref} is on the server already "
+                f"({short_id(new_id)}) and is rolled out.")
+        # A tag change always recreates: the containers must carry the new tag.
+        if not retag and unchanged:
+            run(["docker", "rmi", rb], check=False)
+            op.update(status="nochange", rollback=None, new_id=new_id, to_version=op["from_version"])
+            record(op, log=op_id + ".log")
+            say("Kein neueres Image verfügbar – nichts geändert.", "No newer image available – nothing changed.")
+            result(op=op_id, status="nochange", dumps=op["dumps"],
+                   from_version=op["from_version"], to_version=op["to_version"])
+            return 0
+        op["new_id"] = new_id
+        op["new_digests"] = repo_digests(new_id)
+        op["to_version"] = version_of(new_ref, new_id)
+        # In the history before the containers change (see above).
         record(op, log=op_id + ".log")
-        say("Kein neueres Image verfügbar – nichts geändert.", "No newer image available – nothing changed.")
-        result(op=op_id, status="nochange", dumps=op["dumps"],
-               from_version=op["from_version"], to_version=op["to_version"])
-        return 0
-    op["new_id"] = new_id
-    op["new_digests"] = repo_digests(new_id)
-    op["to_version"] = version_of(new_ref, new_id)
+    except Abort:
+        raise
+    except BaseException:
+        drop_run(op)
+        raise
     versions = {"from_version": op["from_version"], "to_version": op["to_version"]}
     if retag:
         versions.update(image=new_ref, backup=op["backup"])
 
-    # 4. Recreate only these services, then watch those that depend on them
-    watched = running_state([c for d in plan["dependents"] for c in d["containers"]])
-    rc = stream(base + ["up", "-d", "--no-deps", "--pull", "never", *services])
-    ok, failed, _states = (False, [], {}) if rc != 0 else wait_healthy(project, services)
-    if ok:
-        failed = watch_dependents(watched)
-        ok = not failed
-    if rc != 0 or not ok:
-        show_logs(failed or plan["containers"])
-        op["reason"] = failure_reason(failed or plan["containers"], compose_rc=rc)
+    # 4. Recreate only these services, then watch those that depend on them.
+    # Whatever goes wrong from here on fails the update, with its rollback.
+    ok = False
+    try:
+        watched = running_state([c for d in plan["dependents"] for c in d["containers"]])
+        rc = stream(base + ["up", "-d", "--no-deps", "--pull", "never", *services])
+        ok, failed, _states = (False, [], {}) if rc != 0 else wait_healthy(project, services)
+        if ok:
+            failed = watch_dependents(watched)
+            ok = not failed
+        if not ok:
+            show_logs(failed or plan["containers"])
+            op["reason"] = failure_reason(failed or plan["containers"], compose_rc=rc)
+    except Exception as e:
+        ok = False
+        op["reason"] = error_reason(e)
+    if not ok:
         op["status"] = "failed"
         record(op, log=op_id + ".log")
         say_reason(op["reason"])
@@ -1552,6 +1631,52 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
     return 0
 
 
+def compose_images(ctx, services):
+    """{service: image} as `docker compose config` gives it now; exit 5 if
+    compose cannot read its files."""
+    try:
+        cfg = json.loads(run(compose_cmd(ctx) + ["config", "--format", "json"]))
+    except (subprocess.CalledProcessError, ValueError, OSError) as e:
+        detail = (getattr(e, "stderr", None) or str(e)).strip()[-300:]
+        raise Abort(5, f"docker compose config schlägt fehl: {detail} – nichts geändert.",
+                    f"docker compose config fails: {detail} – nothing changed.")
+    svc = cfg.get("services") or {}
+    return {s: (svc.get(s) or {}).get("image") for s in services}
+
+
+def other_image(ctx, op):
+    """Exit 5 unless the compose files give every service of the operation its
+    image: otherwise compose would start something else than the rollback
+    copy, which takes only that tag (an image line changed after the update,
+    a .env edited, a service removed)."""
+    wrong = [f"{s}: {img or '–'}" for s, img in sorted(compose_images(ctx, op["services"]).items())
+             if not same_ref(img, op["image"])]
+    if wrong:
+        raise Abort(5, f"Die Compose-Dateien geben jetzt {', '.join(wrong)} statt {op['image']} – nichts geändert: "
+                       f"Compose würde nicht die Rollback-Kopie starten. Die Dateien zurückändern oder von Hand "
+                       f"zurückrollen.",
+                    f"The compose files now give {', '.join(wrong)} instead of {op['image']} – nothing changed: "
+                    f"compose would not start the rollback copy. Change the files back, or roll back by hand.")
+
+
+def not_on(project, services, image):
+    """Containers of these services (one-off `compose run` ones aside) that do
+    not run the image ID `image`: [(name, image ID or None)]."""
+    off = []
+    for s in services:
+        for n in service_containers(project, s):
+            try:
+                c = docker_json("inspect", "--type", "container", n)[0]
+            except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
+                off.append((n, None))
+                continue
+            if (c["Config"].get("Labels") or {}).get("com.docker.compose.oneoff") == "True":
+                continue
+            if c.get("Image") != image:
+                off.append((n, c.get("Image")))
+    return off
+
+
 def cmd_rollback(op_id):
     if not OP_RE.match(op_id):
         raise Abort(64, f"Ungültige Vorgangs-ID: {op_id}", f"Invalid operation id: {op_id}")
@@ -1559,16 +1684,22 @@ def cmd_rollback(op_id):
     op = load_ops().get(op_id)
     if not op or op.get("kind") not in ("update", "retag"):
         raise Abort(2, f"Vorgang {op_id} nicht gefunden.", f"Operation {op_id} not found.")
-    if op.get("rolled_back"):
+    # A rollback that went through is not repeated; one that failed may run
+    # again (up to 0.18.0 a failed one was marked rolled_back as well).
+    if op.get("rolled_back") and op.get("rollback_status") != "failed":
         raise Abort(3, "Dieser Vorgang wurde bereits zurückgerollt.", "This operation was already rolled back.")
     rb = op.get("rollback")
-    if not rb or not image_id(rb):
+    rb_id = image_id(rb) if rb else ""
+    if not rb_id:
         raise Abort(2, "Das Rollback-Image existiert nicht mehr.", "The rollback image no longer exists.")
     ctx = {"project": op["project"], "workdir": op["workdir"], "files": op["files"],
            "env_files": op.get("env_files") or []}
     saved = (op.get("backup_files") or []) if op.get("kind") == "retag" else []
     # A tag change is undone with its files. Check them all before touching one:
-    # a file edited since then, or a damaged backup, stops the rollback.
+    # a file edited since then, or a damaged backup, stops the rollback. A file
+    # that is back already (an earlier attempt, a run that ended before writing
+    # it) stays as it is.
+    pending = []
     for x in saved:
         try:
             now_sum, bk_sum = sha256_of(x["path"]), sha256_of(x["backup"])
@@ -1577,31 +1708,64 @@ def cmd_rollback(op_id):
         if bk_sum != x["sha256"]:
             raise Abort(2, f"Die Sicherung {x['backup']} ist beschädigt – nichts geändert.",
                         f"The backup {x['backup']} is damaged – nothing changed.")
-        if now_sum != x.get("new_sha256"):
+        if now_sum == x.get("new_sha256"):
+            pending.append(x)
+        elif now_sum != x["sha256"]:
             raise Abort(5, f"{x['path']} wurde nach dem Tag-Wechsel geändert – nichts geändert. Die alte Datei "
                            f"liegt in {x['backup']}.",
                         f"{x['path']} changed after the tag change – nothing changed. The old file is in {x['backup']}.")
+    # The files must give the services the operation's image (other_image):
+    # without a tag change checked before anything changes, with one once its
+    # files are back, which are written again as they were if not.
+    if not saved:
+        other_image(ctx, op)
     say(f"Rollback von {op['image']} auf {rb} (Projekt {op['project']}) …",
         f"Rolling {op['image']} back to {rb} (project {op['project']}) …")
     say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
         "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
     if saved:
-        restore_files(saved)
-        for x in saved:
+        now = {}
+        for x in pending:
+            with open(os.path.realpath(x["path"]), "rb") as f:
+                now[x["path"]] = f.read()
+        restore_files(pending)
+        try:
+            other_image(ctx, op)
+        except Abort:
+            for path, data in now.items():
+                write_like(path, data)
+            raise
+        for x in pending:
             say(f"Wiederhergestellt: {x['path']}", f"Restored: {x['path']}")
     run(["docker", "tag", rb, op["image"]])
-    rc = stream(compose_cmd(ctx) + ["up", "-d", "--no-deps", "--pull", "never", *op["services"]])
-    ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["services"])
+    ok, reason = False, None
+    try:
+        rc = stream(compose_cmd(ctx) + ["up", "-d", "--no-deps", "--pull", "never", *op["services"]])
+        ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["services"])
+        if ok:
+            # What runs must be the rollback copy, not what else a tag names.
+            off = not_on(op["project"], op["services"], rb_id)
+            if off:
+                ok = False
+                n, img = off[0]
+                reason = {"container": n, "state": None, "exit_code": None, "oom": False, "source": "image",
+                          "line": pick(f"läuft auf {short_id(img)} statt auf der Rollback-Kopie {rb} "
+                                       f"({short_id(rb_id)})",
+                                       f"runs {short_id(img)} instead of the rollback copy {rb} ({short_id(rb_id)})")}
+        else:
+            show_logs(failed or op["containers"])
+            reason = failure_reason(failed or op["containers"], compose_rc=rc)
+    except Exception as e:
+        ok, reason = False, error_reason(e)
     status = "ok" if ok else "failed"
-    entry = {"id": op_id, "rolled_back": True, "rollback_ts": now_iso(), "rollback_status": status}
-    if not ok:
-        show_logs(failed or op["containers"])
-        entry["rollback_reason"] = failure_reason(failed or op["containers"], compose_rc=rc)
+    entry = {"id": op_id, "rolled_back": ok, "rollback_ts": now_iso(), "rollback_status": status,
+             "rollback_reason": reason}
     record(entry, log=op_id + ".rollback.log")
     if not ok:
-        say_reason(entry["rollback_reason"])
-        say("Rollback fehlgeschlagen.", "Rollback failed.")
-        result(op=op_id, status="failed", reason=entry["rollback_reason"])
+        say_reason(reason)
+        say("Rollback fehlgeschlagen. Er lässt sich wiederholen, sobald die Ursache behoben ist.",
+            "Rollback failed. It can be tried again once the cause is fixed.")
+        result(op=op_id, status="failed", reason=reason)
         return 4
     say("Rollback erfolgreich.", "Rollback successful.")
     start_radar()
@@ -1678,6 +1842,15 @@ def rollback_images():
     return images
 
 
+def helper_alive(pid):
+    """True if the process `pid` is this helper (an update still running)."""
+    try:
+        with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
+            return b"diun-update" in f.read()
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def cmd_backups():
     ensure_base()
     dumps = list_dumps()
@@ -1688,13 +1861,18 @@ def cmd_backups():
 
     ops = sorted((dict(o) for o in all_ops.values()), key=lambda o: o.get("id", ""), reverse=True)[:30]
     for o in ops:
-        o["can_rollback"] = (o.get("kind") in ("update", "retag") and o.get("status") in ("ok", "failed")
-                             and not o.get("rolled_back") and norm_ref(o.get("rollback") or "") in rb_refs)
+        # "running": a run that ended without its last line (killed, power
+        # cut) unless its process still runs. A failed rollback may be tried again.
+        o["active"] = o.get("status") == "running" and helper_alive(o.get("pid"))
+        o["can_rollback"] = (o.get("kind") in ("update", "retag") and o.get("status") in ("ok", "failed", "running")
+                             and not o["active"]
+                             and not (o.get("rolled_back") and o.get("rollback_status") != "failed")
+                             and norm_ref(o.get("rollback") or "") in rb_refs)
         if not o.get("from_version") and known.get(o.get("old_id")):
             o["from_version"] = known[o["old_id"]]
         if not o.get("to_version") and known.get(o.get("new_id")):
             o["to_version"] = known[o["new_id"]]
-        for k in ("workdir", "files", "env_files", "old_id", "new_id", "backup_files"):
+        for k in ("workdir", "files", "env_files", "old_id", "new_id", "backup_files", "pid"):
             o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))
         o["rollback_log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".rollback.log"))
