@@ -61,6 +61,27 @@ check("mariadb 11 + MARIADB_VERSION with the epoch",
 check("core: epoch skipped, nothing else changes",
       [L.core(x) for x in ("1:11.8.9+maria~ubu2404", "2:1.2", "v6.2.0", "17.10-1.pgdg12+1", "1:", "1:16", "16", "master")],
       ["11.8.9", "1.2", "6.2.0", "17.10", None, None, None, None])
+# Eclipse Temurin names its release with "jdk-" and the build, in the JRE
+# images too (vpn-host, 2026-10-18: hibiscus-server built FROM
+# eclipse-temurin:21-jre-jammy, whose tag points to 21.0.12.1_1-jre-jammy;
+# the base's version stayed null). The variables of that image's config;
+# the build of June carried jdk-21.0.11+10 (java -version: 21.0.11), the one
+# rebuilt with --pull jdk-21.0.12.1+1 (21.0.12.1):
+TEMURIN_ENV = ["PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+               "JAVA_HOME=/opt/java/openjdk", "LANG=en_US.UTF-8", "LANGUAGE=en_US:en", "LC_ALL=en_US.UTF-8"]
+check("eclipse-temurin 21-jre-jammy + JAVA_VERSION with jdk- and the build",
+      lv("eclipse-temurin", "21-jre-jammy", img(TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.12.1+1"])), ("21.0.12.1", "env:JAVA_VERSION"))
+check("eclipse-temurin: a release without a point version",
+      lv("docker.io/library/eclipse-temurin", "21-jre-jammy", img(TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.11+10"])), ("21.0.11", "env:JAVA_VERSION"))
+check("eclipse-temurin 8 names no dotted version",
+      lv("eclipse-temurin", "8-jre", img(TEMURIN_ENV + ["JAVA_VERSION=jdk8u504-b01"])), (None, None))
+check("JAVA_VERSION not fitting the tag", lv("eclipse-temurin", "17-jre", img(["JAVA_VERSION=jdk-21.0.12.1+1"])), (None, None))
+check("JAVA_VERSION belongs to the Java image, not to an app on it",
+      lv("ghcr.io/acme/app", "latest", img(TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.12.1+1"])), (None, None))
+check("core: jdk- skipped, the variable and the tag read the same",
+      [L.core(x) for x in ("jdk-21.0.12.1+1", "21.0.12.1_1-jre-jammy", "jdk-21.0.11+10", "21.0.11_10-jre-jammy", "jdk8u504-b01", "jdk-21")],
+      ["21.0.12.1", "21.0.12.1", "21.0.11", "21.0.11", None, None])
+check("nums: 21.0.11 below 21.0.12.1", L.nums_of("21.0.11") < L.nums_of("21.0.12.1"), True)
 check("clickhouse pinned 4 blocks", lv("clickhouse/clickhouse-server", "24.3.3.102-alpine", img()), ("24.3.3.102", "tag"))
 check("reach latest", L.reachable("latest"), ["patch", "minor", "major"])
 check("reach 16-alpine", L.reachable("16-alpine"), ["patch", "minor"])
@@ -455,6 +476,33 @@ check("base: a build stage has no version of its own, only the push time counts"
 hub_asked.clear()
 check("base: a pinned base never moves and asks nobody",
       (R.base_state({"image": "caddy", "tag": "2", "final": True, "pinned": True}, old_caddy)["newer"], hub_asked), (False, []))
+
+# A Java app built FROM eclipse-temurin:21-jre-jammy (vpn-host, 2026-10-18:
+# hibiscus-server). The tag points to 21.0.12.1_1-jre-jammy (the same digest
+# on Docker Hub), pushed for amd64 on 17 October; the build carries
+# Temurin's JAVA_VERSION.
+check("base eclipse-temurin: the version tag behind 21-jre-jammy",
+      R.best_tag(["21-jre-jammy", "21.0.12.1_1-jre-jammy"]), "21.0.12.1_1-jre-jammy")
+caddy_tags, caddy_now = R.list_tags, R.resolve_tag
+HUB_INFO["eclipse-temurin/21-jre-jammy"] = {"tag_last_pushed": "2026-10-17T05:17:35Z", "images": [
+    {"architecture": "amd64", "os": "linux", "last_pushed": "2026-10-17T05:17:32Z"}]}
+R.list_tags = lambda repo: ["21", "21-jre", "21-jre-jammy", "21.0.12.1_1-jre", "21.0.12.1_1-jre-jammy", "21.0.12.1_1-jdk-jammy"]
+R.resolve_tag = lambda repo, tag, tags, prev: {"digest": "sha256:t", "version": "21.0.12.1", "tag": "21.0.12.1_1-jre-jammy"}
+hib = img(TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.12.1+1"], created="2026-10-18T03:10:00Z")
+hib["Architecture"] = "amd64"
+b = R.base_state({"image": "eclipse-temurin", "tag": "21-jre-jammy", "final": True}, hib)
+check("base eclipse-temurin: the build carries 21.0.12.1, the tag points to it -> current",
+      (b["version"], b["now"], b["newer"]), ("21.0.12.1", "21.0.12.1", False))
+hib["Config"]["Env"] = TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.11+10"]
+b = R.base_state({"image": "eclipse-temurin", "tag": "21-jre-jammy", "final": True}, hib)
+check("base eclipse-temurin: built after the push on an older local base (no --pull) -> newer by version",
+      (b["version"], b["now"], b["newer"]), ("21.0.11", "21.0.12.1", True))
+june = img(TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.11+10"], created="2026-06-28T11:02:41Z")
+june["Architecture"] = "amd64"
+b = R.base_state({"image": "eclipse-temurin", "tag": "21-jre-jammy", "final": True}, june)
+check("base eclipse-temurin: the build of June carries 21.0.11 -> newer, with both versions",
+      (b["version"], b["now"], b["pushed"], b["newer"]), ("21.0.11", "21.0.12.1", "2026-10-17T05:17:32Z", True))
+R.list_tags, R.resolve_tag = caddy_tags, caddy_now
 skopeo_asked = []
 
 

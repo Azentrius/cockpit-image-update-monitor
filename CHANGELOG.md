@@ -1,12 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.18.1 – 2026-10-18
+
+The history fills versions the radar finds later, and an image built on Eclipse Temurin says which Java
+version it carries.
 
 - **History: versions the radar finds later.** An update of an image whose version only the radar
   can tell (`ollama:latest`, an image with a version label) recorded no new version, because the
   radar names a new image a few minutes after the update. The history kept showing “0.30.11 → ?” or no
   versions at all. The backups tab now fills a missing version from the radar's last run for that image ID; the
   history file itself stays as written.
+- **Fix: Java version of an Eclipse Temurin base.** For an image built on the server from
+  `eclipse-temurin:21-jre-jammy` the radar could only tell that the base was published after the
+  build, not which Java version the build carries: Temurin names its release
+  `JAVA_VERSION=jdk-21.0.12.1+1`, which the helpers did not read. The `jdk-` is now skipped, so the
+  base line says what the build carries (21.0.12.1, as the tag `21.0.12.1_1-jre-jammy` reads), and a
+  build on an older Java counts as behind its base even when it was made after the push from a cached
+  base (without `--pull`). A container of `eclipse-temurin` itself gets its version from the variable
+  too. Found on a host with a Java app built on Temurin.
 
 ## 0.18.0 – 2026-10-18
 

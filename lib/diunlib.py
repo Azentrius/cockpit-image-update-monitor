@@ -14,7 +14,7 @@ Version vocabulary used everywhere:
 import re
 
 TAG_RE = re.compile(r"^(?P<prefix>[^0-9]*)(?P<ver>[0-9]+(?:\.[0-9]+)*)(?P<suffix>.*)$")
-CORE_RE = re.compile(r"^(?:[0-9]+:)?v?([0-9]+(?:\.[0-9]+)+)")   # >= 2 numeric blocks, Debian epoch "1:" skipped
+CORE_RE = re.compile(r"^(?:[0-9]+:|jdk-)?v?([0-9]+(?:\.[0-9]+)+)")   # >= 2 numeric blocks, Debian epoch "1:" and "jdk-" skipped
 PLAIN_RE = re.compile(r"^v?([0-9]+(?:\.[0-9]+){1,3})$")     # 1.2 / v1.2.3 / 1.2.3.4
 
 # Images whose version variable is not called <NAME>_VERSION.
@@ -24,6 +24,7 @@ ENV_ALIASES.update({
     "mariadb": ("MARIADB_VERSION",),
     "mysql": ("MYSQL_VERSION",),
     "percona-server": ("PS_VERSION", "MYSQL_VERSION"),
+    "eclipse-temurin": ("JAVA_VERSION",),
 })
 
 
@@ -73,7 +74,10 @@ def nums_of(version):
 def core(value):
     """'v6.2.0' -> '6.2.0', '17.10-1.pgdg12+1' -> '17.10', 'master' / '16' -> None.
     The official mariadb image names its package version with the Debian
-    epoch: MARIADB_VERSION=1:11.8.9+maria~ubu2404 -> '11.8.9'."""
+    epoch: MARIADB_VERSION=1:11.8.9+maria~ubu2404 -> '11.8.9'. Eclipse
+    Temurin names its release, in the JRE images too, with "jdk-" and the
+    build: JAVA_VERSION=jdk-21.0.12.1+1 -> '21.0.12.1', as the tag
+    21.0.12.1_1-jre-jammy reads."""
     m = CORE_RE.match((value or "").strip())
     return m.group(1) if m else None
 
