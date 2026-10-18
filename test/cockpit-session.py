@@ -12,7 +12,9 @@ containers). Playwright drives Chromium through Cockpit's own login and shell:
      session, then a new login: the new version and its texts (i18n.js);
   3. the page found in Cockpit's menu and loaded; at the end, no JavaScript
      error and no failed request of the add-on's files or frame in any
-     session, and no error of another kind than the baseline's;
+     session with this build, and no error of another kind than the
+     baseline's (the release before is reported apart: its errors are its
+     own, this build may have fixed them);
   4. requirements from the page: skopeo installed, the radar set up
      (diun-radar.timer on, a first run), then "Run radar now" (a new run);
   5. the compose project of test/cockpit-setup.sh: "Roll out image", its
@@ -46,7 +48,8 @@ os.makedirs(OUT, exist_ok=True)
 
 report = {"environment": {}, "steps": [], "errors": [], "addon_files": []}
 failed = False
-errors = []          # [kind, text, url, user]
+errors = []          # [kind, text, url, user, phase]
+PHASE = {"now": "baseline"}  # baseline, release before, this build
 OURS = "/image-updates/"  # the add-on's files and frame (the shell's route has no slash after it)
 responses = []       # [url, status] of the add-on's own files
 shots = 0
@@ -76,15 +79,15 @@ def shot(page, name):
 
 def watch(page, who):
     page.on("console", lambda m: m.type == "error" and errors.append(
-        ["console", m.text, (m.location or {}).get("url", ""), who]))
-    page.on("pageerror", lambda e: errors.append(["pageerror", f"{e.message}\n{e.stack or ''}", "", who]))
-    page.on("requestfailed", lambda r: errors.append(["requestfailed", r.failure or "", r.url, who]))
+        ["console", m.text, (m.location or {}).get("url", ""), who, PHASE["now"]]))
+    page.on("pageerror", lambda e: errors.append(["pageerror", f"{e.message}\n{e.stack or ''}", "", who, PHASE["now"]]))
+    page.on("requestfailed", lambda r: errors.append(["requestfailed", r.failure or "", r.url, who, PHASE["now"]]))
 
     def response(r):
         if "/image-updates/" in r.url:
             responses.append([r.url, r.status])
         if r.status >= 400:
-            errors.append([f"http {r.status}", "", r.url, who])
+            errors.append([f"http {r.status}", "", r.url, who, PHASE["now"]])
     page.on("response", response)
 
 
@@ -233,6 +236,7 @@ def main():
 
         # 1. + 2. The release before, then this build over it: reload, new login.
         if old:
+            PHASE["now"] = "release before"
             root("apt-get", "install", "-y", "-q", old)
             ctx, page = login(browser, E["ADMIN_USER"], E["ADMIN_PW"])
             note("administrator: administrative access", admin_access(page, E["ADMIN_PW"]))
@@ -244,6 +248,7 @@ def main():
             note("this build installed over it (apt)",
                  root("dpkg-query", "-W", "-f", "${Version}", "cockpit-image-update-monitor").startswith(E["NEW_VERSION"]),
                  root("dpkg-query", "-W", "-f", "${Version}", "cockpit-image-update-monitor"))
+            PHASE["now"] = "this build"
             page.reload()
             frame = page.frame_locator(FRAME)
             frame.locator("#dm-sig-version").wait_for()
@@ -252,6 +257,7 @@ def main():
                  version_of(frame))
             ctx.close()
         else:
+            PHASE["now"] = "this build"
             root("apt-get", "install", "-y", "-q", new)
             note("no older release to upgrade from: this build installed fresh (apt)", True)
 
@@ -351,13 +357,16 @@ except Exception as e:      # a step that could not even run counts as failed
     except Exception:
         pass
 
-ours = [x for x in errors if OURS in x[1] + x[2]]
+build = [x for x in errors if x[4] == "this build"]
+before = [x for x in errors if x[4] == "release before" and kind(x) not in BASELINE]
+ours = [x for x in build if OURS in x[1] + x[2]]
 note("no JavaScript error and no failed request of the add-on's files or frame", not ours,
-     "; ".join(f"{k} {u} {t[:120]}" for k, t, u, _ in ours)[:600])
-other = [x for x in errors if x not in ours and kind(x) not in BASELINE]
+     "; ".join(f"{k} {u} {t[:120]}" for k, t, u, _, _ in ours)[:600])
+other = [x for x in build if x not in ours and kind(x) not in BASELINE]
 note("no other error in Cockpit than those it shows without the add-on", not other,
-     "; ".join(f"{k} {u} {t[:120]}" for k, t, u, _ in other)[:600]
-     or f"{len(errors) - len(ours)} errors, all of kinds Cockpit shows on its own")
+     "; ".join(f"{k} {u} {t[:120]}" for k, t, u, _, _ in other)[:600]
+     or f"{len(build)} errors with this build, all of kinds Cockpit shows on its own")
+report["release_before_errors"] = sorted({f"{k} {u or t[:100]}" for k, t, u, _, _ in before})
 report["errors"] = errors
 report["addon_files"] = sorted({u.split("/image-updates/", 1)[1] + f" {s}" for u, s in responses})
 with open(os.path.join(OUT, "report.json"), "w") as f:
@@ -367,6 +376,8 @@ md += [f"| {k} | {v} |" for k, v in report["environment"].items()]
 md += ["", "| Step | Result |", "|---|---|"]
 md += [f"| {s['step']} | {'ok' if s['ok'] else 'FAILED'}{': ' + s['detail'] if s['detail'] else ''} |"
        for s in report["steps"]]
+md += ["", "Errors with the release before, beyond the baseline (its own, not this build's): "
+       + ("; ".join(report["release_before_errors"]) or "none")]
 md += ["", "Errors Cockpit shows on its own, before the add-on is installed (the baseline): "
        + ("; ".join(sorted({f"{k} {u or t[:80]}" for k, t, u in BASELINE})) or "none")]
 with open(os.path.join(OUT, "report.md"), "w") as f:
