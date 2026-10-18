@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **History: versions the radar finds later.** An update of an image whose version only the radar
+  can tell (`ollama:latest`, an image with a version label) recorded no new version, because the
+  radar names a new image a few minutes after the update. The history kept showing “0.30.11 → ?” or no
+  versions at all. The backups tab now fills a missing version from the radar's last run for that image ID; the
+  history file itself stays as written.
+
 ## 0.18.0 – 2026-10-18
 
 Images without a registry version say more: a development build shows its commit, and an image built

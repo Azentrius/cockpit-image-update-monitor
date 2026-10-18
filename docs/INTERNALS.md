@@ -366,7 +366,9 @@ rollback marks the operation with `rolled_back`, `rollback_ts` and `rollback_sta
 
 - `from_version` / `to_version` (since 0.7.0): the tag or the app's version variable of the old and
   the new image (`diunlib.local_version`), otherwise what the radar found for that image ID
-  (label / digest), otherwise `null`. Older entries do not have them; the plugin shows “—”.
+  (label / digest), otherwise `null`. Older entries do not have them; the plugin shows “—”. Since the
+  radar names a new image only after the update, `backups` fills a `null` version from the radar's
+  `installed` entry for `old_id` / `new_id` (the history file stays as written).
 - `reason` (since 0.8.0): on a failed update, the same object as in `@@RESULT`. A failed rollback adds
   `rollback_reason` with the line that marks it rolled back. The backups tab shows the cause under the
   result (the rollback's if it failed, otherwise the update's).
