@@ -17,6 +17,13 @@ IMG=$REG/imgupd-ui/app:1
 DIR=/opt/imgupd-ui
 REGISTRY_IMAGE=${REGISTRY_IMAGE:-registry:2.8.3}
 
+# pam_nologin refuses every login but root's while one of these exists (a CI image may keep it).
+for f in /run/nologin /etc/nologin; do
+    if [ -e "$f" ]; then
+        echo "removing $f" >&2
+        rm -f "$f"
+    fi
+done
 useradd -m -s /bin/bash -G sudo "$ADMIN_USER"
 useradd -m -s /bin/bash "$PLAIN_USER"
 printf '%s:%s\n%s:%s\n' "$ADMIN_USER" "$ADMIN_PW" "$PLAIN_USER" "$PLAIN_PW" | chpasswd

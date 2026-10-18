@@ -303,6 +303,17 @@ jobs:
           printf 'ADMIN_USER=imgadmin\nADMIN_PW=%s\nPLAIN_USER=imgplain\nPLAIN_PW=%s\n' "$admin_pw" "$plain_pw" >> "$GITHUB_ENV"
           sudo env ADMIN_USER=imgadmin ADMIN_PW="$admin_pw" PLAIN_USER=imgplain PLAIN_PW="$plain_pw" \
             sh test/cockpit-setup.sh >> "$GITHUB_ENV"
+          sudo passwd -S imgadmin
+          sudo passwd -S imgplain
+          # Cockpit's own login (the same request its login page makes) for both users.
+          for user_pw in "imgadmin:$admin_pw" "imgplain:$plain_pw"; do
+            code=$(curl -sk -u "$user_pw" -o /dev/null -w '%{http_code}' https://localhost:9090/cockpit/login)
+            echo "login ${user_pw%%:*}: HTTP $code"
+            if [ "$code" != 200 ]; then
+              sudo journalctl --no-pager -n 60 | grep -iE "cockpit|pam|auth" || true
+              exit 1
+            fi
+          done
       - name: The add-on in Cockpit (test/cockpit-session.py)
         run: python test/cockpit-session.py cockpit-session
       - name: Report and logs
@@ -310,7 +321,7 @@ jobs:
         run: |
           mkdir -p cockpit-session
           [ ! -f cockpit-session/report.md ] || cat cockpit-session/report.md >> "$GITHUB_STEP_SUMMARY"
-          sudo journalctl -u cockpit.service -u diun-radar.service --no-pager -n 200 > cockpit-session/journal.txt || true
+          sudo journalctl --no-pager -n 2000 > cockpit-session/journal.txt || true
       - name: Keep screenshots, report and logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

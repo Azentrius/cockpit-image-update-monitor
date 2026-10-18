@@ -46,6 +46,7 @@ failed = False
 errors = []          # [kind, text, url, user]
 responses = []       # [url, status] of the add-on's own files
 shots = 0
+LAST = {"page": None}  # the page in use, for a screenshot when a step fails
 
 
 def note(name, ok, detail=""):
@@ -101,7 +102,11 @@ def login(browser, user, pw, locale="en-US"):
     page.fill("#login-user-input", user)
     page.fill("#login-password-input", pw)
     page.click("#login-button")
-    page.wait_for_selector("iframe", state="attached")
+    LAST["page"] = page
+    # Logged in (the shell loads a page in a frame), or Cockpit says why not.
+    page.wait_for_selector("iframe, #login-error-message:not(:empty)", state="attached")
+    if not page.locator("iframe").count():
+        raise RuntimeError(f"login of {user} refused: " + page.locator("#login-error-message").inner_text())
     return ctx, page
 
 
@@ -315,6 +320,10 @@ try:
     main()
 except Exception as e:      # a step that could not even run counts as failed
     note("the session ran to its end", False, f"{type(e).__name__}: {e}"[:600])
+    try:
+        LAST["page"] and shot(LAST["page"], "failed")
+    except Exception:
+        pass
 
 ours = [x for x in errors if "image-updates" in (x[1] + x[2])]
 note("no JavaScript error and no failed request of the add-on", not ours,
