@@ -27,22 +27,28 @@ make packages                    # .deb and .rpm in dist/ (needs dpkg-deb and rp
 python3 tools/preview/build.py   # the page with test data: tools/preview/out/diun/index.html?lang=en (or de)
 ```
 
-The offline tests need no Docker, no root and no network. The `test` workflow runs the lint, the
-tests and the package build on every push and pull request; it has to be green before a merge.
+The offline tests need no Docker, no root and no network. The plugin tests wait until the stubbed
+helpers have answered and the page has handled it (`settle()`, `flush()`), never for a number of
+milliseconds; a state in between is checked behind an answer the test releases itself. The `test`
+workflow runs the lint, the tests and the package build on every push and pull request; it has to be
+green before a merge.
 
 ## End-to-end test
 
 `test/e2e-server.sh` runs the real helpers as root against Docker: it recreates containers, writes
-dumps and pulls the Postgres, MariaDB and MySQL images it needs. Run it **only on a throw-away Docker
-host or VM, never on a host with production containers.**
+dumps, restores them into fresh database containers and pulls the Postgres, MariaDB, MySQL and
+registry images it needs. Run it **only on a throw-away Docker host or VM, never on a host with
+production containers.**
 
 ```bash
 sudo bash test/e2e-server.sh                      # helpers installed in /usr/lib/cockpit-image-updates
 sudo E2E_LIB="$PWD/lib" bash test/e2e-server.sh   # the helpers of this checkout, not installed
 ```
 
-It works in its own compose projects `imgupd-test` and `imgupd-test-my`, touches nothing else and
-cleans up on exit. CI runs it on a GitHub runner. A new flow in the helpers gets a section there.
+It works in its own compose projects `imgupd-test`, `imgupd-test-my` and `imgupd-test-reg` (with a
+local registry on port 5000, `E2E_REGISTRY_PORT`), touches nothing else and cleans up on exit. CI
+runs it on a GitHub runner on every push and before every release. A new flow in the helpers gets a
+section there.
 
 ## How the add-on is built
 

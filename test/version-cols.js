@@ -39,7 +39,9 @@ function boot(language, files, inv = inventory) {
     return w.document;
 }
 const FILES = { "/var/lib/diun-radar/versions.json": radar, "/var/lib/diun/events.jsonl": "", "/var/lib/diun/dismissed.json": null };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The stubbed helpers answer at once and the page has no timers of its own: one turn of the
+// event loop runs everything that follows from the answers, without waiting for milliseconds.
+const flush = () => new Promise((r) => setImmediate(r));
 const row = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector(".dm-name").textContent === name);
 const cells = (tr) => [...tr.querySelectorAll("td")];
 const levels = (td) => [...td.querySelectorAll(".dm-level")];
@@ -48,7 +50,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
 
 (async () => {
     const d = boot("de", FILES);
-    await sleep(60);
+    await flush();
     const heads = [...d.querySelectorAll("#dm-table thead th")].map((t) => t.textContent);
     console.log("cols:", heads.join(" | "));
     assert.deepStrictEqual(heads.slice(0, 6).join("|"), "Container|Image|Konfiguriert|Installiert|Neueste Version|Status");
@@ -120,7 +122,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     for (const [lang, start] of [["de", "Keine Versionsnummer: Das Image nennt nur den Quellstand, aus dem es gebaut wurde, " + REV + "."],
                                  ["en", "No version number: the image names only the source revision it was built from, " + REV + "."]]) {
         const r = boot(lang, FILES, withRev);
-        await sleep(60);
+        await flush();
         const cell = cells(row(r, "formbricks-app"))[3];
         console.log("revision " + lang + ":", cell.textContent.trim(), "|", cell.querySelector(".dm-ver").title.replace(/\n/g, " / "));
         assert.strictEqual(cell.textContent.trim(), "latest @35b2a97");
@@ -148,7 +150,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     const lr = boot("de", lineRadar({ version: "1.6.74", src: "digest", tag: "v1.6.74" },
         { "1.6.74": { patch: "v1.6.75", minor: "v1.8.8", major: null, status: "patch", as_tag: "v1.6.74" } },
         { tag_now: { digest: "sha256:now-v1.6", version: "1.6.75", tag: "v1.6.75" } }), lineInv);
-    await sleep(60);
+    await flush();
     c = cells(row(lr, "formbricks-cube"));
     console.log("line tag:", c.slice(2, 6).map((x) => x.textContent.trim()).join(" | "));
     assert.deepStrictEqual(c.slice(2, 4).map((x) => x.textContent.trim()), ["v1.6 = 1.6.75", "1.6.74"]);
@@ -157,7 +159,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
                            ["patch:update:Patch v1.6.75", "minor:tag:Minor v1.8.8"]);
     const lo = boot("de", lineRadar({ version: "1.6", src: "tag" },
         { "1.6": { patch: null, minor: "v1.8", major: null, status: "minor", as_tag: "v1.6" } }), lineInv);
-    await sleep(60);
+    await flush();
     assert.strictEqual(cells(row(lo, "formbricks-cube"))[3].textContent.trim(), "1.6", "an older radar: the tag's number");
     // The registry failed in the last run: the radar kept the release and its
     // patch from the run before, marked stale. The row still offers the patch
@@ -166,7 +168,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
         { "1.6.74": { patch: "v1.6.75", minor: "v1.8.8", major: null, status: "minor", as_tag: "v1.6.74" } },
         { stale: true, error: "registry down", status: "minor",
           by_tag: { patch: null, minor: null, major: null, status: "current" } }), lineInv);
-    await sleep(60);
+    await flush();
     c = cells(row(ls, "formbricks-cube"));
     console.log("line tag, registry down:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
     assert.strictEqual(c[3].textContent.trim(), "1.6.74");
@@ -196,7 +198,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     }
     assert.strictEqual(cells(row(d, "onlyoffice-ds"))[5].textContent.trim(), "Aktuell", "compared: up to date");
     const u = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": local });
-    await sleep(60);
+    await flush();
     c = cells(row(u, "onlyoffice-ds"));
     console.log("onlyoffice-ds unlisted:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
     assert.deepStrictEqual(c.slice(3, 6).map((x) => x.textContent.trim()), ["9.4.0.1", "nicht in einer Registry", "Unbekannt"]);
@@ -208,7 +210,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Registry-Fehler", "Unbekannt"]);
     assert(c[4].querySelector(".dm-muted").title.endsWith("der nächste Lauf versucht es erneut.\nregistry timeout"));
     const ue = boot("en", { ...FILES, "/var/lib/diun-radar/versions.json": local });
-    await sleep(60);
+    await flush();
     c = cells(row(ue, "onlyoffice-ds"));
     assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["not in a registry", "Unknown"]);
     tip = c[4].querySelector(".dm-muted").title;
@@ -227,7 +229,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
         digest: "sha256:aafc772384232497bed875e1eb66b4d3e54ba1ebc86e2e185a6dc1dbc48182ef", version: null, tag: null,
         pushed: "2026-10-13T05:15:45Z", after: { tag: "5.1.0", pushed: "2026-09-21T03:04:04Z" } } });
     const b = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
-    await sleep(60);
+    await flush();
     c = cells(row(b, "smtp-relay"));
     console.log("smtp-relay, build after a release:", c.slice(2, 6).map((x) => x.textContent.trim()).join(" | "));
     assert.deepStrictEqual(c.slice(2, 6).map((x) => x.textContent.trim()), ["latest", "?", "Build nach 5.1.0", "Aktuell"]);
@@ -239,19 +241,19 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     // the tag moved on to another build: the note stays, the status is unknown
     pf.tag_now.digest = "sha256:" + "9".repeat(64);
     const m = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
-    await sleep(60);
+    await flush();
     c = cells(row(m, "smtp-relay"));
     assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Build nach 5.1.0", "Unbekannt"]);
     assert(c[4].querySelector(".dm-muted").title.endsWith("\nDer Container läuft auf einem anderen Build von latest."));
     // a newer release than the one the radar noted: the newest release again
     pf.newest = "5.2.0";
     const r2 = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
-    await sleep(60);
+    await flush();
     assert.deepStrictEqual(cells(row(r2, "smtp-relay")).slice(4, 6).map((x) => x.textContent.trim()), ["neueste: 5.2.0", "Unbekannt"]);
     pf.newest = "5.1.0";
     pf.tag_now.digest = "sha256:aafc772384232497bed875e1eb66b4d3e54ba1ebc86e2e185a6dc1dbc48182ef";
     const be = boot("en", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
-    await sleep(60);
+    await flush();
     c = cells(row(be, "smtp-relay"));
     assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["build after 5.1.0", "Up to date"]);
     tip = c[4].querySelector(".dm-uptodate").title;
@@ -271,7 +273,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
         return { ...FILES, "/var/lib/diun-radar/versions.json": r };
     };
     let bb = boot("de", bases(true));
-    await sleep(60);
+    await flush();
     c = cells(row(bb, "prod-mcp-1"));
     console.log("built here, newer base:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
     assert.deepStrictEqual(c.slice(3, 6).map((x) => x.textContent.trim()), ["?", "Basis neuer: caddy:2 = 2.11.7", "Neue Version"]);
@@ -285,7 +287,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     assert.strictEqual(iconOf(c[4]), "info-circle");
     // every base older than the build: up to date, though the version is unknown
     bb = boot("de", bases(false));
-    await sleep(60);
+    await flush();
     c = cells(row(bb, "prod-mcp-1"));
     assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Basis aktuell", "Aktuell"]);
     assert.strictEqual(iconOf(c[4]), "check-circle");
@@ -295,10 +297,10 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     errs["/var/lib/diun-radar/versions.json"].images.find((x) => x.image === "ghcr.io/cbcoutinho/nextcloud-mcp-server").base
         .forEach((x) => { Object.keys(x).filter((k) => !["image", "tag", "final"].includes(k)).forEach((k) => delete x[k]); x.error = "registry down"; });
     bb = boot("de", errs);
-    await sleep(60);
+    await flush();
     assert.deepStrictEqual(cells(row(bb, "prod-mcp-1")).slice(4, 6).map((x) => x.textContent.trim()), ["Basis nicht geprüft", "Unbekannt"]);
     bb = boot("en", bases(true, { pinned: true, newer: false }));
-    await sleep(60);
+    await flush();
     c = cells(row(bb, "prod-mcp-1"));
     assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["base newer: caddy:2-builder = 2.11.7", "New version"],
                            "a pinned base never counts; the build stage does");
@@ -306,7 +308,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
 
     // English
     const e = boot("en", FILES);
-    await sleep(60);
+    await flush();
     const eh = [...e.querySelectorAll("#dm-table thead th")].map((t) => t.textContent).slice(2, 5);
     console.log("EN cols:", eh.join(" | "), "| ollama tip:", cells(row(e, "ollama"))[3].querySelector(".dm-ver").title.split("\n")[0]);
     assert.deepStrictEqual(eh.join("|"), "Configured|Installed|Newest version");
@@ -315,7 +317,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
 
     // no radar file: legend hidden, installed from inventory still shown
     const n = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": null });
-    await sleep(60);
+    await flush();
     assert(n.getElementById("dm-legend").hidden);
     assert.strictEqual(cells(row(n, "glitchtip-web"))[3].textContent.trim(), "6.1.8");
     assert.strictEqual(cells(row(n, "ollama"))[3].textContent.trim(), "?");
