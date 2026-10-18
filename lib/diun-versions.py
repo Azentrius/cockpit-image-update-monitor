@@ -729,6 +729,25 @@ def tag_now_cache(prev):
             if isinstance(r, dict) and isinstance(r.get("tag_now"), dict)}
 
 
+def kept_installed(old, new):
+    """`installed` of a record whose registry failed this run: the new entry
+    per image ID, except where it only guessed from the tag. Without the tag
+    list a line tag (v1.6) cannot be told from an exact one, so its number
+    (1.6) stands in for the release; the previous run's entry for the same
+    image ID wins then when it names that release (1.6.74) or the same
+    number. An entry from the label, a variable or the digest cache stays,
+    and nothing moves to another image ID."""
+    out = dict(old or {})
+    for iid, e in (new or {}).items():
+        o = out.get(iid)
+        guess = isinstance(e, dict) and e.get("src") == "tag" and e.get("version")
+        ov = o.get("version") if isinstance(o, dict) else None
+        if guess and ov and (ov == e["version"] or ov.startswith(e["version"] + ".")):
+            continue
+        out[iid] = e
+    return out
+
+
 def keep_last_good(recs, prev):
     """A registry hiccup must not wipe known results: for every record that
     failed this run, reuse the previous good result and mark it stale. That
@@ -742,7 +761,7 @@ def keep_last_good(recs, prev):
             merged = dict(old)
             merged.update(containers=r["containers"], db=r["db"], reach=r["reach"], stale=True,
                           error=r["error"], checked=old.get("checked"),
-                          installed={**(old.get("installed") or {}), **r["installed"]})
+                          installed=kept_installed(old.get("installed"), r["installed"]))
             out.append(merged)
         else:
             out.append(r)

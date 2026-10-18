@@ -426,6 +426,37 @@ exact = R.analyse((("postgres", "16.14-alpine"), {"containers": ["x"], "images":
                   {}, now)
 check("an exact tag with two numbers: the tag, no digest search, no tag_now",
       (exact["installed"]["idp"], hub_calls, "tag_now" in exact), ({"version": "16.14", "src": "tag"}, [], False))
+
+# The registry fails for a line tag that was resolved before. Without the tag
+# list the radar cannot tell the line from an exact tag and reads 1.6 from it;
+# merged with the last good run, the same image ID keeps 1.6.74 and the patch
+# it had, marked stale. Before, the guess replaced it: installed 1.6, versions
+# only for 1.6.74, and the page fell back to by_tag.
+line_hits["sha256:c74"] = "v1.6.74"
+good = R.analyse(CUBE, {}, now)
+real_lt = R.list_tags
+R.list_tags = lambda repo: (_ for _ in ()).throw(RuntimeError("registry down")) if repo == "cubejs/cube" else real_lt(repo)
+down = R.keep_last_good([R.analyse(CUBE, R.digest_cache([good]), now)], [good])[0]
+check("registry down: the same image keeps its release and its patch, marked stale",
+      ({k: down["installed"]["idc"][k] for k in ("version", "src")}, down["versions"]["1.6.74"]["patch"],
+       down["stale"], down["error"], down["status"]),
+      ({"version": "1.6.74", "src": "digest"}, "v1.6.75", True, "registry down", "minor"))
+moved = (("cubejs/cube", "v1.6"), {"containers": ["formbricks-cube"],
+                                   "images": {"idc2": img(digests=["cubejs/cube@sha256:c75"])}})
+other = R.keep_last_good([R.analyse(moved, R.digest_cache([good]), now)], [good])[0]
+check("registry down, another image ID meanwhile: no release taken over, the tag's number",
+      (other["installed"]["idc2"], other["stale"]), ({"version": "1.6", "src": "tag"}, True))
+check("registry down: a new version from the label or a variable is not overruled",
+      R.kept_installed({"x": {"version": "1.6.74", "src": "digest"}, "y": {"version": "1.6", "src": "tag", "digest_ts": "t"}},
+                       {"x": {"version": "1.6.80", "src": "label"}, "y": {"version": "1.6", "src": "tag"}}),
+      {"x": {"version": "1.6.80", "src": "label"}, "y": {"version": "1.6", "src": "tag", "digest_ts": "t"}})
+R.list_tags = real_lt
+CUBE_TAGS.append("v1.6.76")
+hub_calls.clear()
+back = R.keep_last_good([R.analyse(CUBE, R.digest_cache([down]), now)], [down])[0]
+check("registry back: fresh comparison for the kept release, not stale, no new digest search",
+      (back["installed"]["idc"]["version"], back["versions"]["1.6.74"]["patch"], "stale" in back, hub_calls),
+      ("1.6.74", "v1.6.76", False, []))
 R.match_digest = fake_match
 
 # registry error keeps previous good record, marks it stale

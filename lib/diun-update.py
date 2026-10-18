@@ -1243,15 +1243,15 @@ def say_reason(reason):
 
 
 # ------------------------------------------------------------ operations ----
-_log_name = None         # logs/<name> to keep once the operation is recorded
+_log_name = None         # logs/<name> that keeps the output of this run
+_tee = None              # the Tee of the update or rollback that runs now (keep_output)
 _recorded = set()        # operations this process put into the history
 
 
 def record(entry, log=None):
     """Append to operations.jsonl (flushed to disk: what a rollback needs
     must survive a crash). log: the name under logs/ that keeps the output
-    of this run (see keep_output)."""
-    global _log_name
+    of this run (keep_log)."""
     ensure_base()
     fd = os.open(OPS, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a") as f:
@@ -1260,20 +1260,40 @@ def record(entry, log=None):
         os.fsync(f.fileno())
     _recorded.add(entry.get("id"))
     if log:
-        _log_name = log
+        keep_log(log)
+
+
+def keep_log(name):
+    """From here on the output of this run goes to logs/<name> as it is
+    printed, starting with what was printed before; each call flushes it to
+    disk (see Tee)."""
+    global _log_name
+    _log_name = name
+    if _tee:
+        _tee.to_file(os.path.join(LOGS, name))
+        _tee.sync()
 
 
 class Tee:
     """sys.stdout during update and rollback: everything goes through to the
-    caller as before, and a copy (up to LOG_MAX characters) is kept."""
+    caller as before, and a copy (up to LOG_MAX characters) is kept. Until
+    the run is in the history only in memory; from then on (to_file) also in
+    its log file, line by line as printed and without the @@RESULT line, so
+    a killed run keeps its output up to there. The file reaches the disk
+    (fsync) with every history line and at the end: after a power cut the
+    lines printed since the last history line can be missing, the history
+    line itself not."""
     def __init__(self, real):
         self.real, self.parts, self.size = real, [], 0
+        self.fd, self.path, self.rest = None, None, ""
 
     def write(self, s):
         self.real.write(s)
         if self.size < LOG_MAX:
             self.parts.append(s)
             self.size += len(s)
+            if self.fd is not None:
+                self.spill(s)
         return len(s)
 
     def flush(self):
@@ -1282,47 +1302,80 @@ class Tee:
     def __getattr__(self, name):
         return getattr(self.real, name)
 
+    def spill(self, s):
+        """Complete lines to the file; an unfinished one waits for its end."""
+        text = self.rest + s
+        cut = text.rfind("\n") + 1
+        self.rest = text[cut:]
+        lines = [ln for ln in text[:cut].splitlines(True) if not ln.startswith("@@RESULT ")]
+        if lines:
+            self.put("".join(lines))
 
-def save_log(name, text):
-    """logs/<name>, root only, written atomically, without the @@RESULT line."""
-    ensure_base()
-    path = os.path.join(LOGS, name)
-    lines = [ln for ln in text.splitlines(True) if not ln.startswith("@@RESULT ")]
-    fd = os.open(path + ".part", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.writelines(lines)
-    os.replace(path + ".part", path)
+    def put(self, text):
+        data = text.encode("utf-8", "replace")
+        while data:
+            data = data[os.write(self.fd, data):]
+
+    def to_file(self, path):
+        """Write to path from now on, what was printed so far first (root
+        only). A file that is there already, the output of a rollback that
+        failed before, stays: this run's output follows a marker line."""
+        if self.fd is not None:
+            return
+        ensure_base()
+        self.fd, self.path = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), path
+        if os.fstat(self.fd).st_size:
+            with open(path, "rb") as f:
+                f.seek(-1, os.SEEK_END)
+                ends = f.read(1) == b"\n"
+            self.put(("" if ends else "\n") + pick("--- Erneuter Versuch ---\n", "--- Tried again ---\n"))
+        self.spill("".join(self.parts))
+
+    def sync(self):
+        if self.fd is not None:
+            os.fsync(self.fd)
+
+    def close(self, keep=True):
+        """End of the run: the unfinished last line and, if the output was
+        cut, a note. keep=False removes the file: a run that took back what
+        it did keeps no output."""
+        if self.fd is None:
+            return
+        try:
+            if keep:
+                tail = "" if self.rest.startswith("@@RESULT ") else self.rest
+                if self.size >= LOG_MAX:
+                    tail += "\n[output cut at %d KiB]\n" % (LOG_MAX // 1024)
+                if tail:
+                    self.put(tail)
+                os.fsync(self.fd)
+        finally:
+            os.close(self.fd)
+            self.fd, self.rest = None, ""
+            if not keep:
+                try:
+                    os.unlink(self.path)
+                except OSError:
+                    pass
 
 
 def keep_output(fn, *args, **kw):
     """Run update or rollback and keep its output with the history:
-    logs/<op-id>.log and logs/<op-id>.rollback.log. An update that stops
-    before any change records nothing, so no output is kept either. A
-    rollback tried again after a failure adds its output to the first one's."""
-    global _log_name
+    logs/<op-id>.log and logs/<op-id>.rollback.log, written as printed once
+    the run is in the history (Tee). An update that stops before any change
+    records nothing, so no output is kept either. A rollback tried again
+    after a failure adds its output to the first one's."""
+    global _log_name, _tee
     tee = Tee(sys.stdout)
-    sys.stdout, _log_name = tee, None
+    sys.stdout, _log_name, _tee = tee, None, tee
     try:
         return fn(*args, **kw)
     finally:
-        sys.stdout = tee.real
-        if _log_name:
-            text = "".join(tee.parts)
-            if tee.size >= LOG_MAX:
-                text += "\n[output cut at %d KiB]\n" % (LOG_MAX // 1024)
-            try:
-                with open(os.path.join(LOGS, _log_name), errors="replace") as f:
-                    before = f.read()
-            except OSError:
-                before = ""
-            if before:
-                text = (before + ("" if before.endswith("\n") else "\n")
-                        + pick("--- Erneuter Versuch ---\n", "--- Tried again ---\n") + text)
-            try:
-                save_log(_log_name, text)
-            except OSError:
-                pass
-            _log_name = None
+        sys.stdout, _tee, _log_name = tee.real, None, None
+        try:
+            tee.close()
+        except OSError:
+            pass
 
 
 def cmd_log(op_id):
@@ -1438,6 +1491,8 @@ def drop_run(op):
     if op["id"] in _recorded:
         record({"id": op["id"], "status": "discarded"})
         _log_name = None
+        if _tee:
+            _tee.close(keep=False)
 
 
 def change_files(op, ctx, retag, services, st):
@@ -1749,6 +1804,8 @@ def cmd_rollback(op_id):
             raise
         for x in pending:
             say(f"Wiederhergestellt: {x['path']}", f"Restored: {x['path']}")
+    # The containers change from here on: the output goes to the log as printed.
+    keep_log(op_id + ".rollback.log")
     run(["docker", "tag", rb, op["image"]])
     ok, reason = False, None
     try:

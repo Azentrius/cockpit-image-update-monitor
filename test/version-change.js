@@ -73,10 +73,12 @@ function boot(language, script) {
             if (!s) return Promise.reject(new Error("unscripted " + cmd.join(" ")));
             const r = typeof s === "function" ? s(cmd) : s;
             let cb = null;
-            const p = new Promise((resolve, reject) => setTimeout(() => {
+            // r.gate: a promise the answer waits for, so a test can check the
+            // state in between at a fixed point instead of after a few ms.
+            const p = new Promise((resolve, reject) => Promise.resolve(r.gate).then(() => setTimeout(() => {
                 (r.chunks || []).forEach((c) => cb && cb(c));
                 r.fail ? reject(r.fail) : resolve(r.out ?? "");
-            }, r.delay || 10));
+            }, r.delay || 10)));
             p.stream = (f) => { cb = f; return p; };
             return p;
         },
@@ -168,13 +170,23 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     const runOk = { chunks: ["Changing …\n", "@@RESULT " + JSON.stringify({ op: "20261015-101500-plausible", status: "ok",
         rollback: REPO + ":rollback-20261015-101500", dumps: [], from_version: "2.1.4", to_version: "2.1.5",
         image: REPO + ":v2.1.5", backup: "/var/backups/image-updates/compose/plausible/20261015-101500" }) + "\n"] };
-    const c = boot("de", { ...BASE, "diun-update.py retag": (cmd) => DRY()(cmd) || runOk });
+    // The dry-run and the run answer only when the test opens their gate: the
+    // states while they run are checked at fixed points (a slow host could
+    // otherwise get the answer before a 5 ms wait was over).
+    let openDry, openRun;
+    const dryGate = new Promise((r) => { openDry = r; });
+    const runGate = new Promise((r) => { openRun = r; });
+    const c = boot("de", { ...BASE, "diun-update.py retag": (cmd) => {
+        const dry = DRY()(cmd);
+        return dry ? { ...dry, gate: dryGate } : { ...runOk, gate: runGate };
+    } });
     await sleep(80);
     rowOf(c.d, "plausible").querySelector('button.dm-level-btn[data-tag="v2.1.5"]').click();
     await sleep(5);
     assert.strictEqual(c.$("dm-retag-select").value, "v2.1.5", "the level's tag is chosen");
     assert.strictEqual(c.$("dm-retag-preview").textContent, "Die Änderung wird geprüft …");
     assert(c.$("dm-dialog-confirm").disabled, "no confirm while planning");
+    openDry();
     await sleep(40);
     const dry = c.last("retag");
     console.log("\ndry-run:", JSON.stringify(dry.cmd.slice(1)), dry.opts.superuser);
@@ -195,6 +207,7 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     cf.click();
     await sleep(5);
     assert(c.$("dm-retag-select").disabled && c.$("dm-dump-check").disabled, "the choice is fixed while it runs");
+    openRun();
     await sleep(60);
     const run = c.last("retag");
     console.log("run    :", JSON.stringify(run.cmd.slice(1)), run.opts.superuser);
