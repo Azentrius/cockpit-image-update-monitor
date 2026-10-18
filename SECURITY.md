@@ -37,14 +37,21 @@ is a development state, not a supported installation.
 To stay on a supported version, upgrade to the newest release:
 
 ```bash
-# From packages.azentrius.de (see README)
+# From packages.azentrius.de (Debian, Ubuntu, Fedora, RHEL; see README)
 sudo apt update && sudo apt install cockpit-image-update-monitor   # Debian, Ubuntu
-sudo dnf upgrade cockpit-image-update-monitor                      # Fedora, RHEL, openSUSE
+sudo dnf upgrade cockpit-image-update-monitor                      # Fedora, RHEL
 
-# From the release assets: check the download, then install it
+# From the files of the release (every system; on openSUSE the only way):
+# check the download first, then install it
 sha256sum --ignore-missing -c SHA256SUMS
 gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor
+sudo apt install ./cockpit-image-update-monitor_X.Y.Z-1_all.deb                              # Debian, Ubuntu
+sudo dnf install ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm                           # Fedora, RHEL
+sudo zypper install --allow-unsigned-rpm ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm   # openSUSE
 ```
+
+The `.rpm` of a release carries no package signature; the two checks take its place (README,
+“Install, update, uninstall”).
 
 ## How fixes are announced
 

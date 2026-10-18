@@ -102,17 +102,20 @@ jobs:
             echo
             echo "### Install"
             echo
-            echo "From the Azentrius package repository: set up https://packages.azentrius.de once, then install Image Update Monitor in Cockpit under Applications, or with \`sudo apt install cockpit-image-update-monitor\` or \`sudo dnf install cockpit-image-update-monitor\`. The repository takes this release within an hour."
+            echo "From the Azentrius package repository (Debian, Ubuntu, Fedora, RHEL): set up https://packages.azentrius.de once, then install Image Update Monitor in Cockpit under Applications, or with \`sudo apt install cockpit-image-update-monitor\` or \`sudo dnf install cockpit-image-update-monitor\`. The repository takes this release within an hour. It has no openSUSE packages."
             echo
-            echo "From the files of this release: Debian and Ubuntu \`sudo apt install ./$deb\`, Fedora and RHEL \`sudo dnf install ./$rpm\`, openSUSE \`sudo zypper install --allow-unsigned-rpm ./$rpm\`."
-            echo "The package takes over an installation made with install.sh (up to 0.11)."
-            echo
-            echo "Check the download against \`SHA256SUMS\`, and that it was built by this repository's release workflow:"
+            echo "From the files of this release (every system; on openSUSE the only way): download the package and \`SHA256SUMS\`, check that the download is complete and that this repository's release workflow built it, then install it:"
             echo
             echo '```sh'
             echo "sha256sum --ignore-missing -c SHA256SUMS"
             echo "gh attestation verify <file> --repo $GITHUB_REPOSITORY"
+            echo
+            echo "sudo apt install ./$deb                              # Debian, Ubuntu"
+            echo "sudo dnf install ./$rpm                           # Fedora, RHEL"
+            echo "sudo zypper install --allow-unsigned-rpm ./$rpm   # openSUSE"
             echo '```'
+            echo
+            echo "The \`.rpm\` carries no package signature; the two checks take its place. The package takes over an installation made with install.sh (up to 0.11)."
           } >> notes.md
 
       - name: Create the release

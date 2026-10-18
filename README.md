@@ -453,8 +453,17 @@ Containers not started by Compose are shown, but not updated.
 
 ## Install, update, uninstall
 
-**From the Azentrius package repository.** Set up [packages.azentrius.de](https://packages.azentrius.de)
-once:
+Two ways, the same package:
+
+| | Debian, Ubuntu | Fedora, RHEL | openSUSE |
+|---|---|---|---|
+| [Azentrius package repository](https://packages.azentrius.de) (`apt`, `dnf`) | yes | yes (set-up tested on Fedora; RHEL derivatives use the same `dnf` set-up, untested) | no |
+| [Release files](https://github.com/Azentrius/cockpit-image-update-monitor/releases), checked first | yes | yes | yes, the only way (`zypper`) |
+
+Which systems are tested how: [Supported systems](#supported-systems).
+
+**From the Azentrius package repository** (Debian, Ubuntu, Fedora, RHEL). Set up
+[packages.azentrius.de](https://packages.azentrius.de) once:
 
 ```bash
 # Debian and Ubuntu
@@ -467,25 +476,28 @@ sudo rpm --import https://packages.azentrius.de/azentrius.asc
 sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
 ```
 
-On openSUSE (untested, see [Supported systems](#supported-systems)) install the `.rpm` of a release with
-`sudo zypper install --allow-unsigned-rpm ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm` after
-checking it as described below.
-
 Then install **Image Update Monitor** in Cockpit under **Applications** (with administrative access), or on the
 console with `sudo apt install cockpit-image-update-monitor` or `sudo dnf install cockpit-image-update-monitor`. The
 system's updates keep it current. The repository takes a package only after checking that this
-repository's release workflow built it.
+repository's release workflow built it, and signs it.
 
-**From a release.** Every [release](https://github.com/Azentrius/cockpit-image-update-monitor/releases) has the
-`.deb` and the `.rpm`, `SHA256SUMS` and a signed build provenance (`X.Y.Z` is the version):
+**From the files of a release** (every system; on openSUSE the only way). Every
+[release](https://github.com/Azentrius/cockpit-image-update-monitor/releases) has the `.deb` and the `.rpm`,
+`SHA256SUMS` and a signed build provenance. Download the package and `SHA256SUMS` into one folder,
+check both, then install (`X.Y.Z` is the version):
 
 ```bash
-sudo apt install ./cockpit-image-update-monitor_X.Y.Z-1_all.deb     # Debian, Ubuntu
-sudo dnf install ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm  # Fedora, RHEL
-sudo zypper install --allow-unsigned-rpm ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm  # openSUSE
-sha256sum --ignore-missing -c SHA256SUMS                     # check a download
-gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor   # built by the release workflow
+sha256sum --ignore-missing -c SHA256SUMS                                     # complete and unchanged
+gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor   # built by this repository's release workflow
+
+sudo apt install ./cockpit-image-update-monitor_X.Y.Z-1_all.deb                              # Debian, Ubuntu
+sudo dnf install ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm                           # Fedora, RHEL
+sudo zypper install --allow-unsigned-rpm ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm   # openSUSE
 ```
+
+The `.rpm` of a release carries no package signature (the repository signs its own copy): `zypper`
+needs `--allow-unsigned-rpm`, and the two checks above take the place of the signature. To update,
+do the same with the files of the newer release; the package manager replaces the installed version.
 
 The package puts the page into `/usr/share/cockpit/image-updates/`, the root helpers into `/usr/lib/cockpit-image-updates/` and the units `diun-radar` and `diun-cleanup` into `/usr/lib/systemd/system/` (off until you set them up). After an update it starts a radar run if the radar is set up. It also takes over an installation made with `install.sh` (up to 0.11): the old page in `/usr/share/cockpit/diun`, the old helpers in `/usr/local/lib/diun-radar` and the copies of the units in `/etc/systemd/system` go (a timer changed by hand stays and keeps overriding the package's), the `backup-*` folders of `install.sh` and all data stay, and timers that were on keep running.
 
@@ -512,7 +524,7 @@ sudo /usr/lib/cockpit-image-updates/diun-deps.sh install cleanup  # diun-cleanup
 **Uninstall**
 
 ```bash
-sudo apt remove cockpit-image-update-monitor      # or: sudo dnf remove cockpit-image-update-monitor
+sudo apt remove cockpit-image-update-monitor      # or: sudo dnf remove / sudo zypper remove cockpit-image-update-monitor
 ```
 
 This stops the timers and removes the page, the helpers and the units. On purpose it keeps the radar data (`/var/lib/diun-radar`), the dumps (`/var/backups/image-updates`), `/etc/image-updates.conf`, the rollback images and the Diun stack:
