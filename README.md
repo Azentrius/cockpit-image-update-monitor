@@ -293,6 +293,25 @@ If the project lies in a git repository, the dialog says so; the add-on never co
 
   A line that is not understood stops the cleanup with a message instead of guessing.
 
+**Time limits** (same file, since 0.19.0)
+
+| Limit | Default | Key | Allowed |
+|---|---|---|---|
+| One `docker compose pull`, `docker compose up` or `docker rmi` | 1800 s | `DOCKER_TIMEOUT` | 60–86400 |
+| One database dump | 14400 s (4 h) | `DUMP_TIMEOUT` | 60–172800 |
+
+- A command that does not end in time is stopped: its process group gets SIGTERM, ten seconds later
+  SIGKILL, and the helper waits for it, so the update lock is free again afterwards. The limit counts
+  for the whole command, also when it prints nothing at all.
+- **Pull or dump too slow:** the update stops before anything changed (exit 5); a partial dump is
+  removed. Docker may still finish a download it had started.
+- **`compose up` too slow:** the containers were already being changed. The update counts as failed
+  (exit 4) with its history, output and rollback, and the message says the containers may still be
+  changing: check `docker ps` before rolling back. Stopping the docker client does not stop what the
+  Docker daemon is doing.
+- Very large databases need a larger `DUMP_TIMEOUT`. A value outside the range, or not a number, stops
+  updates, rollbacks and the cleanup (exit 2) until it is fixed.
+
 **Restoring a dump (manually, with care)**
 
 A `pg_dumpall` dump creates roles and databases anew. It belongs in an **empty** Postgres instance. Restored into a running instance with the same databases, it gives “already exists” errors and mixed states. A proven way: stop the app, back up or rename the data volume, start the database container with an empty volume, then:
@@ -358,6 +377,7 @@ flowchart LR
 | `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run |
 | `lib/diun-deps.sh` | `/usr/lib/cockpit-image-updates/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
 | `lib/diunlib.py` | `/usr/lib/cockpit-image-updates/` | shared functions (tag scheme, version variables, reach) |
+| `lib/diunproc.py` | `/usr/lib/cockpit-image-updates/` | docker commands and dumps with a time limit (process group stopped, never left behind) |
 | `systemd/diun-radar.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install radar` enables the timer; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
 | `systemd/diun-cleanup.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install cleanup` enables the timer; runs daily (04:40) |
 | Diun stack | `/opt/diun/`, data `/var/lib/diun/` | created by `diun-deps.sh install diun`: Diun 4.33.0 + `docker-socket-proxy` (read-only), the script notifier writes JSON lines |
@@ -489,7 +509,7 @@ tail -n 5 /var/lib/diun/events.jsonl
 |---|---|
 | “Container inventory unavailable” | Switch on administrative access in Cockpit, otherwise check Docker. |
 | Column *Installed* shows `?` after an update | Label/digest come from the radar, which starts after every update and takes a few minutes. *Run radar now* or `diun-update.py radar` runs it again. |
-| “Cleanup rules: … not understood” | Fix the line in `/etc/image-updates.conf` (only `KEEP_DUMPS` and `ROLLBACK_IMAGE_DAYS`, numbers) or make it root-only (`chown root:root`, `chmod 644`). Until then nothing is deleted. |
+| “Cleanup rules: … not understood” | Fix the line in `/etc/image-updates.conf` (only `KEEP_DUMPS`, `ROLLBACK_IMAGE_DAYS`, `DOCKER_TIMEOUT` and `DUMP_TIMEOUT`, numbers in their range) or make it root-only (`chown root:root`, `chmod 644`). Until then nothing is deleted, and updates stop before they change anything. |
 | “Radar: no data yet” / “(outdated)” | Timer missing or not running: *Missing requirements* panel or `systemctl status diun-radar.timer`. |
 | “Registry error”, “(older data)” | Registry unreachable, rate limit or server error; the last good result stays visible and the next run tries again. |
 | “not in a registry”, status “Unknown” | No registry shows the image: it was built or tagged on the server (`build:` in the compose file, `docker build -t`), or it is private. The radar cannot find newer versions; update the image where it is built. |

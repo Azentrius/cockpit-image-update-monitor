@@ -74,11 +74,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import deque
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from diunlib import CI_JOB_RE, CI_RUNNER_RE, core, is_ci_job, local_version, nums_of, tag_digits  # noqa: E402
+from diunproc import Timeout, copy as copy_out, stream as stream_out  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
@@ -139,20 +139,22 @@ def run(cmd, check=True, capture=True, timeout=600):
 
 
 STREAM_TAIL = []          # last lines of the last stream() call, for the failure reason
+# Time limits in seconds (DOCKER_TIMEOUT, DUMP_TIMEOUT in /etc/image-updates.conf, load_limits):
+# one docker / docker compose command that streams (pull, up, rmi), one database dump.
+LIMITS = {"docker": 1800, "dump": 14400}
 
 
 def stream(cmd):
-    """Run a command, pass its output through to our stdout line by line and
-    keep the last lines in STREAM_TAIL."""
+    """Run a docker command, pass its output through to our stdout line by
+    line and keep the last lines in STREAM_TAIL. Ends after LIMITS["docker"]
+    seconds with diunproc.Timeout (the command stopped, STREAM_TAIL filled)."""
     print("+ " + " ".join(cmd), flush=True)
-    tail = deque(maxlen=50)
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
-    for line in p.stdout:
-        sys.stdout.write(line)
-        sys.stdout.flush()
-        tail.append(line.rstrip("\n"))
-    rc = p.wait()
-    STREAM_TAIL[:] = list(tail)
+    try:
+        rc, tail = stream_out(cmd, LIMITS["docker"], sys.stdout)
+    except Timeout as e:
+        STREAM_TAIL[:] = e.tail
+        raise
+    STREAM_TAIL[:] = tail
     return rc
 
 
@@ -1054,20 +1056,36 @@ def dump_db(project, db, st):
     final = os.path.join(pdir, f"{st}_{db['name']}.sql.gz")
     tmp = final + ".part"
     script = PG_DUMP if db["kind"] == "postgres" else MY_DUMP
-    tail = b""
+    seen = {"tail": b""}
     t0 = time.time()
-    errf = tempfile.TemporaryFile()
-    proc = subprocess.Popen(["docker", "exec", db["name"], "sh", "-c", script],
-                            stdout=subprocess.PIPE, stderr=errf)
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6) as gz:
-        for chunk in iter(lambda: proc.stdout.read(1 << 16), b""):
-            gz.write(chunk)
-            tail = (tail + chunk)[-4096:]
-    rc = proc.wait()
-    errf.seek(0)
-    err = errf.read().decode(errors="replace").strip()
-    errf.close()
+
+    def keep(gz, chunk):
+        gz.write(chunk)
+        seen["tail"] = (seen["tail"] + chunk)[-4096:]
+
+    # The dump has DUMP_TIMEOUT seconds; then docker exec is stopped and the
+    # partial file goes. The dump inside the container ends when it finds
+    # its output closed; the update stops before anything changed.
+    with tempfile.TemporaryFile() as errf:
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6) as gz:
+                rc = copy_out(["docker", "exec", db["name"], "sh", "-c", script],
+                              lambda chunk: keep(gz, chunk), LIMITS["dump"], errf)
+        except BaseException as e:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            if isinstance(e, Timeout):
+                raise Abort(5, f"Dump von {db['name']} nach {e.seconds} s abgebrochen (DUMP_TIMEOUT in {CONF}). "
+                               f"Update abgebrochen – nichts geändert.",
+                            f"Dump of {db['name']} stopped after {e.seconds} s (DUMP_TIMEOUT in {CONF}). "
+                            f"Update aborted – nothing changed.")
+            raise
+        errf.seek(0)
+        err = errf.read().decode(errors="replace").strip()
+    tail = seen["tail"]
     if rc != 0 or DUMP_DONE[db["kind"]] not in tail:
         os.unlink(tmp)
         msg = err[-400:] if err else f"exit {rc}"
@@ -1225,7 +1243,17 @@ def failure_reason(names, compose_rc=0):
 
 def error_reason(e):
     """The cause when the helper itself stopped after the containers were
-    recreated (Docker did not answer, a command failed): source "error"."""
+    recreated (Docker did not answer, a command failed): source "error".
+    A command that did not end within its limit (diunproc.Timeout) gets
+    source "timeout": it was stopped, but what it asked the Docker daemon to
+    do may go on or have stopped half way, so nobody can say the containers
+    are as before."""
+    if isinstance(e, Timeout):
+        return {"container": None, "state": None, "exit_code": None, "oom": False, "source": "timeout",
+                "line": pick(f"{' '.join(e.cmd[-6:])} hat nach {e.seconds} s nicht geendet und wurde abgebrochen "
+                             f"(DOCKER_TIMEOUT); die Container können sich noch ändern – mit docker ps prüfen.",
+                             f"{' '.join(e.cmd[-6:])} did not end within {e.seconds} s and was stopped "
+                             f"(DOCKER_TIMEOUT); the containers may still be changing – check with docker ps.")}
     text = (getattr(e, "stderr", None) or str(e) or type(e).__name__).strip()
     line = (text.splitlines() or [type(e).__name__])[-1][:REASON_MAX]
     return {"container": None, "state": None, "exit_code": None, "oom": False, "source": "error",
@@ -1613,7 +1641,14 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         # registry fails, and that looked like "no newer image". A failed pull
         # goes on only with the image to roll out on the server already.
         base = compose_cmd(ctx)
-        pull_rc = stream(base + ["pull", *services])
+        try:
+            pull_rc = stream(base + ["pull", *services])
+        except Timeout as e:
+            drop_run(op)
+            raise Abort(5, f"Der Pull hat nach {e.seconds} s nicht geendet und wurde abgebrochen (DOCKER_TIMEOUT in "
+                           f"{CONF}) – nichts geändert. Docker kann ein begonnenes Herunterladen noch beenden.",
+                        f"The pull did not end within {e.seconds} s and was stopped (DOCKER_TIMEOUT in {CONF}) – "
+                        f"nothing changed. Docker may still finish a download it had started.")
         pull_error = (reason_line(STREAM_TAIL) or f"exit {pull_rc}") if pull_rc else None
         new_id = image_id(new_ref)
         if retag and not new_id:
@@ -1990,13 +2025,62 @@ def cmd_delete_image(ref):
     if not image_id(ref):
         raise Abort(2, f"{ref} nicht gefunden.", f"{ref} not found.")
     # Without -f: Docker refuses if a container still uses the image.
-    return stream(["docker", "rmi", ref])
+    try:
+        return stream(["docker", "rmi", ref])
+    except Timeout as e:
+        raise Abort(1, f"docker rmi hat nach {e.seconds} s nicht geendet und wurde abgebrochen; ob {ref} noch da "
+                       f"ist, zeigt die Übersicht nach dem Neuladen.",
+                    f"docker rmi did not end within {e.seconds} s and was stopped; whether {ref} is still there "
+                    f"shows after a reload.")
 
 
 # --------------------------------------------------------------- cleanup ----
 # KEY in /etc/image-updates.conf -> (rule, default). 0 switches a rule off.
 RULES = {"KEEP_DUMPS": ("keep_dumps", 3), "ROLLBACK_IMAGE_DAYS": ("image_days", 14)}
 RULE_VALUE_RE = re.compile(r"^\d{1,4}$")
+# KEY -> (LIMITS key, lowest, highest), in seconds (see LIMITS).
+LIMIT_KEYS = {"DOCKER_TIMEOUT": ("docker", 60, 86400), "DUMP_TIMEOUT": ("dump", 60, 172800)}
+LIMIT_VALUE_RE = re.compile(r"^\d{1,6}$")
+
+
+def read_conf(nothing_de, nothing_en):
+    """{KEY: int} from /etc/image-updates.conf, {} without the file. The file
+    must belong to root and be writable by root only; a line not understood,
+    an unknown key or a value out of range raises Abort(2) with nothing_* as
+    the consequence ("nothing deleted", "nothing changed")."""
+    try:
+        st = os.stat(CONF)
+    except FileNotFoundError:
+        return {}
+    if st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
+        raise Abort(2, f"{CONF} muss root gehören und darf nur für root schreibbar sein – {nothing_de}.",
+                    f"{CONF} must belong to root and be writable by root only – {nothing_en}.")
+    found = {}
+    with open(CONF) as f:
+        for n, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, sep, value = (x.strip() for x in line.partition("="))
+            value = value.strip("\"'")
+            ok = sep and ((key in RULES and RULE_VALUE_RE.match(value))
+                          or (key in LIMIT_KEYS and LIMIT_VALUE_RE.match(value)
+                              and LIMIT_KEYS[key][1] <= int(value) <= LIMIT_KEYS[key][2]))
+            if not ok:
+                hint = (f" ({LIMIT_KEYS[key][1]}–{LIMIT_KEYS[key][2]} s)" if key in LIMIT_KEYS else "")
+                raise Abort(2, f"{CONF}, Zeile {n} nicht verstanden: {line[:60]}{hint} – {nothing_de}.",
+                            f"{CONF}, line {n} not understood: {line[:60]}{hint} – {nothing_en}.")
+            found[key] = int(value)
+    return found
+
+
+def load_limits():
+    """LIMITS from /etc/image-updates.conf, before an update, a rollback or
+    a delete changes anything; a file not understood stops it (exit 2)."""
+    found = read_conf("nichts geändert", "nothing changed")
+    for key, (name, _, _) in LIMIT_KEYS.items():
+        if key in found:
+            LIMITS[name] = found[key]
 
 
 def load_rules():
@@ -2006,24 +2090,11 @@ def load_rules():
     of guessing - a typo must never delete more than intended."""
     rules = {name: default for name, default in RULES.values()}
     rules["file"] = None
-    try:
-        st = os.stat(CONF)
-    except FileNotFoundError:
+    if not os.path.exists(CONF):
         return rules
-    if st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
-        raise Abort(2, f"{CONF} muss root gehören und darf nur für root schreibbar sein – nichts gelöscht.",
-                    f"{CONF} must belong to root and be writable by root only – nothing deleted.")
-    with open(CONF) as f:
-        for n, line in enumerate(f, 1):
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            key, sep, value = (x.strip() for x in line.partition("="))
-            value = value.strip("\"'")
-            if not sep or key not in RULES or not RULE_VALUE_RE.match(value):
-                raise Abort(2, f"{CONF}, Zeile {n} nicht verstanden: {line[:60]} – nichts gelöscht.",
-                            f"{CONF}, line {n} not understood: {line[:60]} – nothing deleted.")
-            rules[RULES[key][0]] = int(value)
+    for key, value in read_conf("nichts gelöscht", "nothing deleted").items():
+        if key in RULES:
+            rules[RULES[key][0]] = value
     rules["file"] = CONF
     return rules
 
@@ -2173,6 +2244,8 @@ def main(argv):
         plan, _ = make_plan(argv[1])
         print(json.dumps(plan, ensure_ascii=False))
         return 0
+    if argv[:1] in (["update"], ["rollback"], ["delete-image"]) or argv[:1] == ["retag"] and "--expect" in argv:
+        load_limits()
     if len(argv) in (2, 3) and argv[0] == "update" and (len(argv) == 2 or argv[2] == "--no-dump"):
         return keep_output(cmd_update, argv[1], do_dump=len(argv) == 2)
     if len(argv) == 2 and argv[0] == "rollback":
@@ -2205,4 +2278,7 @@ if __name__ == "__main__":
         sys.exit(e.code)
     except subprocess.CalledProcessError as e:
         print((e.stderr or str(e)).strip(), flush=True)
+        sys.exit(1)
+    except (Timeout, subprocess.TimeoutExpired) as e:
+        print(pick(f"Abgebrochen, Zeitgrenze überschritten: {e}", f"Stopped, time limit passed: {e}"), flush=True)
         sys.exit(1)

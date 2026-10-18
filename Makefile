@@ -22,7 +22,7 @@ install:
 	install -d $(PAGE) $(HELPERS) $(UNITS)
 	install -m 644 plugin/* $(PAGE)/
 	install -m 755 lib/*.py lib/*.sh $(HELPERS)/
-	install -m 644 lib/diunlib.py $(HELPERS)/
+	install -m 644 lib/diunlib.py lib/diunproc.py $(HELPERS)/
 	install -m 644 systemd/*.service systemd/*.timer $(UNITS)/
 	if [ -z "$(DESTDIR)" ]; then sh packaging/scripts/configure; fi
 

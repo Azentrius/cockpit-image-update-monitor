@@ -14,7 +14,7 @@ together.
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
 | `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log`, `compose/<project>/<stamp>/<n>_<file>` (the compose / `.env` files a tag change wrote, byte-exact as they were) | root, 700 / 600 |
-| `/etc/image-updates.conf` | cleanup rules (optional, see below) | root, not writable by others |
+| `/etc/image-updates.conf` | cleanup rules and time limits (optional, see below) | root, not writable by others |
 | `/opt/diun/` | Diun stack (`docker-compose.yml`, `diun.yml`), from `diun-deps.sh install diun` | root |
 | `/usr/lib/systemd/system/diun-radar.{service,timer}` | radar every 6 h (`*-*-* 00/6:17:00`); from the package, `diun-deps.sh install radar` enables the timer | root, 644 |
 | `/usr/lib/systemd/system/diun-cleanup.{service,timer}` | cleanup daily (`04:40` + up to 20 min); from the package, `diun-deps.sh install cleanup` enables the timer | root, 644 |
@@ -66,8 +66,8 @@ Inputs are checked by regex:
 | 1 | unexpected error of a subcommand (stderr in the output; `radar`: the run failed) |
 | 2 | not found / not possible (container, operation, rollback image gone, not updatable, radar not set up, cleanup rules not understood or not root-only) |
 | 3 | refused (rolled back already, successfully; file/container exists on `install`) |
-| 4 | after update/rollback the containers do not run stably |
-| 5 | stopped before any change (dump failed, too little space, database not running, the pull failed and left the old image; on `rollback`: a file of a tag change edited since, or the compose files giving the services another image) |
+| 4 | after update/rollback the containers do not run stably, or `compose up` did not end within `DOCKER_TIMEOUT` (state unclear, `reason.source: "timeout"`) |
+| 5 | stopped before any change (dump failed or did not end within `DUMP_TIMEOUT`, too little space, database not running, the pull failed and left the old image or did not end within `DOCKER_TIMEOUT`; on `rollback`: a file of a tag change edited since, or the compose files giving the services another image) |
 | 64 | wrong call |
 | 75 | lock taken (already running) |
 | 77 | no root rights |
@@ -348,7 +348,8 @@ with `op`. The versions can be `null` (unknown).
   `null` when `docker compose up` itself failed (`source: "compose"`, `exit_code` = its exit code).
 - `state`: the container state, or the health state `unhealthy` / `starting`.
 - `source`: `log` (the last 80 log lines), `health` (last output of the health check, for an
-  unhealthy container), `compose` (the last 50 lines `docker compose up` printed), `error` (since
+  unhealthy container), `compose` (the last 50 lines `docker compose up` printed), `timeout` (since
+  0.19.0: `compose up` did not end within `DOCKER_TIMEOUT`; `container` is `null`), `error` (since
   0.18.1: the helper itself stopped after the containers were recreated, e.g. Docker did not answer;
   `container` is `null`), `image` (since 0.18.1, rollback only: the container runs another image than
   the rollback copy) or `null`.
@@ -370,6 +371,16 @@ ROLLBACK_IMAGE_DAYS=14
 - Without the file the defaults above apply. `KEY=VALUE` lines, `#` comments, values `0`–`9999`.
 - The file must belong to root and must not be writable by group or others. An unknown key or a
   value that is not a number stops the cleanup (exit 2) – nothing is deleted on a guess.
+- **Time limits** (since 0.19.0, `read_conf` / `load_limits`): `DOCKER_TIMEOUT` (default 1800,
+  60–86400 seconds) for one streamed docker command (`compose pull`, `compose up`, `rmi`),
+  `DUMP_TIMEOUT` (default 14400, 60–172800) for one database dump. `update`, `retag --expect`,
+  `rollback` and `delete-image` read them first; a value out of range or not a number stops them with
+  exit 2 before anything changes. `lib/diunproc.py` runs the command in a process group of its own;
+  the limit is a deadline for the whole command, also without any output. Then SIGTERM to the group,
+  after 10 s SIGKILL, and the process is always waited for. A pull or dump over its limit stops the
+  update before any change (exit 5, a partial dump removed); `compose up` over its limit fails it
+  (exit 4, history, output and rollback kept), and the cause says the containers may still be
+  changing, because the Docker daemon goes on with what the stopped client asked for.
 - **Never deleted:** the dumps of each project's last update (`operations.jsonl`), files not named
   `<stamp>_<container>.sql.gz`, rollback images a container (running or stopped) uses. Images are
   removed with `docker rmi` without `-f`.
@@ -604,7 +615,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, line tags (release by digest, the tag's number on a miss, exact tags untouched, a registry outage keeping the release per image ID), a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes) |
+| `test/proc_test.py` | `diunproc` with real child processes: a silent hang, endless output, children that ignore SIGTERM (the group killed), a dump that hangs, the next command after a timeout |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes), time limits (a pull or dump over its limit stops before any change, `compose up` over its limit fails with its rollback, the limits from the settings file and their ranges) |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |

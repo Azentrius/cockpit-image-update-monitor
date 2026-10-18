@@ -191,6 +191,7 @@ class Docker:
                                      # --ignore-pull-failures (docker/compose pkg/compose/pull.go)
         self.pull_raises = None      # exception the pull raises (the helper itself stops there)
         self.up_runs = None          # image ID recreated containers run, whatever the tag names
+        self.up_raises = None        # exception `compose up` raises (diunproc.Timeout: it did not end)
         self.undefined = set()       # services the compose files no longer define
 
     def add(self, c):
@@ -289,6 +290,8 @@ class Docker:
         if "pull" in cmd and self.pull_to:
             ref, iid = self.pull_to
             self.tags[U.norm_ref(ref)] = iid
+        if "up" in cmd and self.up_raises:
+            raise self.up_raises
         if "up" in cmd:
             if self.up_rc:
                 U.STREAM_TAIL[:] = self.up_out
@@ -330,28 +333,21 @@ class Systemctl:
 
 
 class FakePopen:
-    """docker exec <db> sh -c <dump script>: data on stdout, exit code."""
+    """docker exec <db> sh -c <dump script>, as diunproc.copy runs it: the
+    data to stdout, the exit code (script: {container: (data, exit code)})."""
     script = {}
 
-    def __init__(self, cmd, stdout=None, stderr=None):
-        data, self.rc = FakePopen.script[cmd[2]]
-        self.stdout = io.BytesIO(data)
-        if self.rc and stderr is not None:
-            stderr.write(b"mariadb-dump: Got error: 1045: Access denied for user 'root'@'localhost'")
-
-    def wait(self):
-        return self.rc
-
-
-class _Subprocess:
-    """subprocess for the module under test, with the fake Popen."""
-    Popen = FakePopen
-
-    def __getattr__(self, name):
-        return getattr(subprocess, name)
+    @staticmethod
+    def copy(cmd, sink, limit, errfile, grace=10):
+        data, rc = FakePopen.script[cmd[2]]
+        if data:
+            sink(data)
+        if rc:
+            errfile.write(b"mariadb-dump: Got error: 1045: Access denied for user 'root'@'localhost'")
+        return rc
 
 
-U.subprocess = _Subprocess()
+U.copy_out = FakePopen.copy
 
 # ------------------------------------------------------- database detection
 k = U.kind_of
@@ -847,6 +843,76 @@ rc, _ = quiet(U.cmd_rollback, res["op"])
 release_lock()
 check("registry down: its update rolled back", (rc, D.tags["postgres:16-alpine"], D.containers["glitchtip-postgres"]["Image"]),
       (0, "sha256:new", "sha256:new"))
+
+# Time limits (DOCKER_TIMEOUT, DUMP_TIMEOUT). A pull that does not end is stopped
+# before anything changed. A compose up that does not end fails the update with
+# its history, output and rollback, and never claims the containers are as they
+# were: the Docker daemon may still be changing them.
+D.pull_raises = U.Timeout(["docker", "compose", "pull", "migrate", "postgres"], 1800, ["postgres Pulling"])
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
+rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+release_lock()
+D.pull_raises = None
+check("pull timeout -> exit 5, nothing left, the daemon may still finish the download",
+      (rc, D.tags == tags_before, dumps_of("glitchtip"), ops() == ops_before,
+       "The pull did not end within 1800 s and was stopped (DOCKER_TIMEOUT" in out, "Docker may still finish" in out),
+      (5, True, dumps_before, True, True, True))
+D.pull_to = ("postgres:16-alpine", "sha256:v30")
+D.images["sha256:v30"] = {"Id": "sha256:v30", "Config": {"Env": ["PG_VERSION=16.30"]}}
+D.up_raises = U.Timeout(["docker", "compose", "up", "-d", "--no-deps", "--pull", "never", "migrate", "postgres"], 1800)
+with as_uid(0):
+    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+release_lock()
+D.up_raises = None
+res = last_result(out)
+op = ops()[res["op"]]
+check("up timeout -> exit 4, failed, a timeout cause that says the containers may still change",
+      (rc, res["status"], op["status"], op["reason"]["source"], "may still be changing" in op["reason"]["line"]),
+      (4, "failed", "failed", "timeout", True))
+check("up timeout: output kept, rollback offered",
+      (os.path.exists(os.path.join(U.LOGS, res["op"] + ".log")), history(res["op"])["can_rollback"]), (True, True))
+rc, _ = quiet(U.cmd_rollback, res["op"])
+release_lock()
+check("up timeout: the lock is free again, the rollback runs", (rc, D.tags["postgres:16-alpine"]), (0, "sha256:new"))
+real_copy = U.copy_out
+
+
+def dump_hangs(cmd, sink, limit, errfile, grace=10):
+    sink(b"--\n-- PostgreSQL database cluster dump\n")
+    raise U.Timeout(cmd, limit)
+
+
+U.copy_out, U.LIMITS["dump"] = dump_hangs, 7
+rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+release_lock()
+U.copy_out, U.LIMITS["dump"] = real_copy, 14400
+check("dump timeout -> exit 5, the limit named, no partial file left",
+      (rc, "Dump of glitchtip-postgres stopped after 7 s (DUMP_TIMEOUT" in out,
+       [f for f in dumps_of("glitchtip") if f.endswith(".part")], dumps_of("glitchtip") == dumps_before),
+      (5, True, [], True))
+D.pull_to = None
+check("after the timeouts: the next update runs (nothing newer now)",
+      quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)[0], 0)
+release_lock()
+# The limits come from /etc/image-updates.conf, checked as strictly as the cleanup rules.
+with open(U.CONF, "w") as f:
+    f.write("KEEP_DUMPS=2\nDOCKER_TIMEOUT=900\nDUMP_TIMEOUT='7200'\n")
+os.chmod(U.CONF, 0o600)
+U.load_limits()
+check("limits from the file, the cleanup rules beside them",
+      (U.LIMITS, U.load_rules()["keep_dumps"]), ({"docker": 900, "dump": 7200}, 2))
+bad = []
+for line in ("DOCKER_TIMEOUT=30", "DUMP_TIMEOUT=999999", "DOCKER_TIMEOUT=ten", "DOCKER_TIMEOUT=-60"):
+    with open(U.CONF, "w") as f:
+        f.write(line + "\n")
+    bad.append(quiet(U.load_limits)[0])
+with as_uid(0):
+    rc, out = quiet(U.main, ["update", "glitchtip-postgres"])
+release_lock()
+check("limits out of range or no number -> exit 2, an update stops before anything changes",
+      (bad, rc, "(60–86400 s) – nothing changed" in out), ([2, 2, 2, 2], 2, True))
+os.unlink(U.CONF)
+U.LIMITS.update(docker=1800, dump=14400)
 
 # Version only known to the radar (latest without a version variable)
 D.images["sha256:oll"] = {"Id": "sha256:oll", "Config": {"Env": []}}

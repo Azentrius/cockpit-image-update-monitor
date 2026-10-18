@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Time limits for docker commands and dumps.** A `docker compose pull`, `docker compose up`,
+  `docker rmi` or database dump that hung held the update lock for good: no other update, rollback or
+  cleanup could run. Each now has a limit, `DOCKER_TIMEOUT` (default 1800 s) and `DUMP_TIMEOUT`
+  (default 4 h) in `/etc/image-updates.conf`, checked like the cleanup rules. The limit counts for the
+  whole command, also when it prints nothing; then its process group is stopped (SIGTERM, SIGKILL after
+  10 s) and the lock is free again. A pull or dump over its limit stops the update before anything
+  changed and removes the partial dump; a `compose up` over its limit fails the update with its history,
+  output and rollback, and says that the containers may still be changing. The process handling lives
+  in the new `lib/diunproc.py`.
 - **Fix: a line tag showed its own number as the installed version.** A tag such as `cubejs/cube:v1.6`,
   `onlyoffice/documentserver:10.0`, `clickhouse/clickhouse-server:24.12-alpine` or
   `pomerium/pomerium:v0.33` names a line, not a release: the registry has `v1.6.74`, `10.0.0.1`,
