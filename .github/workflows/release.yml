@@ -116,7 +116,7 @@ jobs:
             echo
             echo "### Install"
             echo
-            echo "From the Azentrius package repository (Debian, Ubuntu, Fedora, RHEL): set up https://packages.azentrius.de once, then install Image Update Monitor in Cockpit under Applications, or with \`sudo apt install cockpit-image-update-monitor\` or \`sudo dnf install cockpit-image-update-monitor\`. The repository takes this release within an hour. It has no openSUSE packages."
+            echo "From the Azentrius package repository (Debian, Ubuntu, Fedora, RHEL): set up https://packages.azentrius.com once, then install Image Update Monitor in Cockpit under Applications, or with \`sudo apt install cockpit-image-update-monitor\` or \`sudo dnf install cockpit-image-update-monitor\`. The repository takes this release within an hour. It has no openSUSE packages."
             echo
             echo "From the files of this release (every system; on openSUSE the only way): download the package and \`SHA256SUMS\`, check that the download is complete and that this repository's release workflow built it, then install it:"
             echo

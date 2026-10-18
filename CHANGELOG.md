@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.19.1 – 2026-10-18
+
+Azentrius moves to azentrius.com; the page and the helpers work as before.
+
+- **Signature:** the word mark links to azentrius.com.
+- **Package repository:** README, SECURITY and release notes name packages.azentrius.com, the new
+  address of the Azentrius package repository; packages.azentrius.de keeps serving the same packages.
+- **Contact:** security reports without GitHub go to support@azentrius.com, which is also the
+  maintainer of the `.deb` and `.rpm`.
+
 ## 0.19.0 – 2026-10-18
 
 Ready for wider use: docker commands and dumps have time limits and a stopped run cleans up before it

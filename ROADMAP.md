@@ -253,7 +253,7 @@ Packages and Cockpit's Applications page are done in 0.12.0 (see [CHANGELOG](CHA
 - ✅ **Packages** (`.deb` and `.rpm`, `cockpit-image-updates`) with plugin, helpers and units, attached
   to the GitHub releases; they replace `install.sh` and take over its installations.
 - ✅ **Cockpit's Applications page:** AppStream data (`de.azentrius.image_updates`) in the packages, and
-  the Azentrius package repository, packages.azentrius.de, whose catalog Cockpit reads: the add-on is
+  the Azentrius package repository, packages.azentrius.com, whose catalog Cockpit reads: the add-on is
   found and installed from Cockpit itself.
 - **Private registries:** credentials in a separate root-only file that the radar may read despite its
   hardening (`LoadCredential=` or `ReadOnlyPaths=`); `skopeo --authfile`.
