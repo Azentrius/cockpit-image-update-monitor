@@ -428,12 +428,12 @@ for n in ("forgejo-runner", "forgejo-runner-2"):
     D.containers[n]["NetworkSettings"]["Networks"] = {"edge": {}}
 D.add(ctn("caddy", "caddy:2", "sha256:cd", project="caddy", networks=("edge",)))
 JOB = "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit"
-D.add(ctn(JOB, "sanctum-ci:1", "sha256:ci", networks=("edge",)))
+D.add(ctn(JOB, "example-ci:1", "sha256:ci", networks=("edge",)))
 D.containers[JOB]["State"]["StartedAt"] = "2026-10-17T10:35:00Z"
-D.add(ctn("FORGEJO-ACTIONS-TASK-2399_WORKFLOW-b1_JOB-done", "sanctum-ci:1", "sha256:ci", running=False))
+D.add(ctn("FORGEJO-ACTIONS-TASK-2399_WORKFLOW-b1_JOB-done", "example-ci:1", "sha256:ci", running=False))
 p = plan("forgejo-runner")
 check("plan: a runner names the CI jobs that run, not the finished ones", p["ci_jobs"],
-      [{"name": JOB, "image": "sanctum-ci:1", "started": "2026-10-17T10:35:00Z"}])
+      [{"name": JOB, "image": "example-ci:1", "started": "2026-10-17T10:35:00Z"}])
 check("plan: CI jobs are left out of the shared network", p["shared_networks"], [{"network": "edge", "projects": ["caddy"]}])
 
 fresh_docker()

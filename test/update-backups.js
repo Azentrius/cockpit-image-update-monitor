@@ -136,7 +136,7 @@ const BASE_SCRIPT = {
                            [null, null, "zusammen mit glitchtip-worker"], "other compose files: not together");
     // Containers of CI jobs (Forgejo runner, a CI host, 2026-10-17) are not
     // listed: the meta line counts them, its tooltip names them.
-    const JOB = { name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "sanctum-ci", tag: "1", digest: "",
+    const JOB = { name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "example-ci", tag: "1", digest: "",
                   imgid: "sha256:ci", tagid: "", pulled: false, project: "", service: "", managed: false, files: [], ci_job: true };
     for (const [lang, word] of [["de", "1 CI-Job ausgeblendet"], ["en", "1 CI job hidden"]]) {
         const cj = boot(lang, { ...BASE_SCRIPT, "diun-inventory.py": { out: inventory + JSON.stringify(JOB) + "\n" } });
@@ -585,8 +585,8 @@ const BASE_SCRIPT = {
     // 2026-10-17: two jobs kept running without a runner after its update).
     const started = "2026-10-12T02:29:00Z";
     const ci = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, config_changed: false,
-        ci_jobs: [{ name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "sanctum-ci:1", started },
-                  { name: "FORGEJO-ACTIONS-TASK-2417_WORKFLOW-9cbae90a_JOB-gitleaks", image: "sanctum-seccan:1", started }] }) } });
+        ci_jobs: [{ name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "example-ci:1", started },
+                  { name: "FORGEJO-ACTIONS-TASK-2417_WORKFLOW-9cbae90a_JOB-gitleaks", image: "example-seccan:1", started }] }) } });
     await settle();
     ci.d.querySelector('button[data-update="ollama"]').click();
     await settle();
