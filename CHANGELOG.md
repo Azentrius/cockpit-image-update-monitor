@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.17.0 – 2026-10-18
+
+A new digest of the build that already runs, as when a registry publishes an image's list of platforms
+again, no longer shows as “Update available”.
 
 - **Fix: “Update available” for the build that runs.** Docker Hub publishes the list of platforms of an
   official image again when it adds one (`nextcloud:apache` got riscv64 on 2026-10-16). The list's
