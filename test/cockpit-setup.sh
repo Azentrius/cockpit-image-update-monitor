@@ -3,6 +3,7 @@
 # Prepares a throw-away machine for test/cockpit-session.py (CI, test workflow, job cockpit;
 # never a server with real containers):
 #   - two Cockpit users with the passwords given: ADMIN_USER in the sudo group, PLAIN_USER not,
+#   - no skopeo (the page installs it) and no XDG_CONFIG_HOME for everyone (see below),
 #   - a local registry (127.0.0.1:5000) and the compose project "imgupd-ui": its container runs
 #     busybox 1.36.1 under the tag localhost:5000/imgupd-ui/app:1, while that tag points to
 #     busybox 1.37.0 by now, in the registry and here (pulled, not rolled out).
@@ -23,6 +24,11 @@ REGISTRY_IMAGE=${REGISTRY_IMAGE:-registry:2.8.3}
 if grep -q '^XDG_CONFIG_HOME=' /etc/environment 2> /dev/null; then
     echo "removing XDG_CONFIG_HOME from /etc/environment" >&2
     sed -i '/^XDG_CONFIG_HOME=/d' /etc/environment
+fi
+# The runner image brings skopeo; the page is to install it itself.
+if dpkg -s skopeo > /dev/null 2>&1; then
+    echo "removing the runner's skopeo" >&2
+    DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq skopeo > /dev/null
 fi
 useradd -m -s /bin/bash -G sudo "$ADMIN_USER"
 useradd -m -s /bin/bash "$PLAIN_USER"

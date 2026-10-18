@@ -4,12 +4,15 @@
 Docker (CI, test workflow, job cockpit; never on a server with real
 containers). Playwright drives Chromium through Cockpit's own login and shell:
 
+  0. Cockpit before the add-on is installed: the errors the browser shows
+     for Cockpit itself (on Ubuntu e.g. its */po.js), as the baseline;
   1. the release before this build installed (when there is one), the page
      opened as an administrator: its version;
   2. this build installed over it with apt, the page reloaded in the same
      session, then a new login: the new version and its texts (i18n.js);
   3. the page found in Cockpit's menu and loaded; at the end, no JavaScript
-     error and no failed request of the add-on in any session;
+     error and no failed request of the add-on's files or frame in any
+     session, and no error of another kind than the baseline's;
   4. requirements from the page: skopeo installed, the radar set up
      (diun-radar.timer on, a first run), then "Run radar now" (a new run);
   5. the compose project of test/cockpit-setup.sh: "Roll out image", its
@@ -44,6 +47,7 @@ os.makedirs(OUT, exist_ok=True)
 report = {"environment": {}, "steps": [], "errors": [], "addon_files": []}
 failed = False
 errors = []          # [kind, text, url, user]
+OURS = "/image-updates/"  # the add-on's files and frame (the shell's route has no slash after it)
 responses = []       # [url, status] of the add-on's own files
 shots = 0
 LAST = {"page": None}  # the page in use, for a screenshot when a step fails
@@ -82,6 +86,15 @@ def watch(page, who):
         if r.status >= 400:
             errors.append([f"http {r.status}", "", r.url, who])
     page.on("response", response)
+
+
+BASELINE = set()
+
+
+def kind(e):
+    """An error without where it was seen: the same message on another route
+    of the shell is the same error."""
+    return (e[0], e[1] if e[0] != "console" else e[1].split(" because ")[0], e[2] if e[0] != "console" else "")
 
 
 def poll(page, fn, seconds):
@@ -206,6 +219,18 @@ def main():
         browser = p.chromium.launch()
         environment(browser)
 
+        # 0. Cockpit on its own: the baseline of errors that are not the add-on's.
+        ctx, page = login(browser, E["ADMIN_USER"], E["ADMIN_PW"])
+        admin_access(page, E["ADMIN_PW"])
+        page.goto(URL + "/system")
+        page.wait_for_selector("iframe", state="attached")
+        page.wait_for_timeout(3000)
+        BASELINE.update(kind(e) for e in errors)
+        note("Cockpit without the add-on: login, administrative access, the shell",
+             not page.locator('a[href$="/image-updates"]').count(),
+             f"{len(BASELINE)} kinds of browser errors from Cockpit itself")
+        ctx.close()
+
         # 1. + 2. The release before, then this build over it: reload, new login.
         if old:
             root("apt-get", "install", "-y", "-q", old)
@@ -255,7 +280,8 @@ def main():
             note("skopeo installed from the page", ok and "skopeo installed." in log, f"{title} -> {text}")
             close_dialog(page, frame)
         else:
-            note("skopeo offered for installation", False, "no install button")
+            note("skopeo offered for installation", False,
+                 "no install button; skopeo here: " + (root("sh", "-c", "command -v skopeo || echo none", check=False)))
         radar = frame.locator('button[data-verb="install"][data-target="radar"]')
         poll(page, lambda: radar.count() == 1, 60)
         title, text, ok, live, log = run_dialog(page, frame, radar, 900)
@@ -325,9 +351,13 @@ except Exception as e:      # a step that could not even run counts as failed
     except Exception:
         pass
 
-ours = [x for x in errors if "image-updates" in (x[1] + x[2])]
-note("no JavaScript error and no failed request of the add-on", not ours,
+ours = [x for x in errors if OURS in x[1] + x[2]]
+note("no JavaScript error and no failed request of the add-on's files or frame", not ours,
      "; ".join(f"{k} {u} {t[:120]}" for k, t, u, _ in ours)[:600])
+other = [x for x in errors if x not in ours and kind(x) not in BASELINE]
+note("no other error in Cockpit than those it shows without the add-on", not other,
+     "; ".join(f"{k} {u} {t[:120]}" for k, t, u, _ in other)[:600]
+     or f"{len(errors) - len(ours)} errors, all of kinds Cockpit shows on its own")
 report["errors"] = errors
 report["addon_files"] = sorted({u.split("/image-updates/", 1)[1] + f" {s}" for u, s in responses})
 with open(os.path.join(OUT, "report.json"), "w") as f:
@@ -337,7 +367,8 @@ md += [f"| {k} | {v} |" for k, v in report["environment"].items()]
 md += ["", "| Step | Result |", "|---|---|"]
 md += [f"| {s['step']} | {'ok' if s['ok'] else 'FAILED'}{': ' + s['detail'] if s['detail'] else ''} |"
        for s in report["steps"]]
-md += ["", f"Other errors in the browser (Cockpit itself, not the add-on): {len(errors) - len(ours)}"]
+md += ["", "Errors Cockpit shows on its own, before the add-on is installed (the baseline): "
+       + ("; ".join(sorted({f"{k} {u or t[:80]}" for k, t, u in BASELINE})) or "none")]
 with open(os.path.join(OUT, "report.md"), "w") as f:
     f.write("\n".join(md).replace("\n|", "\n|") + "\n")
 print("\n".join(md))
