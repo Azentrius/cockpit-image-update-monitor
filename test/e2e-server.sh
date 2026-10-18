@@ -2,9 +2,11 @@
 # shellcheck disable=SC2034
 # SPDX-License-Identifier: Apache-2.0
 # End-to-end test of diun-update.py on a real Docker host, inside the
-# throw-away compose projects "imgupd-test" and "imgupd-test-my". No other
-# container, compose file, volume or dump is touched; everything created here
-# is removed on exit.
+# throw-away compose projects "imgupd-test", "imgupd-test-my" and
+# "imgupd-test-reg". No other container, compose file, volume or dump is
+# touched; everything created here is removed on exit, also after a failure or
+# an interrupt. Run it on a throw-away host or VM, never next to production
+# containers: the CI workflow runs it on a fresh GitHub runner.
 #
 # Needs: root, the helpers installed in /usr/lib/cockpit-image-updates, docker
 # compose, and two DIFFERENT builds of the same postgres major:
@@ -18,6 +20,11 @@
 # helpers from another folder (e.g. a branch before it is installed).
 # The tag change (stage 2) needs choices from the radar: the test puts a
 # record for its own image into versions.json and removes it again.
+# Pulls that work, fail or find a newer image already here run against a local
+# registry (REGISTRY_IMAGE, default registry:2.8.3, on 127.0.0.1 at
+# E2E_REGISTRY_PORT, default 5000); the MariaDB/MySQL dumps use it too. Every
+# dump the helper writes is restored into a fresh container of its own and
+# checked table by table, object by object (README, "Restoring a dump").
 #
 #   sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e2e-server.sh
 #
@@ -28,14 +35,21 @@
 # (SC2034 is off for the whole file: the check '…' strings run through eval,
 # so shellcheck cannot see that the variables they read are used.)
 set -u
+trap 'exit 130' INT TERM HUP
 LIB=${E2E_LIB:-/usr/lib/cockpit-image-updates}
 H=$LIB/diun-update.py
 INV=$LIB/diun-inventory.py
 VERSIONS=/var/lib/diun-radar/versions.json
 P=imgupd-test
 P2=imgupd-test-my
+P3=imgupd-test-reg
 D=${E2E_DIR:-/root/imgupd-test}
 D2=$D-my
+D3=$D-reg
+REG_PORT=${E2E_REGISTRY_PORT:-5000}
+REG=localhost:$REG_PORT
+REGISTRY_IMAGE=${REGISTRY_IMAGE:-registry:2.8.3}
+LOCKF=/run/lock/diun-update.lock
 BK_DIR=/var/backups/image-updates
 DUMPS=$BK_DIR/dumps
 OPS=$BK_DIR/operations.jsonl
@@ -44,17 +58,20 @@ export DIUN_LANG=en
 
 [ "$(id -u)" = 0 ] || { echo "ABORT: run as root"; exit 1; }
 [ -x "$H" ] || { echo "ABORT: $H missing (install first)"; exit 1; }
-for p in "$P" "$P2"; do
+for p in "$P" "$P2" "$P3"; do
     if [ -n "$(docker ps -aq --filter label=com.docker.compose.project="$p")" ]; then
         echo "ABORT: compose project $p exists already"; exit 1
     fi
 done
+if [ -n "$(docker ps -aq --filter name='^imgupd-test-')" ]; then
+    echo "ABORT: containers named imgupd-test-* exist already"; exit 1
+fi
 OLD_IMAGE=${OLD_IMAGE:-postgres:16.14-alpine}
 NEW_IMAGE=${NEW_IMAGE:-postgres:16.15-alpine}
 MARIADB_IMAGE=${MARIADB_IMAGE:-mariadb:11}
 MYSQL_IMAGE=${MYSQL_IMAGE:-mysql:8}
 E2E_MYSQL=${E2E_MYSQL:-1}
-IMAGES="$OLD_IMAGE $NEW_IMAGE"
+IMAGES="$OLD_IMAGE $NEW_IMAGE $REGISTRY_IMAGE"
 [ "$E2E_MYSQL" = 1 ] && IMAGES="$IMAGES $MARIADB_IMAGE $MYSQL_IMAGE"
 for i in $IMAGES; do
     docker image inspect "$i" >/dev/null 2>&1 || docker pull -q "$i" >/dev/null || { echo "ABORT: $i not available"; exit 1; }
@@ -71,6 +88,64 @@ other_dumps() { find "$DUMPS" -name '*.sql.gz' ! -path "$DUMPS/$P/*" ! -path "$D
 radar_unit() { systemctl cat diun-radar.service >/dev/null 2>&1; }
 cfg_image() { docker inspect -f '{{.Config.Image}}' "$1"; }
 sum_of() { sha256sum < "$1"; }
+# true once "$@" succeeds, false after $1 seconds (no endless waits)
+wait_for() {
+    local end=$(( $(date +%s) + $1 )); shift
+    until "$@" >/dev/null 2>&1; do
+        [ "$(date +%s)" -ge "$end" ] && return 1
+        sleep 1
+    done
+}
+registry_up() { python3 -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=2)' "http://127.0.0.1:$REG_PORT/v2/"; }
+
+# The Postgres test data as one text: rows, view, function, index, sequence,
+# role and grant. A restore is good only if it gives exactly this again.
+pg_state() {
+    docker exec "$1" psql -U postgres -d postgres -At -c "select string_agg(x, ',' order by x) from e2e" &&
+    docker exec "$1" psql -U postgres -d e2e_app -At \
+        -c "select string_agg(id || '|' || name || '|' || coalesce(price::text, 'NULL'), ';' order by id) from items" \
+        -c "select item_count()" \
+        -c "select string_agg(name, ',' order by name) from expensive" \
+        -c "select string_agg(indexname, ',' order by indexname) from pg_indexes where tablename = 'items'" \
+        -c "select last_value from items_id_seq" \
+        -c "select has_table_privilege('imgupd_reader', 'items', 'select')" \
+        -c "select rolcanlogin from pg_roles where rolname = 'imgupd_reader'"
+}
+# The same for MariaDB / MySQL ($2: the client, mariadb or mysql).
+my_state() {
+    docker exec "$1" "$2" -uroot -ptest-only -N -B -e "
+        select group_concat(concat(id, '|', x, '|', ifnull(n, 'NULL')) order by id separator ';') from e2e.t;
+        select e2e.f();
+        select group_concat(x order by x) from e2e.v;
+        select group_concat(concat(routine_type, ':', routine_name) order by routine_name)
+          from information_schema.routines where routine_schema = 'e2e';
+        select group_concat(trigger_name) from information_schema.triggers where trigger_schema = 'e2e';
+        select group_concat(event_name) from information_schema.events where event_schema = 'e2e';
+        select count(*) from mysql.user where user = 'imgupd_reader';" 2>/dev/null
+}
+# A dump ($1) into a fresh Postgres container ($2) of the image the test ran
+# on, as README "Restoring a dump" says. Fails on any psql error but the one
+# the dump always gives in a new instance: the role postgres exists already.
+restore_pg() {
+    docker run -d --name "$2" -e POSTGRES_PASSWORD=restore-only "$OLD_IMAGE" > /dev/null || return 1
+    wait_for 120 sh -c "docker logs $2 2>&1 | grep -q 'init process complete' && docker exec $2 pg_isready -U postgres -q" ||
+        { echo "no fresh Postgres"; return 1; }
+    zcat "$1" | docker exec -i "$2" psql -U postgres -d postgres -q > /dev/null 2> "/tmp/e2e-$2.err"
+    cat "/tmp/e2e-$2.err"
+    ! grep -v 'role "postgres" already exists' "/tmp/e2e-$2.err" | grep -q ERROR
+}
+# A dump ($1) into a fresh MariaDB / MySQL container ($2, image $3, client $4,
+# $5 MARIADB or MYSQL) with the root password of the dumped one, as the README
+# says. The client stops at the first error with exit 1.
+restore_my() {
+    docker run -d --name "$2" -e "$5_ROOT_PASSWORD=test-only" "$3" > /dev/null || return 1
+    wait_for 240 sh -c "docker logs $2 2>&1 | grep -q 'init process done' && docker exec $2 $4 -uroot -ptest-only -e 'select 1'" ||
+        { echo "no fresh $4"; return 1; }
+    zcat "$1" | docker exec -i "$2" sh -c "exec $4 -uroot -p\"\$$5_ROOT_PASSWORD\"" || return 1
+    docker exec "$2" "$4" -uroot -ptest-only -e "flush privileges" 2>/dev/null
+}
+# Half a dump: what a broken copy or a full disk leaves.
+half_dump() { zcat "$1" | head -c "$(( $(zcat "$1" | wc -c) / 2 ))" | gzip > "$2"; }
 # The radar cannot list tags of the local-only test image, so the test offers
 # $1 itself: a record in versions.json for the running version of
 # imgupd-test-db (after any radar run started by an update has finished).
@@ -100,13 +175,19 @@ PY
 }
 
 cleanup() {
+    trap '' INT TERM HUP
     echo "=== Cleanup ==="
+    [ -n "${HOLDER:-}" ] && kill "$HOLDER" 2>/dev/null
     docker compose -p "$P" -f "$D/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P2" -f "$D2/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
+    docker compose -p "$P3" -f "$D3/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
+    for c in $(docker ps -aq --filter name='^imgupd-test-'); do
+        docker rm -f -v "$c" >/dev/null 2>&1
+    done
     # Docker refuses to drop the LAST tag of an image that running containers
     # use (e.g. other databases on the same build). -f then only removes our
     # tag - the image itself stays because it is in use.
-    for t in $(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^imgupd-test/'); do
+    for t in $(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E '(^|/)imgupd-test/'); do
         if docker rmi "$t" >/dev/null 2>&1; then
             echo "untagged $t"
         elif [ -n "$(docker ps -q --filter ancestor="$(docker image inspect -f '{{.Id}}' "$t")")" ]; then
@@ -146,9 +227,9 @@ else:
 print("operations.jsonl:", len(keep), "other entries kept")
 PY
     fi
-    rm -rf "${D:?}" "${D2:?}"
+    rm -rf "${D:?}" "${D2:?}" "${D3:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz
     echo "Left over: $(docker ps -a --format '{{.Names}}' | grep -c imgupd) containers," \
-         "$(docker image ls | grep -c imgupd-test) tags," \
+         "$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/') tags," \
          "$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' | wc -l) test dump folders," \
          "$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l) test logs," \
          "$(find "$BK_DIR/compose" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l) test file backups"
@@ -196,6 +277,20 @@ docker tag "$OLD" imgupd-test/pg:16
 docker tag "$OLD" imgupd-test/side:1
 docker compose -p "$P" -f "$D/docker-compose.yml" up -d --wait 2>&1 | tail -n 3
 docker exec imgupd-test-db psql -U postgres -qc "create table e2e(x text); insert into e2e values ('hello-from-e2e');"
+# More than a table: a second database, a role with a grant, a view, a
+# function, an index and a sequence. The restore must bring them all back.
+docker exec imgupd-test-db psql -U postgres -q -v ON_ERROR_STOP=1 \
+    -c "create role imgupd_reader login password 'reader-only'" -c "create database e2e_app"
+docker exec imgupd-test-db psql -U postgres -d e2e_app -q -v ON_ERROR_STOP=1 -c "
+    create table items(id serial primary key, name text not null, price numeric(10,2));
+    insert into items(name, price) values ('Äpfel und Birnen', 1.50), ('kiwi', null), ('mango', 3.25);
+    create index items_name on items(name);
+    create view expensive as select name from items where price > 2;
+    create function item_count() returns bigint language sql as 'select count(*) from items';
+    grant select on items to imgupd_reader;"
+PG_STATE0=$(pg_state imgupd-test-db)
+echo "Postgres test data: $PG_STATE0" | tr '\n' ' '; echo
+check "Postgres test data in place" '[ "$(echo "$PG_STATE0" | wc -l)" = 8 ] && echo "$PG_STATE0" | grep -q "^1|Äpfel und Birnen|1.50;2|kiwi|NULL;3|mango|3.25$"'
 check "Containers run on OLD" '[ "$(img_of imgupd-test-db)" = "$OLD" ] && [ "$(img_of imgupd-test-app)" = "$OLD" ]'
 
 echo "=== 2. 'Pull' a newer image (move the tag) + change compose (app exits) ==="
@@ -232,6 +327,20 @@ check "Output kept: root only, without @@RESULT" \
     '[ "$(stat -c %a "$LOGS/$OP1.log")" = 600 ] && grep -q "Most likely cause" "$LOGS/$OP1.log" && ! grep -q "^@@RESULT" "$LOGS/$OP1.log"'
 NDIG=$(OP=$OP1 python3 -c 'import json,os; o=[json.loads(l) for l in open("'"$OPS"'") if json.loads(l).get("id")==os.environ["OP"]][0]; print(len(o.get("new_digests") or []))')
 check "Registry digests of the new build in the history ($NDIG)" '[ "$NDIG" -ge 1 ]'
+check "The pull of a tag only this host has failed, the newer image here was rolled out with a warning" \
+    'grep -q "Warning: the pull failed" /tmp/e2e-1.log'
+
+echo "=== 3b. Restore the dump into a fresh Postgres, as the README says ==="
+restore_pg "$DUMPS/$DUMP" imgupd-test-restore-pg > /tmp/e2e-restore-pg.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-restore-pg.log
+check "Postgres restore: no psql error but the role postgres that exists already" '[ $RC = 0 ]'
+check "Postgres restore: rows, view, function, index, sequence, role and grant as before" \
+    '[ "$(pg_state imgupd-test-restore-pg)" = "$PG_STATE0" ]'
+half_dump "$DUMPS/$DUMP" /tmp/e2e-half-pg.sql.gz
+restore_pg /tmp/e2e-half-pg.sql.gz imgupd-test-restore-pg-half > /dev/null 2>&1; RC=$?
+check "Postgres restore of half the dump: caught (psql error or other data)" \
+    '[ $RC != 0 ] || [ "$(pg_state imgupd-test-restore-pg-half)" != "$PG_STATE0" ]'
+docker rm -f -v imgupd-test-restore-pg imgupd-test-restore-pg-half > /dev/null 2>&1
 
 echo "=== 4. Repair compose, roll back ==="
 write_compose "sleep infinity"
@@ -260,6 +369,8 @@ sed 's/^/  | /' /tmp/e2e-4.log
 R2=$(result_of /tmp/e2e-4.log)
 S2=$(jget "$R2" '(d["status"], len(d["dumps"]))')
 check "Exit 0 + status ok, no dump" '[ $RC = 0 ] && [ "$S2" = "('"'"'ok'"'"', 0)" ]'
+check "The local-only tag cannot be pulled: the newer image here rolled out with a warning" \
+    'grep -q "Warning: the pull failed" /tmp/e2e-4.log'
 check "Containers now on NEW" '[ "$(img_of imgupd-test-db)" = "$NEW" ] && [ "$(img_of imgupd-test-app)" = "$NEW" ]'
 check "Test data there after the update" 'docker exec imgupd-test-db psql -U postgres -Atc "select x from e2e" | grep -q hello-from-e2e'
 RB2=$(jget "$R2" 'd["rollback"]')
@@ -289,19 +400,33 @@ check "Rollback with another image in the compose file refused (5), nothing chan
     '[ $RC = 5 ] && grep -q "The compose files now give app: imgupd-test/pg:16-edited" /tmp/e2e-5b.log && [ "$(img_of imgupd-test-db)" = "$NEW" ] && [ "$(img_of imgupd-test-app)" = "$NEW" ]'
 write_compose "sleep infinity"
 
-echo "=== 6. Again – nothing newer ==="
+echo "=== 6. Again: the tag only this host has cannot be pulled, nothing newer here ==="
+# Up to 0.18.0 this was "nochange": the pull ran with --ignore-pull-failures.
+# A pull that fails says nothing about newer images: exit 5, nothing changed.
+OPS_N=$(wc -l < "$OPS")
 python3 $H update imgupd-test-db --no-dump > /tmp/e2e-5.log 2>&1; RC=$?
-R3=$(result_of /tmp/e2e-5.log)
-S3=$(jget "$R3" 'd["status"]')
-check "nochange, exit 0" '[ $RC = 0 ] && [ "$S3" = nochange ]'
+sed 's/^/  | /' /tmp/e2e-5.log
+check "Pull failed, nothing newer: exit 5, said so, no history entry" \
+    '[ $RC = 5 ] && grep -qF "The pull failed and there is no newer image on the server – nothing changed." /tmp/e2e-5.log && [ "$(wc -l < "$OPS")" = "$OPS_N" ]'
 check "No leftover rollback tag" '[ "$(docker image ls --format "{{.Tag}}" imgupd-test/pg | grep -c rollback)" = 2 ]'
+check "Containers still on NEW" '[ "$(img_of imgupd-test-db)" = "$NEW" ] && [ "$(img_of imgupd-test-app)" = "$NEW" ]'
 
-echo "=== 7. Lock: two updates at once ==="
-( python3 $H update imgupd-test-db --no-dump > /tmp/e2e-6.log 2>&1 ) &
-sleep 0.5
+echo "=== 7. Lock: an update while another process holds it ==="
+# A holder takes the lock and says so; no race with the speed of a pull.
+rm -f /tmp/e2e-hold.fifo /tmp/e2e-held.txt
+mkfifo /tmp/e2e-hold.fifo
+python3 -c 'import fcntl, sys; f = open(sys.argv[1], "w"); fcntl.flock(f, fcntl.LOCK_EX); print("held", flush=True); sys.stdin.read()' \
+    "$LOCKF" < /tmp/e2e-hold.fifo > /tmp/e2e-held.txt &
+HOLDER=$!
+exec 8> /tmp/e2e-hold.fifo
+wait_for 30 grep -q held /tmp/e2e-held.txt
 python3 $H update imgupd-test-db --no-dump > /tmp/e2e-7.log 2>&1; RC=$?
-wait
-check "Second update gets 75" '[ $RC = 75 ]'
+exec 8>&-
+wait "$HOLDER"
+HOLDER=
+check "An update while the lock is held gets 75" '[ $RC = 75 ] && grep -q "already running" /tmp/e2e-7.log'
+python3 $H update imgupd-test-db --no-dump > /tmp/e2e-7b.log 2>&1; RC=$?
+check "Lock released: the next update runs (exit 5 again, nothing newer)" '[ $RC = 5 ]'
 
 echo "=== 8. Backups overview, cleanup preview ==="
 BK=$(python3 $H backups)
@@ -357,6 +482,54 @@ write_compose "sleep infinity"
 python3 $H rollback "$OP5" > /tmp/e2e-11.log 2>&1; RC=$?
 check "Restart loop: rollback, containers back on NEW" '[ $RC = 0 ] && [ "$(img_of imgupd-test-db)" = "$NEW" ] && [ "$(img_of imgupd-test-app)" = "$NEW" ]'
 
+echo "=== 10c. Pulls against a local registry ==="
+docker run -d --name imgupd-test-registry -p "127.0.0.1:$REG_PORT:5000" "$REGISTRY_IMAGE" > /dev/null
+wait_for 60 registry_up
+check "Local registry up on 127.0.0.1:$REG_PORT" 'registry_up'
+docker tag "$OLD" "$REG/imgupd-test/reg:16"
+docker push -q "$REG/imgupd-test/reg:16" > /dev/null
+if [ "$E2E_MYSQL" = 1 ]; then
+    docker tag "$MARIADB_IMAGE" "$REG/imgupd-test/mariadb:11"
+    docker tag "$MYSQL_IMAGE" "$REG/imgupd-test/mysql:8"
+    docker push -q "$REG/imgupd-test/mariadb:11" > /dev/null
+    docker push -q "$REG/imgupd-test/mysql:8" > /dev/null
+fi
+mkdir -p "$D3"
+cat > "$D3/docker-compose.yml" <<EOF
+name: $P3
+services:
+  app:
+    image: $REG/imgupd-test/reg:16
+    container_name: imgupd-test-reg
+    entrypoint: ["sh", "-c"]
+    command: ["sleep infinity"]
+EOF
+docker compose -p "$P3" -f "$D3/docker-compose.yml" up -d --wait 2>&1 | tail -n 2
+reg_rollbacks() { docker image ls --format '{{.Tag}}' "$REG/imgupd-test/reg" | grep -c rollback; }
+python3 $H update imgupd-test-reg --no-dump > /tmp/e2e-reg1.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-reg1.log
+S=$(jget "$(result_of /tmp/e2e-reg1.log)" 'd["status"]')
+check "The pull works, the registry has the same image: nochange, exit 0, no rollback tag left" \
+    '[ $RC = 0 ] && [ "$S" = nochange ] && [ "$(reg_rollbacks)" = 0 ]'
+docker stop imgupd-test-registry > /dev/null
+OPS_N=$(wc -l < "$OPS")
+python3 $H update imgupd-test-reg --no-dump > /tmp/e2e-reg2.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-reg2.log
+check "Registry down, nothing newer here: exit 5, said so, nothing changed" \
+    '[ $RC = 5 ] && grep -qF "The pull failed and there is no newer image on the server – nothing changed." /tmp/e2e-reg2.log && [ "$(wc -l < "$OPS")" = "$OPS_N" ] && [ "$(reg_rollbacks)" = 0 ] && [ "$(img_of imgupd-test-reg)" = "$OLD" ]'
+docker tag "$NEW" "$REG/imgupd-test/reg:16"
+python3 $H update imgupd-test-reg --no-dump > /tmp/e2e-reg3.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-reg3.log
+S=$(jget "$(result_of /tmp/e2e-reg3.log)" 'd["status"]')
+check "Registry down, a newer image here: rolled out with a warning" \
+    '[ $RC = 0 ] && [ "$S" = ok ] && grep -q "Warning: the pull failed" /tmp/e2e-reg3.log && [ "$(img_of imgupd-test-reg)" = "$NEW" ]'
+docker start imgupd-test-registry > /dev/null
+wait_for 60 registry_up
+docker push -q "$REG/imgupd-test/reg:16" > /dev/null
+python3 $H update imgupd-test-reg --no-dump > /tmp/e2e-reg4.log 2>&1; RC=$?
+S=$(jget "$(result_of /tmp/e2e-reg4.log)" 'd["status"]')
+check "Registry back with the new image: nochange" '[ $RC = 0 ] && [ "$S" = nochange ]'
+
 if [ "$E2E_MYSQL" = 1 ]; then
     echo "=== 11. MariaDB + MySQL: dumps with test data ==="
     mkdir -p "$D2"
@@ -364,7 +537,7 @@ if [ "$E2E_MYSQL" = 1 ]; then
 name: $P2
 services:
   mariadb:
-    image: imgupd-test/mariadb:11
+    image: $REG/imgupd-test/mariadb:11
     container_name: imgupd-test-mariadb
     # options only, as in Nextcloud's example: the entrypoint starts mariadbd with them
     command: ["--transaction-isolation=READ-COMMITTED", "--log-bin=binlog", "--binlog-format=ROW"]
@@ -376,7 +549,7 @@ services:
       interval: 2s
       retries: 60
   mysql:
-    image: imgupd-test/mysql:8
+    image: $REG/imgupd-test/mysql:8
     container_name: imgupd-test-mysql
     environment:
       MYSQL_ROOT_PASSWORD: test-only
@@ -386,15 +559,29 @@ services:
       interval: 2s
       retries: 90
 EOF
-    docker tag "$MARIADB_IMAGE" imgupd-test/mariadb:11
-    docker tag "$MYSQL_IMAGE" imgupd-test/mysql:8
     docker compose -p "$P2" -f "$D2/docker-compose.yml" up -d --wait 2>&1 | tail -n 3
-    docker exec imgupd-test-mariadb mariadb -uroot -ptest-only e2e -e "create table t(x text); insert into t values ('hello-from-mariadb');"
-    docker exec imgupd-test-mysql mysql -uroot -ptest-only e2e -e "create table t(x text); insert into t values ('hello-from-mysql');" 2>/dev/null
+    for db in mariadb mysql; do
+        docker exec "imgupd-test-$db" "$db" -uroot -ptest-only e2e -e "
+            create table t(id int primary key auto_increment, x varchar(100) not null, n decimal(10,2) null);
+            insert into t(x, n) values ('hello-from-$db', 1.50), ('second', null);
+            create view v as select x from t where n is not null;
+            create function f() returns int deterministic reads sql data return (select count(*) from t);
+            create procedure p() select count(*) from t;
+            create trigger tr before insert on t for each row set new.x = trim(new.x);
+            create event ev on schedule every 1 day do delete from t where id < 0;
+            create user 'imgupd_reader'@'%' identified by 'reader-only';
+            grant select on e2e.* to 'imgupd_reader'@'%';" 2>/dev/null
+    done
+    MD_STATE0=$(my_state imgupd-test-mariadb mariadb)
+    MY_STATE0=$(my_state imgupd-test-mysql mysql)
+    echo "MariaDB test data: $MD_STATE0" | tr '\n' ' '; echo
+    echo "MySQL test data: $MY_STATE0" | tr '\n' ' '; echo
+    check "MariaDB and MySQL test data in place (rows, view, function, procedure, trigger, event, user)" \
+        '[ "$(echo "$MD_STATE0" | wc -l)" = 7 ] && [ "$(echo "$MY_STATE0" | wc -l)" = 7 ] && echo "$MD_STATE0" | grep -q "^1|hello-from-mariadb|1.50;2|second|NULL$" && echo "$MY_STATE0" | grep -q "^FUNCTION:f,PROCEDURE:p$"'
     PLAN=$(python3 $H plan imgupd-test-mariadb)
     KINDS=$(jget "$PLAN" 'sorted((x["name"], x["kind"]) for x in d["dbs"])')
     check "Plan: both databases as mysql" '[ "$KINDS" = "[('"'"'imgupd-test-mariadb'"'"', '"'"'mysql'"'"'), ('"'"'imgupd-test-mysql'"'"', '"'"'mysql'"'"')]" ]'
-    # The local-only tag cannot be pulled: the dumps run, then "nothing newer".
+    # The registry has the same images: the dumps run, then "nothing newer"; the dumps stay.
     python3 $H update imgupd-test-mariadb > /tmp/e2e-10.log 2>&1; RC=$?
     sed 's/^/  | /' /tmp/e2e-10.log
     R4=$(result_of /tmp/e2e-10.log)
@@ -404,6 +591,21 @@ EOF
     MY=$(jget "$R4" '[x for x in d["dumps"] if "_imgupd-test-mysql" in x][0]')
     check "MariaDB dump: test data + end marker" 'zcat "$DUMPS/$MD" | grep -q hello-from-mariadb && zcat "$DUMPS/$MD" | tail -n 3 | grep -q "^-- Dump completed"'
     check "MySQL dump: test data + end marker" 'zcat "$DUMPS/$MY" | grep -q hello-from-mysql && zcat "$DUMPS/$MY" | tail -n 3 | grep -q "^-- Dump completed"'
+
+    echo "=== 11b. Restore both dumps into fresh MariaDB and MySQL containers, as the README says ==="
+    restore_my "$DUMPS/$MD" imgupd-test-restore-mariadb "$REG/imgupd-test/mariadb:11" mariadb MARIADB > /tmp/e2e-restore-md.log 2>&1; RC=$?
+    sed 's/^/  | /' /tmp/e2e-restore-md.log
+    check "MariaDB restore: no error, everything as before" \
+        '[ $RC = 0 ] && [ "$(my_state imgupd-test-restore-mariadb mariadb)" = "$MD_STATE0" ]'
+    restore_my "$DUMPS/$MY" imgupd-test-restore-mysql "$REG/imgupd-test/mysql:8" mysql MYSQL > /tmp/e2e-restore-my.log 2>&1; RC=$?
+    sed 's/^/  | /' /tmp/e2e-restore-my.log
+    check "MySQL restore: no error, everything as before" \
+        '[ $RC = 0 ] && [ "$(my_state imgupd-test-restore-mysql mysql)" = "$MY_STATE0" ]'
+    half_dump "$DUMPS/$MD" /tmp/e2e-half-md.sql.gz
+    restore_my /tmp/e2e-half-md.sql.gz imgupd-test-restore-md-half "$REG/imgupd-test/mariadb:11" mariadb MARIADB > /dev/null 2>&1; RC=$?
+    check "MariaDB restore of half the dump: caught (client error or other data)" \
+        '[ $RC != 0 ] || [ "$(my_state imgupd-test-restore-md-half mariadb)" != "$MD_STATE0" ]'
+    docker rm -f -v imgupd-test-restore-mariadb imgupd-test-restore-mysql imgupd-test-restore-md-half > /dev/null 2>&1
 
     echo "=== 12. Wrong password – must stop before any change ==="
     docker exec imgupd-test-mariadb mariadb -uroot -ptest-only -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'changed'; ALTER USER 'root'@'%' IDENTIFIED BY 'changed';"
@@ -514,4 +716,5 @@ rm -f "$D/docker-compose.override.yml"
 write_compose "sleep infinity"
 
 echo
-[ $FAIL = 0 ] && echo "E2E: ALL CHECKS PASSED" || echo "E2E: FAILURES"
+if [ "$FAIL" = 0 ]; then echo "E2E: ALL CHECKS PASSED"; else echo "E2E: FAILURES"; fi
+exit "$FAIL"

@@ -314,7 +314,7 @@ If the project lies in a git repository, the dialog says so; the add-on never co
 
 **Restoring a dump (manually, with care)**
 
-A `pg_dumpall` dump creates roles and databases anew. It belongs in an **empty** Postgres instance. Restored into a running instance with the same databases, it gives “already exists” errors and mixed states. A proven way: stop the app, back up or rename the data volume, start the database container with an empty volume, then:
+A `pg_dumpall` dump creates roles and databases anew. It belongs in an **empty** Postgres instance. Restored into a running instance with the same databases, it gives “already exists” errors and mixed states. A proven way: stop the app, back up or rename the data volume, start the database container with an empty volume and the **same image** (the same major version), then:
 
 ```bash
 # Postgres
@@ -324,8 +324,20 @@ zcat /var/backups/image-updates/dumps/<project>/<file>.sql.gz \
 # MariaDB
 zcat /var/backups/image-updates/dumps/<project>/<file>.sql.gz \
   | docker exec -i <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
-# MySQL: mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
+docker exec <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "FLUSH PRIVILEGES"'
+# MySQL: the same with mysql and $MYSQL_ROOT_PASSWORD
 ```
+
+- **Postgres:** one error is expected and harmless: `role "postgres" already exists` (the new instance
+  made it). Any other `ERROR` line means the restore is incomplete: start again with an empty volume.
+- **MariaDB, MySQL:** the dump holds all databases including the users (`mysql`), so start the new
+  container with the **root password of the dumped one**; afterwards the old users and passwords apply.
+  The client stops at the first error and exits with 1.
+- **Check** the result before the app writes to it again: the tables, row counts and the users you
+  expect. The end-to-end test (`test/e2e-server.sh`, in CI on every change) restores every dump it makes
+  this way into a fresh Postgres, MariaDB and MySQL container and compares rows, views, functions,
+  procedures, triggers, events, indexes, sequences, users and grants with the original; half a dump is
+  caught as a failed restore.
 
 ---
 
