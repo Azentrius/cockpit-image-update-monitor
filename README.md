@@ -461,23 +461,23 @@ Two ways, the same package:
 
 | | Debian, Ubuntu | Fedora, RHEL | openSUSE |
 |---|---|---|---|
-| [Azentrius package repository](https://packages.azentrius.de) (`apt`, `dnf`) | yes | yes (set-up tested on Fedora; RHEL derivatives use the same `dnf` set-up, untested) | no |
+| [Azentrius package repository](https://packages.azentrius.com) (`apt`, `dnf`) | yes | yes (set-up tested on Fedora; RHEL derivatives use the same `dnf` set-up, untested) | no |
 | [Release files](https://github.com/Azentrius/cockpit-image-update-monitor/releases), checked first | yes | yes | yes, the only way (`zypper`) |
 
 Which systems are tested how: [Supported systems](#supported-systems).
 
 **From the Azentrius package repository** (Debian, Ubuntu, Fedora, RHEL). Set up
-[packages.azentrius.de](https://packages.azentrius.de) once:
+[packages.azentrius.com](https://packages.azentrius.com) once:
 
 ```bash
 # Debian and Ubuntu
-curl -fsSLO https://packages.azentrius.de/azentrius-repository.deb
+curl -fsSLO https://packages.azentrius.com/azentrius-repository.deb
 sudo apt install ./azentrius-repository.deb
 sudo apt update
 
 # Fedora and RHEL (Rocky, Alma)
-sudo rpm --import https://packages.azentrius.de/azentrius.asc
-sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
+sudo rpm --import https://packages.azentrius.com/azentrius.asc
+sudo dnf install https://packages.azentrius.com/azentrius-repository.rpm
 ```
 
 Then install **Image Update Monitor** in Cockpit under **Applications** (with administrative access), or on the
@@ -686,7 +686,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 
 1. Raise `VERSION` and every `?v=` in `plugin/index.html` (`tools/check-version.sh` finds any it misses), add a section `## X.Y.Z – YYYY-MM-DD` to `CHANGELOG.md`, merge.
 2. Actions › release › Run workflow on `main`. The workflow checks the version, runs the tests, builds the `.deb` and `.rpm` and the source archive `cockpit-image-update-monitor-X.Y.Z.tar.gz` with `SHA256SUMS` and creates the tag `vX.Y.Z` with a release whose notes come from `CHANGELOG.md`. It also signs a build provenance for each file; `gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor` shows that it was built by this workflow from this repository.
-3. packages.azentrius.de takes the packages from the release within an hour ([Azentrius/packages](https://github.com/Azentrius/packages)).
+3. packages.azentrius.com takes the packages from the release within an hour ([Azentrius/packages](https://github.com/Azentrius/packages)).
 
 ---
 
@@ -730,4 +730,4 @@ Third-party material keeps its own license, see [NOTICE](NOTICE): the fonts DM S
 
 Please report security issues privately, see [SECURITY.md](SECURITY.md).
 
-Made by [Azentrius](https://azentrius.de).
+Made by [Azentrius](https://azentrius.com).

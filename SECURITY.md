@@ -7,7 +7,7 @@ Please do **not** open a public issue for security problems.
 Report them privately through GitHub instead:
 [Report a vulnerability](https://github.com/Azentrius/cockpit-image-update-monitor/security/advisories/new)
 (tab **Security → Report a vulnerability** in this repository).
-If you cannot use GitHub, write to **support@azentrius.de**.
+If you cannot use GitHub, write to **support@azentrius.com**.
 
 Please include:
 
@@ -37,7 +37,7 @@ is a development state, not a supported installation.
 To stay on a supported version, upgrade to the newest release:
 
 ```bash
-# From packages.azentrius.de (Debian, Ubuntu, Fedora, RHEL; see README)
+# From packages.azentrius.com (Debian, Ubuntu, Fedora, RHEL; see README)
 sudo apt update && sudo apt install cockpit-image-update-monitor   # Debian, Ubuntu
 sudo dnf upgrade cockpit-image-update-monitor                      # Fedora, RHEL
 
@@ -61,7 +61,7 @@ A fixed vulnerability is announced with:
 - an entry in `CHANGELOG.md` marked as a security fix,
 - the release notes of the fixed release, which come from `CHANGELOG.md`.
 
-packages.azentrius.de takes the new release within an hour. To be notified, watch this repository's
+packages.azentrius.com takes the new release within an hour. To be notified, watch this repository's
 releases on GitHub (**Watch › Custom › Releases**).
 
 ## Especially relevant

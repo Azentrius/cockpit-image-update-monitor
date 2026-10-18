@@ -234,7 +234,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     const sig = b.d.querySelector("footer.az-signature");
     console.log("\nsignature:", sig.textContent.replace(/\s+/g, " ").trim());
     assert.strictEqual(sig.querySelector(".az-signature__mark").textContent, "Azentrius");
-    assert.strictEqual(sig.querySelector(".az-signature__mark").getAttribute("href"), "https://azentrius.de");
+    assert.strictEqual(sig.querySelector(".az-signature__mark").getAttribute("href"), "https://azentrius.com");
     const source = sig.querySelector(".az-signature__meta a");
     assert.deepStrictEqual([source.textContent, source.getAttribute("href"), source.previousElementSibling.id],
         ["Quellcode", "https://github.com/Azentrius/cockpit-image-update-monitor", "dm-sig-host"], "the source link comes last");
