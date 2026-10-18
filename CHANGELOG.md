@@ -1,7 +1,34 @@
 # Changelog
 
-## Unreleased
+## 0.19.0 – 2026-10-18
 
+Ready for wider use: docker commands and dumps have time limits, every dump is restored and checked
+in CI against a real Docker Engine, the supported systems are named and the minimum versions are
+enforced, and a killed or interrupted update keeps its output. Line tags show the release they run.
+
+**Upgrading:** install the package as usual (`apt`, `dnf`, `zypper`); nothing to change by hand.
+New, optional: `DOCKER_TIMEOUT` and `DUMP_TIMEOUT` in `/etc/image-updates.conf` (defaults 30 minutes
+and 4 hours); raise `DUMP_TIMEOUT` for very large databases. Cockpit now checks its version (264 or
+newer), and Docker Compose older than 2.8 counts as missing. openSUSE Leap 15.6 (Python 3.6) is not
+supported.
+
+- **End-to-end test in CI, dumps restored.** `test/e2e-server.sh` runs on every push against the
+  Docker Engine of a throw-away GitHub runner, and before every release. It restores every dump the
+  helper writes into a fresh Postgres, MariaDB and MySQL container and compares rows, views,
+  functions, procedures, triggers, events, indexes, sequences, users and grants with the original;
+  half a dump must be caught. Pulls run against a local registry: nothing newer, registry down with
+  and without a newer image here. The cases that still expected “no change” for a tag that cannot be
+  pulled now expect the stop before any change (exit 5).
+- **More checks in CI:** the helper tests on Python 3.8; the packages installed and removed on
+  Debian 12, Ubuntu 22.04 and 24.04, Rocky Linux 9 and 10 and openSUSE Leap 16.0; an upgrade from the
+  newest release on Debian 13 and Fedora 43; gitleaks over the whole history.
+- **Security policy and contributing:** `SECURITY.md` says which releases get fixes (the newest) and
+  how to upgrade and report; `CONTRIBUTING.md`, issue forms (with a warning against pasting
+  credentials) and a pull request template.
+- **UI tests without fixed waits.** The plugin tests waited 5 to 400 ms for the stubbed helpers, which
+  a slow CI runner could miss. They now wait until every answer has arrived and the page has handled
+  it; states in between (a slow inventory, a running preview) are checked behind answers the test
+  releases itself.
 - **Maintenance: the page's texts in a file of their own.** The English and German texts (`I18N`)
   moved unchanged from `plugin/diun.js` to `plugin/i18n.js`, which `index.html` loads first; `diun.js`
   keeps the code (1755 instead of 2445 lines), and a translation can be reviewed on its own.
