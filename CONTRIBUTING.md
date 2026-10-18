@@ -50,6 +50,16 @@ local registry on port 5000, `E2E_REGISTRY_PORT`), touches nothing else and clea
 runs it on a GitHub runner on every push and before every release. A new flow in the helpers gets a
 section there.
 
+## The page in a real Cockpit
+
+The job `cockpit` installs Cockpit on a throw-away GitHub runner and drives the page through
+Cockpit's login with Playwright (`test/cockpit-setup.sh`, `test/cockpit-session.py`): the upgrade
+from the release before, the menu, errors in the browser, with and without administrative access,
+the radar set up from the page and an update with its rollback. It creates users and containers and
+installs packages, so it runs only there, never on a machine you use. Its summary lists the versions
+and every step; the artifact `cockpit-session` has screenshots. A change to what the page does in
+Cockpit gets a step there.
+
 ## How the add-on is built
 
 - **Root code only in `lib/`**, installed to `/usr/lib/cockpit-image-updates` (root-owned). Nothing is

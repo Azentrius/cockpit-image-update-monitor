@@ -425,12 +425,14 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 
 ## Requirements
 
-- Linux with **systemd** and **Cockpit 264** or newer (`plugin/manifest.json` makes Cockpit check it)
+- Linux with **systemd** and **Cockpit 264** or newer (the package depends on `cockpit-bridge` 264 or newer,
+  and `plugin/manifest.json` makes Cockpit check it)
 - **Docker Engine** with the **Docker Compose plugin 2.8** or newer (`docker compose`; Compose counts
   5.x since 2025, that is fine). The helpers run `up --pull never`, which came with Compose 2.8.0. The
   standalone `docker-compose` 1.x is not supported; Debian 12's own `docker.io` brings only that, so
   use Docker's packages there.
-- **Python 3.8** or newer, standard library only; `/bin/sh`, `flock`, `timeout` (coreutils), `systemctl`
+- **Python 3.8** or newer (the package depends on `python3` 3.8 or newer), standard library only;
+  `/bin/sh`, `flock`, `timeout` (coreutils), `systemctl`
 - For the radar: **skopeo** (the add-on installs it on request with `apt-get`, `dnf` or `zypper`)
 - For digest updates: **Diun** (the add-on sets up `/opt/diun` on request)
 
@@ -442,9 +444,11 @@ tested system by itself.
 | | Systems | What is checked |
 |---|---|---|
 | **Tested** | Ubuntu 24.04 (GitHub runner) with Docker Engine and Compose from the runner image | every helper against the real Docker Engine: updates, rollbacks, pulls against a registry, dumps and their restore into Postgres 16, MariaDB 11 and MySQL 8 (job `e2e`, also before every release) |
+| **Tested** | Ubuntu 24.04 (GitHub runner) with Ubuntu's Cockpit, systemd and Docker | the page in a real Cockpit session in Chromium (job `cockpit`): installed with apt over the release before, reloaded and logged in again after that upgrade, found in the menu, no JavaScript or resource errors, with and without administrative access, skopeo and the radar set up from the page and a radar run, an update with its live output and result and its rollback on a throw-away compose project; versions, steps and screenshots in the job summary and the artifact `cockpit-session` |
 | **Tested** | Python 3.8 and 3.12 | the helper tests (fake Docker); 3.8 is the oldest supported |
-| **Package installs** | Debian 12 and 13, Ubuntu 22.04 and 24.04, Fedora 43, Rocky Linux 9 and 10 (for RHEL 9 and 10), openSUSE Leap 16.0 | the package installs with the distribution's own dependencies, the helpers answer, the package removes cleanly; on Debian 13 and Fedora 43 also an upgrade from the newest release. No Cockpit, Docker or systemd runs there. |
-| **Expected, untested** | the systems of the row above with Cockpit 264 or newer and Docker's Engine and Compose packages (on RHEL: `docker-ce` and `docker-compose-plugin` from Docker's repository; on openSUSE: `docker`, `docker-compose` with zypper) | the page in a real Cockpit, Diun, the radar's registry access |
+| **Package installs** | Debian 12 and 13, Ubuntu 22.04 and 24.04, Fedora 43, Rocky Linux 9 and 10 (for RHEL 9 and 10), openSUSE Leap 16.0 | the package installs with the distribution's own dependencies (`cockpit-bridge` 264 or newer, `python3` 3.8 or newer), the helpers answer, skopeo installs the way the page does it (`apt-get`, `dnf`, `zypper`), the package removes cleanly; on Debian 13 and Fedora 43 also an upgrade from the newest older release, the installed files checked against this build and the data kept. No Cockpit, Docker or systemd runs there. |
+| **Expected, untested** | the systems of the row above, besides Ubuntu 24.04, with Cockpit 264 or newer and Docker's Engine and Compose packages (on RHEL: `docker-ce` and `docker-compose-plugin` from Docker's repository; on openSUSE: `docker`, `docker-compose` with zypper) | the page in a real Cockpit there, Diun, the radar's registry access |
+| **Refused** | Ubuntu 20.04 (Cockpit 215), Rocky Linux 8 (`python3` is 3.6) | checked in CI: the package manager refuses the package for the dependency that is too old |
 | **Not supported** | Podman (also with `podman-docker`), Compose 1.x and below 2.8, Swarm, Kubernetes, rootless Docker, systems without systemd, openSUSE Leap 15.6 (Python 3.6, end of life) | |
 
 Containers not started by Compose are shown, but not updated.

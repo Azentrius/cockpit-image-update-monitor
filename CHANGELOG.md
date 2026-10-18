@@ -2,15 +2,18 @@
 
 ## 0.19.0 – 2026-10-18
 
-Ready for wider use: docker commands and dumps have time limits, every dump is restored and checked
-in CI against a real Docker Engine, the supported systems are named and the minimum versions are
-enforced, and a killed or interrupted update keeps its output. Line tags show the release they run.
+Ready for wider use: docker commands and dumps have time limits and a stopped run cleans up before it
+frees the lock, every dump is restored and checked in CI against a real Docker Engine, the page is
+tested in a real Cockpit, the supported systems are named and the packages enforce the minimum
+versions, and a killed update keeps its output. Line tags show the release they run.
 
-**Upgrading:** install the package as usual (`apt`, `dnf`, `zypper`); nothing to change by hand.
+**Upgrading:** install the package as usual (`apt` or `dnf` from packages.azentrius.de, or the checked
+release files, on openSUSE with `zypper`); nothing to change by hand.
 New, optional: `DOCKER_TIMEOUT` and `DUMP_TIMEOUT` in `/etc/image-updates.conf` (defaults 30 minutes
 and 4 hours); raise `DUMP_TIMEOUT` for very large databases. Cockpit now checks its version (264 or
-newer), and Docker Compose older than 2.8 counts as missing. openSUSE Leap 15.6 (Python 3.6) is not
-supported.
+newer), and Docker Compose older than 2.8 counts as missing. The packages now depend on
+`cockpit-bridge` 264 or newer and `python3` 3.8 or newer: on older systems (Ubuntu 20.04, RHEL 8 and
+its derivatives, openSUSE Leap 15.6) the package manager refuses the update.
 
 - **End-to-end test in CI, dumps restored.** `test/e2e-server.sh` runs on every push against the
   Docker Engine of a throw-away GitHub runner, and before every release. It restores every dump the
@@ -19,9 +22,31 @@ supported.
   half a dump must be caught. Pulls run against a local registry: nothing newer, registry down with
   and without a newer image here. The cases that still expected “no change” for a tag that cannot be
   pulled now expect the stop before any change (exit 5).
+- **The page in a real Cockpit, in CI.** The new job `cockpit` installs Cockpit on a throw-away GitHub
+  runner (Ubuntu 24.04, with systemd and Docker) and drives the page through Cockpit's login in
+  Chromium: this build installed with apt over the release before, the page reloaded and logged in
+  again after that upgrade, found in the menu, without JavaScript or resource errors, with and
+  without administrative access; skopeo and the radar set up from the page and a radar run; on a
+  throw-away compose project an update with its plan, live output and result, and its rollback.
+  The job summary lists the versions and every step, the artifact `cockpit-session` has screenshots.
 - **More checks in CI:** the helper tests on Python 3.8; the packages installed and removed on
-  Debian 12, Ubuntu 22.04 and 24.04, Rocky Linux 9 and 10 and openSUSE Leap 16.0; an upgrade from the
-  newest release on Debian 13 and Fedora 43; gitleaks over the whole history.
+  Debian 12, Ubuntu 22.04 and 24.04, Rocky Linux 9 and 10 and openSUSE Leap 16.0, skopeo installed
+  there the way the page does it; gitleaks over the whole history.
+- **Upgrade test that holds after a release.** The job `upgrade` took the newest release as the base
+  and required another version, so after 0.19.0 every pull request without a new version would have
+  failed. It now starts from the newest release older than the build by Semantic Versioning (not a
+  draft or pre-release, with packages; `tools/upgrade-base.py`), checked against `SHA256SUMS` and its
+  build provenance, and checks on Debian 13 and Fedora 43 that the version went up by the package
+  manager's own comparison, that the installed files are this build's byte for byte and that the
+  data stays over the upgrade and the removal. Without an older release it says so and checks a
+  fresh install.
+- **Packages require the minimum versions.** `cockpit-bridge (>= 264)` and `python3 (>= 3.8)` in the
+  `.deb`, `cockpit-bridge >= 264` and `python3 >= 3.8` in the `.rpm`, instead of any version. CI checks
+  the metadata and that Ubuntu 20.04 (Cockpit 215) and Rocky Linux 8 (`python3` 3.6) refuse the
+  package for that reason.
+- **Releases wait for every test job.** The release workflow checks that the whole test workflow
+  passed for the commit it releases (the end-to-end test, the installs, the upgrade, the Cockpit
+  session), not only the required check `test`.
 - **Security policy and contributing:** `SECURITY.md` says which releases get fixes (the newest) and
   how to upgrade and report; `CONTRIBUTING.md`, issue forms (with a warning against pasting
   credentials) and a pull request template.
@@ -40,8 +65,10 @@ supported.
   Cockpit does not read; it is now `requires` (Cockpit 264, Ubuntu 22.04's).
 - **Compose older than 2.8 counts as missing.** The requirements check and the Diun setup now say
   "Docker Compose 2.8 or newer" instead of failing later in an update.
-- **openSUSE:** skopeo installs with zypper as well; the README and the release notes name
-  `zypper install` for the `.rpm`. Leap 15.6 (Python 3.6) is not supported.
+- **openSUSE:** skopeo installs with zypper as well. README, `SECURITY.md` and the release notes
+  give one way for openSUSE: the release's `.rpm`, checked against `SHA256SUMS` and its build
+  provenance first, then `zypper install --allow-unsigned-rpm`; the package repository has no openSUSE
+  packages. Leap 15.6 (Python 3.6) is not supported.
 - **Time limits for docker commands and dumps.** A `docker compose pull`, `docker compose up`,
   `docker rmi` or database dump that hung held the update lock for good: no other update, rollback or
   cleanup could run. Each now has a limit, `DOCKER_TIMEOUT` (default 1800 s) and `DUMP_TIMEOUT`
