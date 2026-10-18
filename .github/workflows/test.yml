@@ -203,7 +203,7 @@ jobs:
             case "$KIND" in
               deb) apt-get update -qq
                    apt-cache policy cockpit-bridge python3 | grep -E "^[a-z]|Candidate"
-                   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/*.deb > /tmp/out 2>&1 ;;
+                   DEBIAN_FRONTEND=noninteractive apt-get install -y /dist/*.deb > /tmp/out 2>&1 ;;
               rpm) dnf -q list --available cockpit-bridge python3 2>&1 | tail -n +1
                    dnf install -y -q /dist/*.rpm > /tmp/out 2>&1 ;;
             esac
