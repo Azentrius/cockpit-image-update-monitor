@@ -911,7 +911,7 @@
                 return;
             }
             const title = r.container ? t("upd.reasonTitle", { name: r.container })
-                : t(r.source === "error" ? "upd.reasonErrorTitle" : "upd.reasonComposeTitle");
+                : t(r.source === "error" || r.source === "signal" ? "upd.reasonErrorTitle" : "upd.reasonComposeTitle");
             el.innerHTML = `<span class="az-alert__icon">${icon("exclamation-circle")}</span>` +
                            `<p class="az-alert__title">${esc(title)}</p>` +
                            `<p class="az-alert__body dm-reason-line">${esc(reasonText(r))}</p>`;

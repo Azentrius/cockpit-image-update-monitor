@@ -195,11 +195,19 @@ the update): compose would start that one, not the rollback copy. Afterwards it 
 containers really run the rollback copy. A rollback that failed can be tried again once the cause is
 fixed.
 
-**An update that was cut off** (the helper killed, a power cut, Docker not answering after the
-restart) stays in the history with its rollback copy: the helper writes it there before any container
-changes. The backups tab shows it as “aborted” and offers the rollback. Its output is kept up to the
-cut, because it goes to the log file as it is printed (after a power cut the last lines can be
-missing).
+**An update that was stopped** with SIGTERM, SIGHUP or Ctrl-C (a `systemctl stop`, a closed
+terminal) ends through its cleanup and keeps the update lock until that is done: the docker command
+it ran is stopped; before any container changed, the dumps, the rollback copy and changed files are
+taken back (exit 5); during the restart the update fails with its history, output and rollback
+(exit 4), and the cause says that Docker may still be changing the containers. A second signal does
+not cut the cleanup short.
+
+**An update that was cut off** (the helper killed with SIGKILL, a power cut, Docker not answering
+after the restart) stays in the history with its rollback copy: the helper writes it there before any
+container changes. The backups tab shows it as “aborted” and offers the rollback. Its output is kept
+up to the cut, because it goes to the log file as it is printed (after a power cut the last lines can
+be missing). After SIGKILL the docker command it ran goes on and keeps the update lock until it ends;
+check `docker ps` before rolling back.
 
 **Unknown jump size:** if the installed version is unknown and the tag fixes no version number
 (`latest`, `stable` …), nobody can tell what the update brings. The plan says so first: it may be a new
@@ -389,7 +397,7 @@ flowchart LR
 | `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run |
 | `lib/diun-deps.sh` | `/usr/lib/cockpit-image-updates/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
 | `lib/diunlib.py` | `/usr/lib/cockpit-image-updates/` | shared functions (tag scheme, version variables, reach) |
-| `lib/diunproc.py` | `/usr/lib/cockpit-image-updates/` | docker commands and dumps with a time limit (process group stopped, never left behind) |
+| `lib/diunproc.py` | `/usr/lib/cockpit-image-updates/` | docker commands and dumps with a time limit (process group stopped, never left behind), signals turned into a cleanup |
 | `systemd/diun-radar.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install radar` enables the timer; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
 | `systemd/diun-cleanup.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install cleanup` enables the timer; runs daily (04:40) |
 | Diun stack | `/opt/diun/`, data `/var/lib/diun/` | created by `diun-deps.sh install diun`: Diun 4.33.0 + `docker-socket-proxy` (read-only), the script notifier writes JSON lines |

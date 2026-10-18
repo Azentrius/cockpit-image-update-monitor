@@ -59,6 +59,12 @@ Everything the addon writes lives in /var/backups/image-updates (root only):
 The machine-readable result of update/rollback/cleanup is the last line:
   @@RESULT {"op": "...", "status": "ok|nochange|failed", ...}
 
+SIGTERM, SIGHUP and SIGINT end a run through its cleanup (entry, diunproc):
+the docker command running is stopped, a run that changed no container yet
+takes back what it did (exit 5), one that did is recorded as failed with its
+rollback (exit 4), and only then is the lock free. SIGKILL cannot be caught:
+see diunproc and docs/INTERNALS.md.
+
 Lives in /usr/lib/cockpit-image-updates (root-owned, not mounted into any
 container). DIUN_LANG=de|en selects the language of the log messages.
 """
@@ -74,11 +80,12 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from diunlib import CI_JOB_RE, CI_RUNNER_RE, core, is_ci_job, local_version, nums_of, tag_digits  # noqa: E402
-from diunproc import Timeout, copy as copy_out, stream as stream_out  # noqa: E402
+from diunproc import Interrupted, Timeout, copy as copy_out, held, on_signals, stream as stream_out  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
@@ -150,7 +157,7 @@ def stream(cmd):
     seconds with diunproc.Timeout (the command stopped, STREAM_TAIL filled)."""
     print("+ " + " ".join(cmd), flush=True)
     try:
-        rc, tail = stream_out(cmd, LIMITS["docker"], sys.stdout)
+        rc, tail = stream_out(cmd, LIMITS["docker"], sys.stdout, keep_fds=lock_fds())
     except Timeout as e:
         STREAM_TAIL[:] = e.tail
         raise
@@ -224,6 +231,13 @@ def lock():
         raise Abort(75, "Es läuft bereits ein Update oder Rollback.",
                     "An update or rollback is already running.")
     _lock_fh = fh
+
+
+def lock_fds():
+    """The lock for the docker commands a run starts (diunproc keep_fds):
+    should the helper be killed with SIGKILL, the lock stays held until they
+    have ended as well."""
+    return (_lock_fh.fileno(),) if _lock_fh else ()
 
 
 def ensure_base():
@@ -1071,7 +1085,7 @@ def dump_db(project, db, st):
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6) as gz:
                 rc = copy_out(["docker", "exec", db["name"], "sh", "-c", script],
-                              lambda chunk: keep(gz, chunk), LIMITS["dump"], errf)
+                              lambda chunk: keep(gz, chunk), LIMITS["dump"], errf, keep_fds=lock_fds())
         except BaseException as e:
             try:
                 os.unlink(tmp)
@@ -1245,9 +1259,16 @@ def error_reason(e):
     """The cause when the helper itself stopped after the containers were
     recreated (Docker did not answer, a command failed): source "error".
     A command that did not end within its limit (diunproc.Timeout) gets
-    source "timeout": it was stopped, but what it asked the Docker daemon to
+    source "timeout", a signal to the helper (diunproc.Interrupted) source
+    "signal": the command was stopped, but what it asked the Docker daemon to
     do may go on or have stopped half way, so nobody can say the containers
     are as before."""
+    if isinstance(e, Interrupted):
+        return {"container": None, "state": None, "exit_code": None, "oom": False, "source": "signal",
+                "line": pick(f"diun-update.py hat {e.name} bekommen und den Neustart oder die Prüfung danach "
+                             f"abgebrochen; Docker kann die Container noch ändern – mit docker ps prüfen.",
+                             f"diun-update.py got {e.name} and stopped the restart or the check after it; Docker "
+                             f"may still be changing the containers – check with docker ps.")}
     if isinstance(e, Timeout):
         return {"container": None, "state": None, "exit_code": None, "oom": False, "source": "timeout",
                 "line": pick(f"{' '.join(e.cmd[-6:])} hat nach {e.seconds} s nicht geendet und wurde abgebrochen "
@@ -1281,14 +1302,15 @@ def record(entry, log=None):
     must survive a crash). log: the name under logs/ that keeps the output
     of this run (keep_log)."""
     ensure_base()
-    fd = os.open(OPS, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    with os.fdopen(fd, "a") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-    _recorded.add(entry.get("id"))
-    if log:
-        keep_log(log)
+    with held():        # a signal waits until the line is on disk (diunproc)
+        fd = os.open(OPS, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        _recorded.add(entry.get("id"))
+        if log:
+            keep_log(log)
 
 
 def keep_log(name):
@@ -1461,9 +1483,25 @@ def result(**kw):
 
 
 # ---------------------------------------------------------------- update ----
+@contextmanager
+def before_change():
+    """A signal (diunproc.Interrupted) while nothing has changed yet: exit 5."""
+    try:
+        yield
+    except Interrupted as e:
+        raise stopped(e, "nichts geändert.", "nothing changed.")
+
+
+def stopped(e, de, en):
+    """Abort(5) for a run that a signal stopped before any container changed."""
+    return Abort(5, f"Abgebrochen durch {e.name}, bevor ein Container geändert wurde – {de}",
+                 f"Stopped by {e.name} before any container changed – {en}")
+
+
 def cmd_update(name, do_dump=True):
     lock()
-    plan, ctx = make_plan(name)
+    with before_change():
+        plan, ctx = make_plan(name)
     if not plan["updatable"]:
         raise Abort(2, f"Nicht aktualisierbar: {plan['reason']}", f"Not updatable: {plan['reason']}")
     return roll_out(name, plan, ctx, do_dump)
@@ -1475,7 +1513,8 @@ def cmd_retag(name, new_tag, expect, do_dump=True):
     if not FP_RE.match(expect):
         raise Abort(64, f"Ungültiger Fingerabdruck: {expect}", f"Invalid fingerprint: {expect}")
     lock()
-    plan, ctx = make_retag(name, new_tag)
+    with before_change():
+        plan, ctx = make_retag(name, new_tag)
     rt = plan["retag"]
     if not rt["possible"]:
         why = rt["reason"] + (f" ({rt['detail']})" if rt.get("detail") else "")
@@ -1488,14 +1527,15 @@ def cmd_retag(name, new_tag, expect, do_dump=True):
 
 def discard(op):
     """A run that stops before any container changed leaves nothing behind:
-    no rollback tag, no dumps."""
-    if op.get("rollback"):
-        run(["docker", "rmi", op["rollback"]], check=False)
-    for rel in op["dumps"]:
-        try:
-            remove_dump(rel)
-        except (Abort, OSError):
-            pass
+    no rollback tag, no dumps. A signal meanwhile waits until it is done."""
+    with held():
+        if op.get("rollback"):
+            run(["docker", "rmi", op["rollback"]], check=False)
+        for rel in op["dumps"]:
+            try:
+                remove_dump(rel)
+            except (Abort, OSError):
+                pass
 
 
 def drop_run(op):
@@ -1504,23 +1544,28 @@ def drop_run(op):
     A run that is in the history already gets the status "discarded" there,
     which hides it, and keeps no output. If the files cannot be put back,
     everything stays: the history keeps the run, and its rollback restores
-    them."""
+    them. Runs once per run, and a signal meanwhile waits until it is done:
+    the cleanup is never cut in two."""
     global _log_name
-    if op.get("backup_files"):
-        try:
-            restore_files(op["backup_files"])
-        except OSError as e:
-            raise Abort(1, f"Wiederherstellen fehlgeschlagen ({e}) – die alten Dateien liegen in {op['backup']}; "
-                           f"der Vorgang steht im Verlauf und lässt sich zurückrollen.",
-                        f"Restoring failed ({e}) – the old files are in {op['backup']}; the operation is in the "
-                        f"history and can be rolled back.")
-        drop_backup(op["backup"])
-    discard(op)
-    if op["id"] in _recorded:
-        record({"id": op["id"], "status": "discarded"})
-        _log_name = None
-        if _tee:
-            _tee.close(keep=False)
+    if op.get("dropped"):
+        return
+    with held():
+        if op.get("backup_files"):
+            try:
+                restore_files(op["backup_files"])
+            except OSError as e:
+                raise Abort(1, f"Wiederherstellen fehlgeschlagen ({e}) – die alten Dateien liegen in "
+                               f"{op['backup']}; der Vorgang steht im Verlauf und lässt sich zurückrollen.",
+                            f"Restoring failed ({e}) – the old files are in {op['backup']}; the operation is in "
+                            f"the history and can be rolled back.")
+            drop_backup(op["backup"])
+        discard(op)
+        if op["id"] in _recorded:
+            record({"id": op["id"], "status": "discarded"})
+            _log_name = None
+            if _tee:
+                _tee.close(keep=False)
+        op["dropped"] = True
 
 
 def change_files(op, ctx, retag, services, st):
@@ -1578,13 +1623,15 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
     new_ref = retag["image"] if retag else ref
     repo, _tag = split_ref(ref)
     services, project = plan["services"], plan["project"]
-    old_ids = {n: inspect(n)["Image"] for n in plan["containers"]}
+    with before_change():
+        old_ids = {n: inspect(n)["Image"] for n in plan["containers"]}
+        from_version = version_of(ref, old_ids[name])
     old_id = old_ids[name]
     op = {"id": op_id, "ts": now_iso(), "kind": "retag" if retag else "update", "container": name,
           "project": project, "workdir": ctx["workdir"], "files": ctx["files"],
           "env_files": ctx["env_files"], "services": services,
           "containers": plan["containers"], "image": ref, "old_id": old_id,
-          "from_version": version_of(ref, old_id), "to_version": None,
+          "from_version": from_version, "to_version": None,
           "rollback": None, "dumps": [], "status": "running", "pid": os.getpid()}
 
     if retag:
@@ -1609,6 +1656,12 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         try:
             for d in dumpable:
                 op["dumps"].append(dump_db(project, d, st))
+        except Interrupted as e:
+            discard(op)
+            raise stopped(e, "die angefangenen Dumps sind gelöscht, nichts geändert. Ein Dump im Container endet, "
+                             "sobald er merkt, dass seine Ausgabe fehlt.",
+                          "the dumps begun are deleted, nothing changed. A dump in the container ends once it "
+                          "notices that its output is gone.")
         except Abort:
             # An aborted update leaves nothing behind, not even the dumps
             # of the other databases that worked.
@@ -1685,6 +1738,12 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         record(op, log=op_id + ".log")
     except Abort:
         raise
+    except Interrupted as e:
+        drop_run(op)
+        raise stopped(e, "Dumps, Rollback-Kopie und geänderte Dateien zurückgenommen, nichts geändert. Ein "
+                         "begonnener Pull kann im Docker-Daemon noch zu Ende laufen.",
+                      "dumps, rollback copy and changed files taken back, nothing changed. A pull that had "
+                      "begun may still finish in the Docker daemon.")
     except BaseException:
         drop_run(op)
         raise
@@ -1705,7 +1764,10 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         if not ok:
             show_logs(failed or plan["containers"])
             op["reason"] = failure_reason(failed or plan["containers"], compose_rc=rc)
-    except Exception as e:
+    except (Exception, Interrupted) as e:
+        # A signal stops the command running (diunproc) and lands here: the
+        # update fails with its history, output and rollback; further signals
+        # wait until that is recorded.
         ok = False
         op["reason"] = error_reason(e)
     if not ok:
@@ -1727,8 +1789,11 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         say("Update erfolgreich.", "Update successful.")
 
     # 5. + 6. Never let these turn a successful update into a failure.
-    cleanup_after_update(project, repo)
-    start_radar()
+    try:
+        cleanup_after_update(project, repo)
+        start_radar()
+    except Interrupted as e:
+        say(f"{e.name}: Aufräumen und Radar-Start übersprungen.", f"{e.name}: cleanup and radar start skipped.")
     result(op=op_id, status="ok", rollback=rb, dumps=op["dumps"], **versions)
     return 0
 
@@ -1819,31 +1884,36 @@ def cmd_rollback(op_id):
     # The files must give the services the operation's image (other_image):
     # without a tag change checked before anything changes, with one once its
     # files are back, which are written again as they were if not.
-    if not saved:
-        other_image(ctx, op)
-    say(f"Rollback von {op['image']} auf {rb} (Projekt {op['project']}) …",
-        f"Rolling {op['image']} back to {rb} (project {op['project']}) …")
-    say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
-        "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
-    if saved:
-        now = {}
-        for x in pending:
-            with open(os.path.realpath(x["path"]), "rb") as f:
-                now[x["path"]] = f.read()
-        restore_files(pending)
-        try:
+    now = {}            # the files as they were before this rollback put any back
+    try:
+        if not saved:
             other_image(ctx, op)
-        except Abort:
+        say(f"Rollback von {op['image']} auf {rb} (Projekt {op['project']}) …",
+            f"Rolling {op['image']} back to {rb} (project {op['project']}) …")
+        say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
+            "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
+        if saved:
+            for x in pending:
+                with open(os.path.realpath(x["path"]), "rb") as f:
+                    now[x["path"]] = f.read()
+            restore_files(pending)
+            other_image(ctx, op)
+            for x in pending:
+                say(f"Wiederhergestellt: {x['path']}", f"Restored: {x['path']}")
+    except (Abort, Interrupted) as e:
+        with held():
             for path, data in now.items():
                 write_like(path, data)
-            raise
-        for x in pending:
-            say(f"Wiederhergestellt: {x['path']}", f"Restored: {x['path']}")
+        if isinstance(e, Interrupted):
+            raise Abort(5, f"Rollback durch {e.name} abgebrochen, bevor ein Container geändert wurde – nichts "
+                           f"geändert.",
+                        f"Rollback stopped by {e.name} before any container changed – nothing changed.")
+        raise
     # The containers change from here on: the output goes to the log as printed.
     keep_log(op_id + ".rollback.log")
-    run(["docker", "tag", rb, op["image"]])
     ok, reason = False, None
     try:
+        run(["docker", "tag", rb, op["image"]])
         rc = stream(compose_cmd(ctx) + ["up", "-d", "--no-deps", "--pull", "never", *op["services"]])
         ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["services"])
         if ok:
@@ -1859,7 +1929,7 @@ def cmd_rollback(op_id):
         else:
             show_logs(failed or op["containers"])
             reason = failure_reason(failed or op["containers"], compose_rc=rc)
-    except Exception as e:
+    except (Exception, Interrupted) as e:
         ok, reason = False, error_reason(e)
     status = "ok" if ok else "failed"
     entry = {"id": op_id, "rolled_back": ok, "rollback_ts": now_iso(), "rollback_status": status,
@@ -2032,6 +2102,10 @@ def cmd_delete_image(ref):
                        f"ist, zeigt die Übersicht nach dem Neuladen.",
                     f"docker rmi did not end within {e.seconds} s and was stopped; whether {ref} is still there "
                     f"shows after a reload.")
+    except Interrupted as e:
+        raise Abort(1, f"docker rmi durch {e.name} abgebrochen; ob {ref} noch da ist, zeigt die Übersicht nach "
+                       f"dem Neuladen.",
+                    f"docker rmi stopped by {e.name}; whether {ref} is still there shows after a reload.")
 
 
 # --------------------------------------------------------------- cleanup ----
@@ -2270,15 +2344,35 @@ def main(argv):
     raise Abort(64, "Unbekannter Befehl: " + " ".join(argv), "Unknown command: " + " ".join(argv))
 
 
-if __name__ == "__main__":
+def entry(argv):
+    """main() as the command line runs it: a message for an error, and the
+    exit code. SIGTERM, SIGHUP and SIGINT end a run through its cleanup
+    (diunproc.on_signals): the docker command running is stopped, the run
+    takes back what it did or records what is left, and only then does the
+    process end and free the lock. The code is the run's own (5: stopped
+    before any change, 4: failed afterwards, with its rollback), else 128 +
+    the signal's number."""
+    guard = None
     try:
-        sys.exit(main(sys.argv[1:]))
+        with on_signals() as guard:
+            code = main(argv)
     except Abort as e:
         print(str(e), flush=True)
-        sys.exit(e.code)
+        code = e.code
     except subprocess.CalledProcessError as e:
         print((e.stderr or str(e)).strip(), flush=True)
-        sys.exit(1)
+        code = 1
     except (Timeout, subprocess.TimeoutExpired) as e:
         print(pick(f"Abgebrochen, Zeitgrenze überschritten: {e}", f"Stopped, time limit passed: {e}"), flush=True)
-        sys.exit(1)
+        code = 1
+    except Interrupted as e:
+        print(pick(f"Abgebrochen durch {e.name}.", f"Stopped by {e.name}."), flush=True)
+        code = 128 + e.signum
+    if guard is not None and guard.repeats:
+        say(f"{guard.repeats} weitere(s) Signal(e) während des Aufräumens nicht beachtet.",
+            f"{guard.repeats} more signal(s) ignored while cleaning up.")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(entry(sys.argv[1:]))

@@ -66,11 +66,41 @@ Inputs are checked by regex:
 | 1 | unexpected error of a subcommand (stderr in the output; `radar`: the run failed) |
 | 2 | not found / not possible (container, operation, rollback image gone, not updatable, radar not set up, cleanup rules not understood or not root-only) |
 | 3 | refused (rolled back already, successfully; file/container exists on `install`) |
-| 4 | after update/rollback the containers do not run stably, or `compose up` did not end within `DOCKER_TIMEOUT` (state unclear, `reason.source: "timeout"`) |
-| 5 | stopped before any change (dump failed or did not end within `DUMP_TIMEOUT`, too little space, database not running, the pull failed and left the old image or did not end within `DOCKER_TIMEOUT`; on `rollback`: a file of a tag change edited since, or the compose files giving the services another image) |
+| 4 | after update/rollback the containers do not run stably, or `compose up` did not end within `DOCKER_TIMEOUT` (state unclear, `reason.source: "timeout"`), or a signal stopped the restart (`reason.source: "signal"`, see [Signals](#signals)) |
+| 5 | stopped before any change (dump failed or did not end within `DUMP_TIMEOUT`, too little space, database not running, the pull failed and left the old image or did not end within `DOCKER_TIMEOUT`, a signal before any container changed; on `rollback`: a file of a tag change edited since, or the compose files giving the services another image) |
 | 64 | wrong call |
 | 75 | lock taken (already running) |
 | 77 | no root rights |
+| 128 + n | `diun-update.py` stopped by signal n where the verb has no code of its own for it: 143 SIGTERM, 129 SIGHUP, 130 SIGINT |
+
+### Signals
+
+Since 0.19.0 `diun-update.py` (`entry`) turns SIGTERM, SIGHUP and SIGINT into an exception
+(`diunproc.on_signals`, installed only there, not on import), so a run ends through its cleanup as it
+does after an error:
+
+- The docker command running (`compose pull`, `compose up`, `rmi`, the `docker exec` of a dump) is
+  stopped with its whole process group: SIGTERM, SIGKILL after 10 s, always waited for.
+- Before any container changed, the run takes back what it did: dumps (also a partial one), the
+  rollback tag, the files of a tag change; exit 5. A rollback stopped before it changed a container
+  puts back the files it had restored; exit 5.
+- During or after the restart (`compose up`, the wait for health, the watch of dependent services)
+  the update fails with its history, output and rollback: `status: "failed"`, `reason.source:
+  "signal"`, exit 4. A rollback in that phase is recorded as failed and can be tried again. The cause
+  never says that the containers are as before.
+- After a successful update a signal skips only the cleanup and the radar start.
+- The update lock stays held until all of that is done; then the process ends. Signals that come
+  during the cleanup are counted and ignored (the output says how many): they cannot cut it short.
+  A history line and the taking back of a run are never cut in two (`diunproc.held`).
+- What the stopped command had asked the Docker daemon to do may go on: a pull may finish, `compose
+  up` may still recreate containers, `pg_dumpall` or `mariadb-dump` in the container runs until it
+  notices that its output is gone.
+
+**SIGKILL** cannot be caught: the helper ends at once, without any cleanup. The run stays in the
+history as `running` with its `pid` and its output up to there (`logs/`); once that process is gone
+the page shows it as aborted and offers its rollback. The docker command it ran goes on in its own
+session. It inherited the update lock (`keep_fds`), so no other update, rollback or cleanup starts
+until it has ended as well (exit 75 meanwhile). Check with `docker ps` before acting on such a run.
 
 ## Formats
 
@@ -351,8 +381,9 @@ with `op`. The versions can be `null` (unknown).
   unhealthy container), `compose` (the last 50 lines `docker compose up` printed), `timeout` (since
   0.19.0: `compose up` did not end within `DOCKER_TIMEOUT`; `container` is `null`), `error` (since
   0.18.1: the helper itself stopped after the containers were recreated, e.g. Docker did not answer;
-  `container` is `null`), `image` (since 0.18.1, rollback only: the container runs another image than
-  the rollback copy) or `null`.
+  `container` is `null`), `signal` (since 0.19.0: SIGTERM, SIGHUP or SIGINT stopped the restart or the
+  check after it, see [Signals](#signals); `container` is `null`), `image` (since 0.18.1, rollback only:
+  the container runs another image than the rollback copy) or `null`.
 - `line` (`reason_line`): the last line that names an error (`Error:`, `TypeError:`,
   `…Exception`, `error:`, `panic:`, `FATAL`, `PANIC`, `CRITICAL`), plus the next line when it ends in
   `:`; otherwise the last line that mentions a problem (`error`, `failed`, `refused`, `not found` …).
@@ -616,8 +647,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, line tags (release by digest, the tag's number on a miss, exact tags untouched, a registry outage keeping the release per image ID), a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
-| `test/proc_test.py` | `diunproc` with real child processes: a silent hang, endless output, children that ignore SIGTERM (the group killed), a dump that hangs, the next command after a timeout |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes), time limits (a pull or dump over its limit stops before any change, `compose up` over its limit fails with its rollback, the limits from the settings file and their ranges) |
+| `test/proc_test.py` | `diunproc` with real child processes: a silent hang, endless output, children that ignore SIGTERM (the group killed), a dump that hangs, the next command after a timeout; signals: no handler changed on import, `on_signals` restores the handlers before it, `held` defers a signal; a helper that holds a lock gets SIGTERM or SIGHUP while its command runs (silent and printing, `stream` and `copy`) and keeps the lock until the stop has reached the command (synchronised through FIFOs), children that ignore SIGTERM with SIGTERM and SIGHUP again during the cleanup (SIGKILL after the grace time, repeats only counted), the next operation afterwards, SIGKILL (the command runs on and keeps the lock until it ends) |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes), signals (SIGTERM during the dump: exit 5, partial dump and everything else taken back; SIGHUP during the pull: exit 5; SIGTERM during `compose up`: exit 4 with history, output, rollback and the cause `signal`; SIGHUP during a rollback's restart: failed, offered again; a signal before the rollback changed a container: exit 5; the same with the real helper (`entry`), a real dump process and a real `compose up` process: state before the signal, the command gone, the lock free afterwards, the rollback), time limits (a pull or dump over its limit stops before any change, `compose up` over its limit fails with its rollback, the limits from the settings file and their ranges) |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |

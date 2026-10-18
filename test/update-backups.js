@@ -427,6 +427,21 @@ const BASE_SCRIPT = {
     rt.d.getElementById("dm-dialog-confirm").click();
     await settle();
     assert.strictEqual(rt.d.querySelector("#dm-dialog-reason .az-alert__title").textContent, "Ursache (Update-Helfer)");
+    // A signal to the helper (source "signal") is the helper's cause too, not docker compose's.
+    const SIG_LINE = "diun-update.py got SIGTERM and stopped the restart or the check after it; Docker may still be " +
+                     "changing the containers – check with docker ps.";
+    const sg = boot("en", { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: RETRY_OPS }) },
+        "diun-update.py rollback": { chunks: ["…\n", "@@RESULT " + JSON.stringify({ op: "20261012-030000-d", status: "failed",
+            reason: { ...RETRY_OPS[3].reason, source: "signal", line: SIG_LINE } }) + "\n"], fail: { exit_status: 4 } } });
+    await settle();
+    sg.d.getElementById("dm-tab-btn-backups").click();
+    await settle();
+    sg.d.querySelector('#dm-ops button[data-op="3"]').click();
+    sg.d.getElementById("dm-dialog-confirm").click();
+    await settle();
+    assert.deepStrictEqual([sg.d.querySelector("#dm-dialog-reason .az-alert__title").textContent,
+                            sg.d.querySelector("#dm-dialog-reason .dm-reason-line").textContent],
+                           ["Cause (update helper)", SIG_LINE]);
 
     // 9. The kept output: a button per history entry, the dialog shows it
     const withLog = { ...BACKUPS, ops: BACKUPS.ops.map((o, i) => ({ ...o, log: i === 0, rollback_log: false })) };

@@ -11,6 +11,7 @@ the watch of dependent services, rollback, the cleanup rules and the radar
 verb.
 No Docker, no root, no network."""
 import contextlib
+import fcntl
 import gzip
 import hashlib
 import importlib.util
@@ -338,7 +339,7 @@ class FakePopen:
     script = {}
 
     @staticmethod
-    def copy(cmd, sink, limit, errfile, grace=10):
+    def copy(cmd, sink, limit, errfile, grace=10, keep_fds=()):
         data, rc = FakePopen.script[cmd[2]]
         if data:
             sink(data)
@@ -877,7 +878,7 @@ check("up timeout: the lock is free again, the rollback runs", (rc, D.tags["post
 real_copy = U.copy_out
 
 
-def dump_hangs(cmd, sink, limit, errfile, grace=10):
+def dump_hangs(cmd, sink, limit, errfile, grace=10, keep_fds=()):
     sink(b"--\n-- PostgreSQL database cluster dump\n")
     raise U.Timeout(cmd, limit)
 
@@ -894,6 +895,71 @@ D.pull_to = None
 check("after the timeouts: the next update runs (nothing newer now)",
       quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)[0], 0)
 release_lock()
+
+# Signals to the helper (SIGTERM, SIGHUP: diunproc.Interrupted, raised where the
+# command ran). Before any container changed, the run takes back what it did and
+# stops with exit 5. During the restart it fails with its history, output and
+# rollback (exit 4), and its cause names the signal without claiming that the
+# containers are as before. Real processes and signals: further below.
+
+
+def dump_signalled(cmd, sink, limit, errfile, grace=10, keep_fds=()):
+    sink(b"--\n-- PostgreSQL database cluster dump\n")
+    raise U.Interrupted(signal.SIGTERM)
+
+
+U.copy_out = dump_signalled
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
+rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+release_lock()
+U.copy_out = real_copy
+check("SIGTERM during the dump -> exit 5, the partial dump gone, nothing else left",
+      (rc, "Stopped by SIGTERM before any container changed – the dumps begun are deleted, nothing changed." in out,
+       [f for f in dumps_of("glitchtip") if f.endswith(".part")], dumps_of("glitchtip") == dumps_before,
+       D.tags == tags_before, ops() == ops_before), (5, True, [], True, True, True))
+D.pull_raises = U.Interrupted(signal.SIGHUP)
+rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+release_lock()
+D.pull_raises = None
+check("SIGHUP during the pull -> exit 5, dumps and rollback tag taken back, no history entry",
+      (rc, "Stopped by SIGHUP before any container changed – dumps, rollback copy and changed files taken back, "
+           "nothing changed. A pull that had begun may still finish in the Docker daemon." in out,
+       D.tags == tags_before, dumps_of("glitchtip") == dumps_before, ops() == ops_before), (5, True, True, True, True))
+D.pull_to = ("postgres:16-alpine", "sha256:v31")
+D.images["sha256:v31"] = {"Id": "sha256:v31", "Config": {"Env": ["PG_VERSION=16.31"]}}
+D.up_raises = U.Interrupted(signal.SIGTERM)
+with as_uid(0):
+    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+release_lock()
+D.up_raises = None
+res = last_result(out)
+op = ops()[res["op"]]
+check("SIGTERM during the restart -> exit 4, failed, the cause names the signal and says to check",
+      (rc, res["status"], op["status"], op["reason"]["source"], "got SIGTERM and stopped the restart" in
+       op["reason"]["line"], "check with docker ps" in op["reason"]["line"]), (4, "failed", "failed", "signal", True, True))
+check("SIGTERM during the restart: output kept, rollback offered, no success claimed",
+      (os.path.exists(os.path.join(U.LOGS, res["op"] + ".log")), history(res["op"])["can_rollback"],
+       "Update successful" in out), (True, True, False))
+D.up_raises = U.Interrupted(signal.SIGHUP)
+rc, out = quiet(U.cmd_rollback, res["op"])
+release_lock()
+D.up_raises = None
+check("SIGHUP during the rollback's restart -> exit 4, failed with the signal as cause, offered again",
+      (rc, ops()[res["op"]].get("rollback_status"), ops()[res["op"]]["rollback_reason"]["source"],
+       ops()[res["op"]]["rolled_back"], history(res["op"])["can_rollback"]), (4, "failed", "signal", False, True))
+D.images_from = lambda: (_ for _ in ()).throw(U.Interrupted(signal.SIGTERM))
+tags_before, calls_before = dict(D.tags), len(D.calls)
+rc, out = quiet(U.cmd_rollback, res["op"])
+release_lock()
+D.images_from = None
+check("SIGTERM before the rollback changed a container -> exit 5, nothing changed",
+      (rc, "Rollback stopped by SIGTERM before any container changed – nothing changed." in out,
+       D.tags == tags_before, [c[:2] for c in D.calls[calls_before:] if c[:2] == ["docker", "tag"]]), (5, True, True, []))
+rc, _ = quiet(U.cmd_rollback, res["op"])
+release_lock()
+check("after the signals: the rollback runs", (rc, D.tags["postgres:16-alpine"], ops()[res["op"]]["rolled_back"]),
+      (0, "sha256:new", True))
+D.pull_to = None
 # The limits come from /etc/image-updates.conf, checked as strictly as the cleanup rules.
 with open(U.CONF, "w") as f:
     f.write("KEEP_DUMPS=2\nDOCKER_TIMEOUT=900\nDUMP_TIMEOUT='7200'\n")
@@ -1976,6 +2042,194 @@ release_lock()
 check("killed after the restart: rollback -> exit 0, the old image again, the update's output unchanged",
       (rc, D.containers["killed-app"]["Image"], ops()[op["id"]]["rolled_back"], open(logf).read() == kept,
        os.path.exists(os.path.join(U.LOGS, op["id"] + ".rollback.log"))), (0, "sha256:app1", True, True, True))
+
+# ------------------------------------- signals to a real run, real commands
+# The helper as the command line runs it (entry), with the fake Docker above
+# but a real process for the dump and for `compose up`: SIGTERM while the dump
+# runs (before any change), SIGHUP while the containers are recreated (after
+# the change). The commands report through a FIFO once they run; at that point
+# the state before the signal is read, then the signal is sent.
+SIG_DRIVER = '''
+import importlib.util, json, os, subprocess, sys
+lib, base, tmp, state, docker_src = sys.argv[1:6]
+spec = importlib.util.spec_from_file_location("upd", os.path.join(lib, "diun-update.py"))
+U = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(U)
+U.BASE, U.LOCK = base, os.path.join(tmp, "update.lock")
+U.DUMPS, U.OPS, U.LOGS = [os.path.join(base, x) for x in ("dumps", "operations.jsonl", "logs")]
+U.CONF, U.VERSIONS = os.path.join(tmp, "image-updates.conf"), os.path.join(tmp, "versions.json")
+with open(docker_src, encoding="utf-8") as f:
+    exec(f.read())
+D = Docker()
+with open(state) as f:
+    st = json.load(f)
+D.containers, D.images, D.tags, D.pull_to = st["containers"], st["images"], st["tags"], tuple(st["pull_to"])
+real_stream, real_copy = U.stream, U.copy_out
+
+
+def saved(fn):
+    def call(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        finally:
+            with open(state + ".tmp", "w") as f:
+                json.dump({"containers": D.containers, "images": D.images, "tags": D.tags, "pull_to": None}, f)
+            os.replace(state + ".tmp", state)
+    return call
+
+
+def copy(cmd, sink, limit, errfile, grace=10, keep_fds=()):
+    return real_copy(["sh", "-c", os.environ["DUMP_SCRIPT"]], sink, limit, errfile, grace, keep_fds)
+
+
+def stream(cmd):
+    if "up" in cmd:
+        D.stream(cmd)       # the fake recreates the containers, the real command runs on
+        return real_stream(["sh", "-c", os.environ["UP_SCRIPT"]])
+    return D.stream(cmd)
+
+
+U.copy_out = copy
+U.run, U.stream = saved(D.run), saved(stream)
+U.systemctl = lambda *a, timeout=60: subprocess.CompletedProcess(["systemctl", *a], 1, "", "")
+os.geteuid = lambda: 0
+sys.exit(U.entry(sys.argv[6:]))
+'''
+SIG_DIR = os.path.join(TMP, "signals")
+os.makedirs(SIG_DIR)
+sig_file = os.path.join(SIG_DIR, "compose.yml")
+open(sig_file, "w").close()
+sig_state = os.path.join(SIG_DIR, "docker.json")
+sig_src = os.path.join(SIG_DIR, "docker_fake.py")
+with open(sig_src, "w", encoding="utf-8") as f:
+    f.write(pyinspect.getsource(Docker))
+sig_driver = os.path.join(SIG_DIR, "driver.py")
+with open(sig_driver, "w", encoding="utf-8") as f:
+    f.write(SIG_DRIVER)
+EV = os.path.join(SIG_DIR, "events")
+os.mkfifo(EV)
+ev_r = os.open(EV, os.O_RDONLY | os.O_NONBLOCK)
+ev_keep = os.open(EV, os.O_WRONLY)
+SIG_ENV = {**os.environ, "DIUN_LANG": "en", "EV": EV,
+           "DUMP_SCRIPT": 'printf -- "--\\n-- PostgreSQL database cluster dump\\n"; echo "dump $$" > "$EV"; exec sleep 600',
+           "UP_SCRIPT": 'echo " Container sig-app  Recreate"; echo "up $$" > "$EV"; '
+                        'while :; do echo " Container sig-app  Starting"; sleep 0.05; done'}
+
+
+def sig_event(within=120):
+    """(word, pid) the command wrote to the FIFO once it ran."""
+    buf = b""
+    end = time.monotonic() + within
+    while not buf.endswith(b"\n"):
+        left = end - time.monotonic()
+        if left <= 0 or not select.select([ev_r], [], [], left)[0]:
+            return None, None
+        buf += os.read(ev_r, 4096)
+    word, pid = buf.decode().split()[:2]
+    return word, int(pid)
+
+
+def lock_free():
+    with open(U.LOCK, "w") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        return True
+
+
+def pid_gone(pid, within=10):
+    end = time.monotonic() + within
+    while time.monotonic() < end:
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                if f.read().rsplit(")", 1)[1].split()[0] == "Z":
+                    return True
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def sig_run(argv, sig):
+    """Run the helper until its command reports, read the state, send sig.
+    Returns (word, before, exit code, output, pid of the command)."""
+    reset_fs()
+    with open(sig_state, "w") as f:
+        json.dump({"containers": {
+            "sig-app": ctn("sig-app", "acme/sig:1", "sha256:sig1", project="sigp", service="app", files=sig_file),
+            "sig-db": ctn("sig-db", "postgres:16", "sha256:pg16", project="sigp", service="db", files=sig_file,
+                          cmd=["postgres"])},
+            "tags": {"acme/sig:1": "sha256:sig1", "postgres:16": "sha256:pg16"},
+            "images": {"sha256:sig1": {"Id": "sha256:sig1", "Config": {"Env": ["SIG_VERSION=1.0.1"]}},
+                       "sha256:sig2": {"Id": "sha256:sig2", "Config": {"Env": ["SIG_VERSION=1.0.2"]}},
+                       "sha256:pg16": {"Id": "sha256:pg16", "Config": {"Env": ["PG_VERSION=16.4"]}}},
+            "pull_to": ["acme/sig:1", "sha256:sig2"]}, f)
+    out_path = os.path.join(SIG_DIR, "stdout.txt")
+    with open(out_path, "w") as out_f:
+        child = subprocess.Popen([sys.executable, sig_driver, ROOT, U.BASE, TMP, sig_state, sig_src, *argv],
+                                 stdout=out_f, stderr=subprocess.STDOUT, env=SIG_ENV)
+    word, pid = sig_event()
+    pdir = os.path.join(U.DUMPS, "sigp")
+    before = {"part": [f for f in (os.listdir(pdir) if os.path.isdir(pdir) else []) if f.endswith(".part")],
+              "ops": {o["id"]: o["status"] for o in ops().values() if o.get("container") == "sig-app"},
+              "logs": sorted(os.listdir(U.LOGS)) if os.path.isdir(U.LOGS) else [],
+              "lock_free": lock_free(), "running": child.poll() is None}
+    child.send_signal(sig)
+    rc = child.wait(timeout=120)
+    with open(out_path) as f:
+        return word, before, rc, f.read(), pid
+
+
+word, before, rc, out, pid = sig_run(["update", "sig-app"], signal.SIGTERM)
+check("SIGTERM while the dump runs: before, a partial dump, no history entry, the lock held",
+      (word, len(before["part"]), before["ops"], before["lock_free"], before["running"]), ("dump", 1, {}, False, True))
+with open(sig_state) as f:
+    st = json.load(f)
+check("SIGTERM while the dump runs: exit 5, 'nothing changed', the dump process gone, no partial dump, no "
+      "history entry, no rollback tag, the lock free",
+      (rc, "Stopped by SIGTERM before any container changed – the dumps begun are deleted, nothing changed." in out,
+       pid_gone(pid), dumps_of("sigp"), [o for o in ops().values() if o.get("container") == "sig-app"],
+       [t for t in st["tags"] if ":rollback-" in t], lock_free()),
+      (5, True, True, [], [], [], True))
+if rc != 5:
+    print(out)
+
+word, before, rc, out, pid = sig_run(["update", "sig-app", "--no-dump"], signal.SIGHUP)
+op_id = next(iter(before["ops"]), None)
+check("SIGHUP while the containers are recreated: before, in the history as running, its log, the lock held",
+      (word, list(before["ops"].values()), before["logs"], before["lock_free"], before["running"]),
+      ("up", ["running"], [f"{op_id}.log"], False, True))
+res = last_result(out) if "@@RESULT" in out else {}
+op = ops().get(op_id, {})
+logf = os.path.join(U.LOGS, f"{op_id}.log")
+kept = open(logf).read() if os.path.exists(logf) else ""
+check("SIGHUP while the containers are recreated: exit 4, failed with the signal as cause, the command gone, "
+      "the lock free",
+      (rc, res.get("status"), op.get("status"), (op.get("reason") or {}).get("source"), pid_gone(pid), lock_free()),
+      (4, "failed", "failed", "signal", True, True))
+if rc != 4:
+    print(out)
+check("SIGHUP while the containers are recreated: the log has the command's output, the cause, no @@RESULT",
+      ("Container sig-app  Recreate" in kept, "Container sig-app  Starting" in kept,
+       "diun-update.py got SIGHUP and stopped the restart" in kept, "Update failed. A rollback is possible." in kept,
+       "@@RESULT" in kept), (True, True, True, True, False))
+fresh_docker()
+with open(sig_state) as f:
+    st = json.load(f)
+D.containers, D.images, D.tags = st["containers"], st["images"], st["tags"]
+U.wait_healthy = lambda project, services: (True, [], {})
+U.systemctl = Systemctl()
+check("SIGHUP while the containers are recreated: the rollback is offered",
+      (history(op_id)["can_rollback"], D.containers["sig-app"]["Image"]), (True, "sha256:sig2"))
+with as_uid(0):
+    rc, _ = quiet(U.main, ["rollback", op_id])
+release_lock()
+check("after the signal: the rollback runs, the old image again", (rc, D.containers["sig-app"]["Image"]),
+      (0, "sha256:sig1"))
+os.close(ev_r)
+os.close(ev_keep)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")

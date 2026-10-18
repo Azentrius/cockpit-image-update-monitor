@@ -51,6 +51,14 @@ supported.
   changed and removes the partial dump; a `compose up` over its limit fails the update with its history,
   output and rollback, and says that the containers may still be changing. The process handling lives
   in the new `lib/diunproc.py`.
+- **Fix: SIGTERM or SIGHUP left the docker command running and the lock free.** The helper ended at
+  once; a `docker compose up` or dump it had started went on, and the next update or rollback could
+  start meanwhile. Now the first SIGTERM, SIGHUP or Ctrl-C ends the run through its cleanup: the
+  command's process group is stopped, a run that changed no container yet takes back its dumps,
+  rollback copy and files (exit 5), one in the restart fails with its history, output and rollback
+  (exit 4, cause `signal`), and the lock stays held until all that is done; a second signal cannot
+  cut it short. SIGKILL cannot be caught by any program: after it, the docker command keeps the lock
+  until it has ended, and the run stays in the history as aborted with its rollback.
 - **Fix: a line tag showed its own number as the installed version.** A tag such as `cubejs/cube:v1.6`,
   `onlyoffice/documentserver:10.0`, `clickhouse/clickhouse-server:24.12-alpine` or
   `pomerium/pomerium:v0.33` names a line, not a release: the registry has `v1.6.74`, `10.0.0.1`,
