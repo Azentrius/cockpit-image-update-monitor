@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.18.0 – 2026-10-18
+
+Images without a registry version say more: a development build shows its commit, and an image built
+on the server is checked against the images its Dockerfile starts from. MariaDB's version variable is
+read again.
 
 - **Fix: MariaDB version from its variable.** The official image names its version with the Debian
   epoch (`MARIADB_VERSION=1:11.8.9+maria~ubu2404`), which the helpers did not read: the version came
