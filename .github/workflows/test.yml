@@ -36,6 +36,14 @@ jobs:
           (cd dist && sha256sum *.deb *.rpm) > first.sha256
           rm -rf dist && make packages > /dev/null
           (cd dist && sha256sum -c ../first.sha256)
+      - name: Package dependencies name the minimum versions (Cockpit 264, Python 3.8)
+        run: |
+          dpkg-deb -f dist/*.deb Depends
+          test "$(dpkg-deb -f dist/*.deb Depends)" = "cockpit-bridge (>= 264), python3 (>= 3.8)"
+          rpm -qp --requires dist/*.rpm | grep -v '^rpmlib('
+          rpm -qp --requires dist/*.rpm | grep -qx 'cockpit-bridge >= 264'
+          rpm -qp --requires dist/*.rpm | grep -qx 'python3 >= 3.8'
+          ! rpm -qp --requires dist/*.rpm | grep -qxE 'cockpit-bridge|python3'
       # On Debian over what install.sh (up to 0.11) left behind: the package takes it over. The
       # copies of the units: the service runs the old helpers, the radar timer is the same as the
       # package's (both go), the cleanup timer was changed by hand (it stays).
@@ -127,8 +135,10 @@ jobs:
             for t in radar_test.py inv_test.py update_test.py proc_test.py; do python3 "$t" > "/tmp/$t.log" || { cat "/tmp/$t.log"; exit 1; }; echo "PASS $t"; done'
 
   # The packages on more distributions than the test job: install (the package manager
-  # resolves the dependencies from the distribution), the helpers answer, removal. An
-  # installed package is not yet a supported system (README, Supported systems).
+  # resolves the dependencies from the distribution, the versions it took are printed), the
+  # helpers answer, removal. An installed package is not yet a supported system (README,
+  # Supported systems). And two systems below the minimums, which must refuse the package:
+  # Ubuntu 20.04 (Cockpit 215) and Rocky Linux 8 (python3 is 3.6).
   install:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -142,6 +152,8 @@ jobs:
           - { image: "rockylinux/rockylinux:9", kind: rpm }
           - { image: "rockylinux/rockylinux:10", kind: rpm }
           - { image: "opensuse/leap:16.0", kind: zypper }
+          - { image: "ubuntu:20.04", kind: deb, refused: "cockpit-bridge (>= 264)" }
+          - { image: "rockylinux/rockylinux:8", kind: rpm, refused: "python3 >= 3.8" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -152,26 +164,55 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
           make packages
       - name: Install, check and remove on ${{ matrix.image }}
+        if: ${{ !matrix.refused }}
         env:
           IMAGE: ${{ matrix.image }}
           KIND: ${{ matrix.kind }}
         run: |
           docker run --rm -e KIND -v "$PWD/dist:/dist:ro" "$IMAGE" sh -ec '
             case "$KIND" in
-              deb) apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/*.deb > /dev/null ;;
-              rpm) dnf install -y -q /dist/*.rpm ;;
-              zypper) zypper --non-interactive --quiet install --allow-unsigned-rpm /dist/*.rpm ;;
+              deb) apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/*.deb > /dev/null
+                   dpkg-query -W cockpit-bridge python3 ;;
+              rpm) dnf install -y -q /dist/*.rpm
+                   rpm -q cockpit-bridge python3 ;;
+              zypper) zypper --non-interactive --quiet install --allow-unsigned-rpm /dist/*.rpm
+                      rpm -q cockpit-bridge; rpm -q --whatprovides python3 ;;
             esac
             python3 --version
             test -f /usr/share/cockpit/image-updates/manifest.json
             test -f /usr/lib/cockpit-image-updates/diunproc.py
             /usr/lib/cockpit-image-updates/diun-deps.sh check | python3 -c "import json, sys; json.load(sys.stdin)"
+            # skopeo as the page installs it (apt-get, dnf or zypper, from the distribution)
+            mkdir -p /run/lock
+            /usr/lib/cockpit-image-updates/diun-deps.sh install skopeo > /tmp/skopeo.log 2>&1 || { cat /tmp/skopeo.log; exit 1; }
+            skopeo --version
             case "$KIND" in
               deb) apt-get remove -y -qq cockpit-image-update-monitor > /dev/null ;;
               rpm) dnf remove -y -q cockpit-image-update-monitor ;;
               zypper) zypper --non-interactive --quiet remove cockpit-image-update-monitor ;;
             esac
             test ! -e /usr/lib/cockpit-image-updates'
+      - name: ${{ matrix.image }} refuses the package (${{ matrix.refused }})
+        if: ${{ matrix.refused }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          KIND: ${{ matrix.kind }}
+          REFUSED: ${{ matrix.refused }}
+        run: |
+          docker run --rm -e KIND -e REFUSED -v "$PWD/dist:/dist:ro" "$IMAGE" sh -c '
+            case "$KIND" in
+              deb) apt-get update -qq
+                   apt-cache policy cockpit-bridge python3 | grep -E "^[a-z]|Candidate"
+                   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/*.deb > /tmp/out 2>&1 ;;
+              rpm) dnf -q list --available cockpit-bridge python3 2>&1 | tail -n +1
+                   dnf install -y -q /dist/*.rpm > /tmp/out 2>&1 ;;
+            esac
+            rc=$?
+            cat /tmp/out
+            if [ "$rc" = 0 ]; then echo "installed although $REFUSED is not met"; exit 1; fi
+            grep -qF "$REFUSED" /tmp/out || { echo "refused, but not for $REFUSED"; exit 1; }
+            test ! -e /usr/lib/cockpit-image-updates
+            echo "refused as it must be: $REFUSED"'
 
   # An upgrade over a published release, and the removal, on Debian 13 and Fedora 43
   # (test/package-upgrade.sh). The release is the newest one older than this build by
