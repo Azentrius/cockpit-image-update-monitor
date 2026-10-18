@@ -20,6 +20,7 @@ permissions:
   contents: write       # tag and release
   id-token: write       # signing the build provenance
   attestations: write   # storing the build provenance
+  actions: read         # the test workflow's result for this commit
 
 concurrency:
   group: release
@@ -28,7 +29,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - name: Only from main
         if: github.ref != 'refs/heads/main'
@@ -59,6 +60,19 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # Every job of the test workflow on this very commit, not only the required check "test":
+      # also the end-to-end test, the installs, the upgrade and the real Cockpit session.
+      - name: The test workflow passed for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow test.yml --commit "$GITHUB_SHA" \
+            --event push --limit 1 --json conclusion --jq '.[0].conclusion')
+          if [ "$conclusion" != success ]; then
+            echo "::error::The test workflow has not passed for $GITHUB_SHA (${conclusion:-no run}). Wait for it, or fix it first."
+            exit 1
+          fi
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
@@ -68,6 +82,12 @@ jobs:
 
       - name: Tests
         run: make check
+
+      # The release acceptance: the helpers against the real Docker Engine of this throw-away
+      # runner (test/e2e-server.sh), as in the e2e job of the test workflow.
+      - name: End-to-end test on the runner's Docker
+        shell: bash
+        run: sudo env E2E_LIB="$PWD/lib" bash test/e2e-server.sh 2>&1 | tee e2e.log
 
       - name: Packages (.deb, .rpm) and source archive
         run: |
@@ -96,17 +116,20 @@ jobs:
             echo
             echo "### Install"
             echo
-            echo "From the Azentrius package repository: set up https://packages.azentrius.de once, then install Image Update Monitor in Cockpit under Applications, or with \`sudo apt install cockpit-image-update-monitor\` or \`sudo dnf install cockpit-image-update-monitor\`. The repository takes this release within an hour."
+            echo "From the Azentrius package repository (Debian, Ubuntu, Fedora, RHEL): set up https://packages.azentrius.de once, then install Image Update Monitor in Cockpit under Applications, or with \`sudo apt install cockpit-image-update-monitor\` or \`sudo dnf install cockpit-image-update-monitor\`. The repository takes this release within an hour. It has no openSUSE packages."
             echo
-            echo "From the files of this release: Debian and Ubuntu \`sudo apt install ./$deb\`, Fedora, RHEL and openSUSE \`sudo dnf install ./$rpm\`."
-            echo "The package takes over an installation made with install.sh (up to 0.11)."
-            echo
-            echo "Check the download against \`SHA256SUMS\`, and that it was built by this repository's release workflow:"
+            echo "From the files of this release (every system; on openSUSE the only way): download the package and \`SHA256SUMS\`, check that the download is complete and that this repository's release workflow built it, then install it:"
             echo
             echo '```sh'
             echo "sha256sum --ignore-missing -c SHA256SUMS"
             echo "gh attestation verify <file> --repo $GITHUB_REPOSITORY"
+            echo
+            echo "sudo apt install ./$deb                              # Debian, Ubuntu"
+            echo "sudo dnf install ./$rpm                           # Fedora, RHEL"
+            echo "sudo zypper install --allow-unsigned-rpm ./$rpm   # openSUSE"
             echo '```'
+            echo
+            echo "The \`.rpm\` carries no package signature; the two checks take its place. The package takes over an installation made with install.sh (up to 0.11)."
           } >> notes.md
 
       - name: Create the release

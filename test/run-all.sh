@@ -29,6 +29,8 @@ run() {
 run "python: diunlib + version radar"   python3 radar_test.py
 run "python: inventory"                 python3 inv_test.py
 run "python: update/rollback/cleanup"   python3 update_test.py
+run "python: time limits, signals"      python3 proc_test.py
+run "python: upgrade base (CI)"        python3 upgrade_base_test.py
 run "shell:  diun-deps.sh check (JSON)" sh -c '../lib/diun-deps.sh check | python3 deps_check_test.py'
 run "python: syntax lib/*.py"           python3 -c 'import ast, glob, sys; [ast.parse(open(f).read(), f) for f in glob.glob("../lib/*.py")]'
 run "shell:  syntax lib/*.sh + e2e"     bash -c 'for f in ../lib/*.sh e2e-server.sh run-all.sh ../packaging/scripts/* ../tools/*.sh; do bash -n "$f" || exit 1; done'
@@ -41,6 +43,7 @@ run "plugin: version columns"           node version-cols.js
 run "plugin: Diun events per tag"      node diun-events.js
 run "plugin: page frame, tabs, labels"  node page-frame.js
 run "design: contrast (light + dark)"   python3 contrast_test.py
+run "design: fonts ship with the add-on" python3 fonts_test.py
 run "plugin: whole table (smoke)"       node harness.js
 run "repo:   version + changelog"       sh ../tools/check-version.sh
 run "repo:   shared design files"       sh ../tools/check-design-files.sh

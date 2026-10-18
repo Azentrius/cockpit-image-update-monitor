@@ -1,7 +1,7 @@
 {
     "version": 0,
-    "require": {
-        "cockpit": "266"
+    "requires": {
+        "cockpit": "264"
     },
     "menu": {
         "index": {
