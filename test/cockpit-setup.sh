@@ -17,13 +17,13 @@ IMG=$REG/imgupd-ui/app:1
 DIR=/opt/imgupd-ui
 REGISTRY_IMAGE=${REGISTRY_IMAGE:-registry:2.8.3}
 
-# pam_nologin refuses every login but root's while one of these exists (a CI image may keep it).
-for f in /run/nologin /etc/nologin; do
-    if [ -e "$f" ]; then
-        echo "removing $f" >&2
-        rm -f "$f"
-    fi
-done
+# The GitHub runner image sets XDG_CONFIG_HOME=/home/runner/.config for everyone in
+# /etc/environment: Cockpit's bridge, started for another user, then fails on the runner's
+# config folder and the login ends with 401. The test users get their own.
+if grep -q '^XDG_CONFIG_HOME=' /etc/environment 2> /dev/null; then
+    echo "removing XDG_CONFIG_HOME from /etc/environment" >&2
+    sed -i '/^XDG_CONFIG_HOME=/d' /etc/environment
+fi
 useradd -m -s /bin/bash -G sudo "$ADMIN_USER"
 useradd -m -s /bin/bash "$PLAIN_USER"
 printf '%s:%s\n%s:%s\n' "$ADMIN_USER" "$ADMIN_PW" "$PLAIN_USER" "$PLAIN_PW" | chpasswd
