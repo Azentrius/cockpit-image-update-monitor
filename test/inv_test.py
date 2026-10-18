@@ -28,7 +28,8 @@ C = [{"Name": "/glitchtip-postgres", "Image": "sha256:old", "Config": {"Image": 
       "Mounts": [{"Type": "volume", "Destination": "/workspace/Azentrius/sanctum"},
                  {"Type": "volume", "Destination": "/var/run/act"}]}]
 IMAGES = {
-    "sha256:old": {"Id": "sha256:old", "RepoDigests": ["postgres@sha256:16bc"], "Config": {"Env": ["PG_VERSION=16.14"]}},
+    "sha256:old": {"Id": "sha256:old", "RepoDigests": ["postgres@sha256:16bc"], "Config": {"Env": ["PG_VERSION=16.14"]},
+                   "Created": "2026-08-14T02:11:09.512433187Z"},
     "sha256:new": {"Id": "sha256:new", "RepoDigests": ["postgres@sha256:7218"], "Config": {"Env": ["PG_VERSION=16.15"]}},
     "sha256:oll": {"Id": "sha256:oll", "RepoDigests": ["ollama/ollama@sha256:c484"],
                    "Config": {"Env": [], "Labels": {"org.opencontainers.image.version": "24.04"}}},
@@ -74,6 +75,8 @@ check("ollama: inherited label ignored", (ol["version"], ol["version_src"]), (No
 check("ollama not pulled, not managed", (ol["pulled"], ol["managed"]), (False, False))
 check("compose files: the label as a list, none without compose", (pg["files"], ol["files"]),
       (["/opt/g/compose.yml"], []))
+check("build time of the running image, empty when Docker names none", (pg["created"], ol["created"]),
+      ("2026-08-14T02:11:09.512433187Z", ""))
 check("CI job container marked, the others not",
       (rows["FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit"]["ci_job"], pg["ci_job"], ol["ci_job"]),
       (True, False, False))

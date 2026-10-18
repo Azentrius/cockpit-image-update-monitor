@@ -68,7 +68,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 
 | Label | Meaning | Button |
 |---|---|---|
-| ⓘ Update available | Diun reported a new build of **the same tag**. | Update, Dismiss (✓) |
+| ⓘ Update available | Diun reported a new build of **the same tag**. A new digest of the same build (a registry publishing its list of platforms again) does not count. | Update, Dismiss (✓) |
 | ⓘ Roll-out pending | The newer image is already local, the container still runs the old one. | Roll out image |
 | ⓘ New version | The radar knows a newer version. The level labels show whether the Update button delivers it. | – |
 | ✓ Up to date | The radar compared the installed version with the registry and knows nothing newer, or the container runs the very build a tag like `latest` points to, a build after the newest release. | – |

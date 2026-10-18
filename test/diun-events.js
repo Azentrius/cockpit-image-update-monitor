@@ -99,6 +99,26 @@ const updateButton = (d, name) => d.querySelector(`[data-update="${name}"][data-
     await sleep(60);
     assert.notStrictEqual(status(g, "calcom-db"), "Update available");
 
+    // A new digest of the tag, but the build that runs: Docker Hub published
+    // the list of platforms of nextcloud:apache again when it added riscv64
+    // (a test host, 2026-10-17). Diun's "created" says which build it is.
+    const BUILT = "2026-10-15T19:00:50.089352556Z";
+    const withCreated = (created) => inventory.trim().split("\n").map((l) => JSON.parse(l))
+        .map((c) => (c.name === "calcom-db" ? { ...c, created } : c)).map((c) => JSON.stringify(c)).join("\n") + "\n";
+    for (const [what, evCreated, rowCreated, want] of [
+        ["same build, a new list of platforms", "2026-10-15 19:00:50.089352556 +0000 UTC", BUILT, false],
+        ["same build, another time zone", "2026-10-15 21:00:50 +0200 CEST", BUILT, false],
+        ["a newer build", "2026-10-17 01:36:06.1 +0000 UTC", BUILT, true],
+        ["Diun names no build time", "", BUILT, true],
+        ["the image names no build time", "2026-10-15 19:00:50 +0000 UTC", "", true],
+        ["a fixed date proves nothing (reproducible builds)", "1970-01-01 00:00:00 +0000 UTC", "1970-01-01T00:00:00Z", true]]) {
+        const evs = event("2026-10-16T00:00:00Z", "docker.io/library/postgres:15-alpine", NEW, { created: evCreated }) + "\n";
+        const x = boot("en", { ...FILES, "/var/lib/diun/events.jsonl": evs }, () => Promise.resolve(withCreated(rowCreated)));
+        await sleep(60);
+        console.log(what + ":", status(x, "calcom-db"));
+        assert.strictEqual(status(x, "calcom-db") === "Update available", want, what);
+    }
+
     // without an inventory the rows come from the events: one per image and
     // tag, none for a reference with a digest
     const f = boot("en", FILES, () => Promise.reject(Object.assign(new Error("denied"), { problem: "access-denied" })));

@@ -21,6 +21,9 @@ Emits one JSON object per running container:
            update recreates the containers of the project that share them
   ci_job   the container of a CI job (Forgejo / Gitea Actions): lives as
            long as the job, the plugin lists it apart
+  created  when the image it runs on was built (Docker's Created, "" if
+           unknown); Diun reports the same for a build, so a new list of
+           platforms under the same tag is no update
 
 Invoked by the plugin via cockpit.spawn (superuser) on every load, so it
 uses a handful of docker calls instead of several per container.
@@ -107,6 +110,7 @@ def main():
             "managed": bool(project and service and labels.get(L_WORKDIR) and labels.get(L_FILES)),
             "files": [f for f in (labels.get(L_FILES) or "").split(",") if f],
             "ci_job": is_ci_job(c),
+            "created": img.get("Created") or "",
         }, ensure_ascii=False), flush=True)
     return 0
 

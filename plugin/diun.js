@@ -1146,13 +1146,32 @@
         if (lastRender) render(...lastRender);
     }
 
+    // When an image was built, in seconds: Docker's "2026-10-15T19:00:50.089Z"
+    // and Diun's "2026-10-15 19:00:50.089 +0000 UTC". null if unreadable.
+    function builtAt(s) {
+        const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?/.exec(s || "");
+        if (!m) return null;
+        const zone = !m[3] || m[3] === "Z" ? "Z" : m[3].slice(0, 3) + ":" + m[3].slice(-2);
+        const ms = Date.parse(m[1] + "T" + m[2] + zone);
+        return isNaN(ms) ? null : ms / 1000;
+    }
+    // Diun reports a new digest of the tag, but the build is the one that runs:
+    // Docker Hub publishes the list of platforms of an official image again
+    // when it adds one (nextcloud:apache, 2026-10-16: riscv64), and its digest
+    // changes while the amd64 build stays. A fixed date (1970, reproducible
+    // builds) proves nothing.
+    function sameBuild(ev, ctn) {
+        const a = builtAt(ev.created), b = builtAt(ctn.created);
+        return a !== null && a === b && a > Date.UTC(1980, 0, 1) / 1000;
+    }
+
     function rowFor(ctn, events, versionsMap, radarOk) {
         const ev = events.byTag.get(verKey(ctn.image, ctn.tag));
         const acknowledged = ev && dismissed[evKey(ev)];
         let kind;
         if (ctn.pulled) {
             kind = "pulled";        // newer image already local, container on the old one
-        } else if (ev && ev.digest && ctn.digest && ev.digest !== ctn.digest && !acknowledged) {
+        } else if (ev && ev.digest && ctn.digest && ev.digest !== ctn.digest && !acknowledged && !sameBuild(ev, ctn)) {
             kind = "update";
         } else if (!ctn.digest) {
             kind = "unknown";

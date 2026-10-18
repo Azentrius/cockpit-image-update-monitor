@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: “Update available” for the build that runs.** Docker Hub publishes the list of platforms of an
+  official image again when it adds one (`nextcloud:apache` got riscv64 on 2026-10-16). The list's
+  digest changes, the amd64 build stays, and a row compared only digests: a container updated a day
+  earlier showed an update again, which would have restarted it with the same image. A new digest
+  now counts only when Diun's build time (`created`) differs from the running image's, which the
+  inventory now names (`created`). A fixed build date before 1980 (reproducible builds) counts for
+  nothing, so such images still compare by digest.
+
 ## 0.16.0 – 2026-10-17
 
 Containers of running CI jobs are counted above the table instead of listed, and updating a CI runner
