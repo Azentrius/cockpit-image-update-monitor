@@ -14,7 +14,7 @@ together.
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
 | `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log`, `compose/<project>/<stamp>/<n>_<file>` (the compose / `.env` files a tag change wrote, byte-exact as they were) | root, 700 / 600 |
-| `/etc/image-updates.conf` | cleanup rules (optional, see below) | root, not writable by others |
+| `/etc/image-updates.conf` | cleanup rules and time limits (optional, see below) | root, not writable by others |
 | `/opt/diun/` | Diun stack (`docker-compose.yml`, `diun.yml`), from `diun-deps.sh install diun` | root |
 | `/usr/lib/systemd/system/diun-radar.{service,timer}` | radar every 6 h (`*-*-* 00/6:17:00`); from the package, `diun-deps.sh install radar` enables the timer | root, 644 |
 | `/usr/lib/systemd/system/diun-cleanup.{service,timer}` | cleanup daily (`04:40` + up to 20 min); from the package, `diun-deps.sh install cleanup` enables the timer | root, 644 |
@@ -66,11 +66,41 @@ Inputs are checked by regex:
 | 1 | unexpected error of a subcommand (stderr in the output; `radar`: the run failed) |
 | 2 | not found / not possible (container, operation, rollback image gone, not updatable, radar not set up, cleanup rules not understood or not root-only) |
 | 3 | refused (rolled back already, successfully; file/container exists on `install`) |
-| 4 | after update/rollback the containers do not run stably |
-| 5 | stopped before any change (dump failed, too little space, database not running, the pull failed and left the old image; on `rollback`: a file of a tag change edited since, or the compose files giving the services another image) |
+| 4 | after update/rollback the containers do not run stably, or `compose up` did not end within `DOCKER_TIMEOUT` (state unclear, `reason.source: "timeout"`), or a signal stopped the restart (`reason.source: "signal"`, see [Signals](#signals)) |
+| 5 | stopped before any change (dump failed or did not end within `DUMP_TIMEOUT`, too little space, database not running, the pull failed and left the old image or did not end within `DOCKER_TIMEOUT`, a signal before any container changed; on `rollback`: a file of a tag change edited since, or the compose files giving the services another image) |
 | 64 | wrong call |
 | 75 | lock taken (already running) |
 | 77 | no root rights |
+| 128 + n | `diun-update.py` stopped by signal n where the verb has no code of its own for it: 143 SIGTERM, 129 SIGHUP, 130 SIGINT |
+
+### Signals
+
+Since 0.19.0 `diun-update.py` (`entry`) turns SIGTERM, SIGHUP and SIGINT into an exception
+(`diunproc.on_signals`, installed only there, not on import), so a run ends through its cleanup as it
+does after an error:
+
+- The docker command running (`compose pull`, `compose up`, `rmi`, the `docker exec` of a dump) is
+  stopped with its whole process group: SIGTERM, SIGKILL after 10 s, always waited for.
+- Before any container changed, the run takes back what it did: dumps (also a partial one), the
+  rollback tag, the files of a tag change; exit 5. A rollback stopped before it changed a container
+  puts back the files it had restored; exit 5.
+- During or after the restart (`compose up`, the wait for health, the watch of dependent services)
+  the update fails with its history, output and rollback: `status: "failed"`, `reason.source:
+  "signal"`, exit 4. A rollback in that phase is recorded as failed and can be tried again. The cause
+  never says that the containers are as before.
+- After a successful update a signal skips only the cleanup and the radar start.
+- The update lock stays held until all of that is done; then the process ends. Signals that come
+  during the cleanup are counted and ignored (the output says how many): they cannot cut it short.
+  A history line and the taking back of a run are never cut in two (`diunproc.held`).
+- What the stopped command had asked the Docker daemon to do may go on: a pull may finish, `compose
+  up` may still recreate containers, `pg_dumpall` or `mariadb-dump` in the container runs until it
+  notices that its output is gone.
+
+**SIGKILL** cannot be caught: the helper ends at once, without any cleanup. The run stays in the
+history as `running` with its `pid` and its output up to there (`logs/`); once that process is gone
+the page shows it as aborted and offers its rollback. The docker command it ran goes on in its own
+session. It inherited the update lock (`keep_fds`), so no other update, rollback or cleanup starts
+until it has ended as well (exit 75 meanwhile). Check with `docker ps` before acting on such a run.
 
 ## Formats
 
@@ -142,16 +172,16 @@ Inputs are checked by regex:
 
 | Field | Meaning |
 |---|---|
-| `installed` | per **image ID**, also for the newer image that is already pulled. `src` is `tag`, `env:<NAME>`, `label` or `digest`. Digest matches are the cache for the next run: hits are kept for good, `version: null` is retried after 7 days. A **line tag** (since 0.18.2: a tag with two or more numbers under which the registry has longer versions of the same scheme, `v1.6` → `v1.6.74`, `10.0` → `10.0.0.1`, `24.12-alpine` → `24.12.6.70-alpine`) names only its line: its number counts only when neither the label nor the digest names the release, as `{"version": "1.6", "src": "tag", "digest_ts": "…"}` (`digest_ts` keeps the miss for the cache). An exact tag such as `16.14-alpine` has no longer versions under it. |
+| `installed` | per **image ID**, also for the newer image that is already pulled. `src` is `tag`, `env:<NAME>`, `label` or `digest`. Digest matches are the cache for the next run: hits are kept for good, `version: null` is retried after 7 days. A **line tag** (since 0.19.0: a tag with two or more numbers under which the registry has longer versions of the same scheme, `v1.6` → `v1.6.74`, `10.0` → `10.0.0.1`, `24.12-alpine` → `24.12.6.70-alpine`) names only its line: its number counts only when neither the label nor the digest names the release, as `{"version": "1.6", "src": "tag", "digest_ts": "…"}` (`digest_ts` keeps the miss for the cache). An exact tag such as `16.14-alpine` has no longer versions under it. |
 | `versions[<installed version>]` | newer tags in the scheme of the installed version. `status: "unknown"` when there is no matching scheme (e.g. pgvector `pg17` with `PG_VERSION` 17.10). |
 | `versions[…].choices` | (since 0.11.0, for the stage-2 selection field) what can replace the configured tag, in the installed version's scheme and never older: `pin` = the installed version's own tag, `null` if the registry lacks it; `lines` = major and minor lines (`5`, `5.4`, `16-alpine`; one or two blocks, never more) and the newest version tag in each, broad lines first, at most 12: only lines with a released version in them (a bare `9.2` before `9.2.0` may be a pre-release), the running version's own lines always, the others newest first; `newer` = exact tags with `level` `patch` / `minor` / `major`: every newer patch of the installed minor line (at most 10), the newest of each newer minor line and of each newer major (at most 15 each), newest first per level; `floating` = `latest`, `stable`, `production` (with the flavour suffix, e.g. `stable-apache`, or the bare flavour `apache`) when the registry has them. Pre-releases (`-rc.1`), other flavours and `v`-prefixed twins never count. Missing without a scheme and in data from radars before 0.11.0. |
 | `by_tag` | comparison with the configured tag itself. Only when the tag contains numbers; the plugin uses it as a fallback. |
 | `reach` | levels the configured tag delivers with the Update button. |
 | `newest` | highest plain version tag. Shown when the installed version is unknown. |
-| `tag_now` | (since 0.10.0) only for floating tags (fewer than two version blocks: `latest`, `16-alpine`, `5`) and, since 0.18.2, line tags (`v1.6`): the digest the tag has in the registry right now (Docker Hub API or `skopeo inspect --raw`, no pull) and the version tag with the same digest (`version` / `tag`, `null` if none). Reused while the digest stays the same; missing when the lookup failed. |
+| `tag_now` | (since 0.10.0) only for floating tags (fewer than two version blocks: `latest`, `16-alpine`, `5`) and, since 0.19.0, line tags (`v1.6`): the digest the tag has in the registry right now (Docker Hub API or `skopeo inspect --raw`, no pull) and the version tag with the same digest (`version` / `tag`, `null` if none). Reused while the digest stays the same; missing when the lookup failed. |
 | `tag_now.pushed` / `tag_now.after` | only for a tag without numbers (`latest`, `main`) whose digest no version tag shares, and only on Docker Hub, the one registry that says when a tag was pushed: `after` = the newest release (`newest`) as `{"tag": "v4.5.3", "pushed": "…"}` and `pushed` = when the tag itself was pushed, at least a day later (two builds of one release are minutes apart). MobSF builds `latest` from its development branch. Asked again on every run, also while the digest stays the same. Missing in data from older radars. |
 | `status` | `major`, `minor`, `patch`, `current`, `unknown`, `error` or `unlisted`, for sorting and for the table. |
-| `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. In `installed` the new entry wins per image ID, except where it only read the tag's number: without the tag list a line tag cannot be told from an exact one, so the last good entry for the same image ID stays when it names that release or the same number (since 0.18.2; `kept_installed`). Nothing moves to another image ID. |
+| `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. In `installed` the new entry wins per image ID, except where it only read the tag's number: without the tag list a line tag cannot be told from an exact one, so the last good entry for the same image ID stays when it names that release or the same number (since 0.19.0; `kept_installed`). Nothing moves to another image ID. |
 | `status: "unlisted"` | (since 0.12.2) no registry shows the repository; skopeo answers `requested access to the resource is denied` (Docker Hub, for names it does not have and for private ones), `unauthorized` or `name unknown`. The image was built or tagged on the server (`hibiscus-server:2.12.4` means `docker.io/library/hibiscus-server`), or it is private and the radar has no login. Only `installed` and `error` are set. With a good earlier run the entry is kept like a registry error (`stale`). Timeouts, rate limits and server errors stay `error`. |
 | `built` / `base` | only for an `unlisted` image built on this server (a compose service with `build:`): `built` is the build time of the running image, `base` the images its Dockerfile starts `FROM` (read through `docker compose config`; stage names, `scratch` and unfilled variables left out; global `ARG` defaults filled in), each `{"image", "tag", "final", "version", "now", "pushed", "newer"}` or with `"pinned": true` (`FROM x@sha256:…`, never newer) or `"error"`. `final` marks the base of the image that runs; `version` is what the build carries (that base's version variable, final base only); `now` what the tag points to (`tag_now` rules, an exact tag is its own version); `pushed` when the registry got it for this server's platform (Docker Hub per platform, so a new list of platforms changes nothing; other registries: the image's creation time). `newer`: pushed more than an hour after the build, or `now` above `version`. Missing in data from older radars. |
 
@@ -348,10 +378,12 @@ with `op`. The versions can be `null` (unknown).
   `null` when `docker compose up` itself failed (`source: "compose"`, `exit_code` = its exit code).
 - `state`: the container state, or the health state `unhealthy` / `starting`.
 - `source`: `log` (the last 80 log lines), `health` (last output of the health check, for an
-  unhealthy container), `compose` (the last 50 lines `docker compose up` printed), `error` (since
+  unhealthy container), `compose` (the last 50 lines `docker compose up` printed), `timeout` (since
+  0.19.0: `compose up` did not end within `DOCKER_TIMEOUT`; `container` is `null`), `error` (since
   0.18.1: the helper itself stopped after the containers were recreated, e.g. Docker did not answer;
-  `container` is `null`), `image` (since 0.18.1, rollback only: the container runs another image than
-  the rollback copy) or `null`.
+  `container` is `null`), `signal` (since 0.19.0: SIGTERM, SIGHUP or SIGINT stopped the restart or the
+  check after it, see [Signals](#signals); `container` is `null`), `image` (since 0.18.1, rollback only:
+  the container runs another image than the rollback copy) or `null`.
 - `line` (`reason_line`): the last line that names an error (`Error:`, `TypeError:`,
   `…Exception`, `error:`, `panic:`, `FATAL`, `PANIC`, `CRITICAL`), plus the next line when it ends in
   `:`; otherwise the last line that mentions a problem (`error`, `failed`, `refused`, `not found` …).
@@ -370,6 +402,16 @@ ROLLBACK_IMAGE_DAYS=14
 - Without the file the defaults above apply. `KEY=VALUE` lines, `#` comments, values `0`–`9999`.
 - The file must belong to root and must not be writable by group or others. An unknown key or a
   value that is not a number stops the cleanup (exit 2) – nothing is deleted on a guess.
+- **Time limits** (since 0.19.0, `read_conf` / `load_limits`): `DOCKER_TIMEOUT` (default 1800,
+  60–86400 seconds) for one streamed docker command (`compose pull`, `compose up`, `rmi`),
+  `DUMP_TIMEOUT` (default 14400, 60–172800) for one database dump. `update`, `retag --expect`,
+  `rollback` and `delete-image` read them first; a value out of range or not a number stops them with
+  exit 2 before anything changes. `lib/diunproc.py` runs the command in a process group of its own;
+  the limit is a deadline for the whole command, also without any output. Then SIGTERM to the group,
+  after 10 s SIGKILL, and the process is always waited for. A pull or dump over its limit stops the
+  update before any change (exit 5, a partial dump removed); `compose up` over its limit fails it
+  (exit 4, history, output and rollback kept), and the cause says the containers may still be
+  changing, because the Docker daemon goes on with what the stopped client asked for.
 - **Never deleted:** the dumps of each project's last update (`operations.jsonl`), files not named
   `<stamp>_<container>.sql.gz`, rollback images a container (running or stopped) uses. Images are
   removed with `docker rmi` without `-f`.
@@ -398,7 +440,7 @@ rollback marks the operation with `rolled_back`, `rollback_ts`, `rollback_status
   the new image (`diunlib.local_version`), otherwise what the radar found for that image ID
   (label / digest), otherwise `null`. Older entries do not have them; the plugin shows “—”. Since the
   radar names a new image only after the update, `backups` fills a `null` version from the radar's
-  `installed` entry for `old_id` / `new_id`, and since 0.18.2 also replaces a line tag's number that
+  `installed` entry for `old_id` / `new_id`, and since 0.19.0 also replaces a line tag's number that
   the radar refines (`1.6` → `1.6.74`; the history file stays as written). `update`, `retag` and
   `plan` take the radar's version over the tag's number the same way (`version_of`).
 - `reason` (since 0.8.0): on a failed update, the same object as in `@@RESULT`. A rollback adds
@@ -434,7 +476,7 @@ rollback marks the operation with `rolled_back`, `rollback_ts`, `rollback_status
   runs that reach the history keep output; an update stopped before any change does not, and a run that
   took back what it did (`discarded`) removes its file again. The files stay with their history entry;
   nothing deletes them.
-  Since 0.18.2 the output goes to the file as it is printed, from the moment the run is in the history
+  Since 0.19.0 the output goes to the file as it is printed, from the moment the run is in the history
   (an update: before a tag change writes its files or before the containers are recreated; a rollback:
   before it points the tag back), what was printed before first; the live output on stdout is the
   same as before. A killed run (SIGKILL) keeps it up to its last complete line; up to 0.18.1 the file
@@ -512,6 +554,11 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   `src/` in Azentrius/cockpit-cronjobs, pinned in `tools/design-files.sha256` and never edited here;
   `diun.css` holds only what this page needs on top. Icons are inline SVG from `icon(name)` in
   `diun.js`, all from the shared set.
+- **Fonts:** DM Sans and DM Serif Display ship with the add-on. Code and versions use the system's
+  monospace font: `diun.css` sets `--font-mono`, because `azentrius.css` names Red Hat Mono from
+  Cockpit's static files, which not every Cockpit ships (Ubuntu 24.04's Cockpit 314 answers 404). A
+  family that no stack names is never requested; `test/fonts_test.py` checks that every font the page
+  uses ships with it.
 - **Frame:** header (`az-page-header`, the only `az-btn--primary` is Refresh), tabs (`az-tabs`,
   WAI-ARIA keyboard), `#dm-status` and `#dm-deps` under the tabs, the panels, the signature (version,
   host from `/etc/hostname`). Both tabs are loaded together with every load; switching loads nothing.
@@ -521,7 +568,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 - **Version:** `const VERSION` in `diun.js`; `index.html` loads `diun.js` and `diun.css` with
   `?v=<version>`. `tools/check-version.sh` keeps them and `CHANGELOG.md` in step.
 - **Language:** `../base1/po.js` sets `cockpit.language`. `de*` → German, otherwise English.
-  - Texts live in `I18N.en` / `I18N.de` in `diun.js`. Static texts in the HTML carry `data-i18n`.
+  - Texts live in `I18N.en` / `I18N.de` in `i18n.js` (since 0.19.0; `window.ImageUpdatesI18n`, loaded
+    before `diun.js`, which keeps only the code). Static texts in the HTML carry `data-i18n`.
   - The menu entry is the product name, Image Update Monitor, and is not translated (`po.manifest.de.js` stays empty).
 - **Loading:** `safeLoad()` never loads twice; a request during a load is repeated once afterwards.
   - `cockpit.file().watch()` triggers a reload only on a **changed** tag.
@@ -604,7 +652,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, line tags (release by digest, the tag's number on a miss, exact tags untouched, a registry outage keeping the release per image ID), a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes) |
+| `test/proc_test.py` | `diunproc` with real child processes: a silent hang, endless output, children that ignore SIGTERM (the group killed), a dump that hangs, the next command after a timeout; signals: no handler changed on import, `on_signals` restores the handlers before it, `held` defers a signal; a helper that holds a lock gets SIGTERM or SIGHUP while its command runs (silent and printing, `stream` and `copy`) and keeps the lock until the stop has reached the command (synchronised through FIFOs), children that ignore SIGTERM with SIGTERM and SIGHUP again during the cleanup (SIGKILL after the grace time, repeats only counted), the next operation afterwards, SIGKILL (the command runs on and keeps the lock until it ends) |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes), signals (SIGTERM during the dump: exit 5, partial dump and everything else taken back; SIGHUP during the pull: exit 5; SIGTERM during `compose up`: exit 4 with history, output, rollback and the cause `signal`; SIGHUP during a rollback's restart: failed, offered again; a signal before the rollback changed a container: exit 5; the same with the real helper (`entry`), a real dump process and a real `compose up` process: state before the signal, the command gone, the lock free afterwards, the rollback), time limits (a pull or dump over its limit stops before any change, `compose up` over its limit fails with its rollback, the limits from the settings file and their ranges) |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
@@ -614,12 +663,16 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the revision of a development build, the bases of an image built here, a line tag refined by the radar, and kept with its patch when the registry failed |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
+| `test/fonts_test.py` | every font family the stylesheets name (custom properties resolved, in the order `index.html` loads them) that has an `@font-face` has its file in `plugin/`: no request for a font outside the add-on; counter-check that `azentrius.css` alone would name Red Hat Mono from Cockpit's files |
 | `test/contrast_test.py` | WCAG contrast of every colour pair the page uses, light and dark (text 4.5:1, borders and icons 3:1) |
 | `tools/check-design-files.sh` | the shared design files match `tools/design-files.sha256` |
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
 | `tools/check-units.sh` | `systemd-analyze verify` for the units (CI lint step, next to shellcheck and ruff) |
-| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres) and `imgupd-test-my` (MariaDB, MySQL); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again); since 0.18.1 a rollback refused while the compose file names another image. `E2E_LIB=<folder>` runs helpers that are not installed yet. |
+| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres), `imgupd-test-my` (MariaDB, MySQL) and `imgupd-test-reg` (pulls against a local registry: nothing newer, registry down without and with a newer image here); since 0.19.0 every dump is restored into a fresh Postgres, MariaDB and MySQL container and compared object by object with the original (half a dump must be caught), the update lock is held by a separate process instead of a race, and CI runs it (job `e2e`, and before every release); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again); since 0.18.1 a rollback refused while the compose file names another image. `E2E_LIB=<folder>` runs helpers that are not installed yet. |
+| `test/upgrade_base_test.py` | `tools/upgrade-base.py`, the release the CI upgrade test starts from: a build newer than the newest release, a build of a version released already (the release before it), no older release with packages (exit 3), Semantic Versioning precedence instead of text order, drafts, pre-releases and releases without packages left out |
+| `test/package-upgrade.sh` | CI (job `upgrade`), in a throw-away Debian 13 or Fedora 43 container: the release from `tools/upgrade-base.sh` (checked against `SHA256SUMS` and its build provenance), data a server has, this build over it; the version went up by the package manager's own comparison, the package database names this build, the files on disk are this build's byte for byte (`dpkg --verify` and `diff` against the `.deb`, `rpm -V` and the digests of the `.rpm`), the data unchanged, removed again with the data kept. Without an older release it says so and checks a fresh install |
+| `test/cockpit-setup.sh`, `test/cockpit-session.py` | CI (job `cockpit`), a real Cockpit with systemd and Docker on a throw-away GitHub runner, Playwright with Chromium through Cockpit's login: this build installed with apt over the release before, the page reloaded and logged in again after the upgrade (the new version, `i18n.js` of this build); the page in Cockpit's menu; no JavaScript error and no failed request of the add-on's files or frame, and no other kind of error than Cockpit shows on its own (a login before the add-on is installed is the baseline; on Ubuntu 24.04 Cockpit 314 answers `*/po.js` and `*/po.manifest.js` with 404 on every page; the page's own request for Red Hat Mono, which that Cockpit does not ship, was caught this way; the page of the release before is checked only for loading, its errors are listed apart in the report); with administrative access (a sudo user) and without (a user without sudo, German browser: the hint, no actions); skopeo and the radar set up from the page (timer on, a first run), “Run radar now” (a new run); a throw-away compose project (a local registry, busybox 1.36.1 running, 1.37.0 pulled under the same tag): “Roll out image” with its plan, live output and result, the container on the new image, then the rollback from the history. Versions, steps and results in the job summary and the artifact `cockpit-session` (with screenshots) |
 
 The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds
 `inventory3.jsonl` and `versions2.json` from `inventory2.jsonl`.

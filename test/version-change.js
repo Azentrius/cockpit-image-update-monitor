@@ -13,7 +13,8 @@ const { JSDOM } = require("jsdom");
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
 const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
-const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
+// The page as index.html loads it: the texts (i18n.js), then the code (diun.js).
+const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const icons = fs.readFileSync(path.join(PLUGIN, "icons.js"), "utf8");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const files = {
@@ -52,7 +53,24 @@ const RETAG_OP = { id: "20261015-101500-plausible", ts: "2026-10-15T08:15:00Z", 
     status: "ok", can_rollback: true, log: true, rollback_log: false };
 const BACKUPS = { dir: "/var/backups/image-updates", free_bytes: 40 * 2 ** 30, dump_bytes: 0, dumps: [], images: [],
                   ops: [RETAG_OP], cleanup: null };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Answers of the stubbed helpers that have not arrived yet, for every page of this file.
+const pending = new Set();
+const track = (p) => {
+    const done = p.then(() => {}, () => {});
+    pending.add(done);
+    done.then(() => pending.delete(done));
+};
+// Waits until every stubbed answer has arrived and the page has handled it (also the calls
+// those answers lead to), instead of a fixed number of milliseconds. Fails after a bounded
+// number of rounds, so a page that keeps calling cannot hang the test.
+async function settle() {
+    for (let round = 0; round < 500; round++) {
+        if (pending.size) await Promise.all([...pending]);
+        await new Promise((r) => setImmediate(r));
+        if (!pending.size) return;
+    }
+    throw new Error("the page did not settle: helper calls keep coming");
+}
 const kvRows = (el) => [...el.querySelectorAll(".dm-kv li")].map((li) => [...li.children].map((x) => x.textContent).join(": "));
 
 function boot(language, script) {
@@ -74,11 +92,13 @@ function boot(language, script) {
             const r = typeof s === "function" ? s(cmd) : s;
             let cb = null;
             // r.gate: a promise the answer waits for, so a test can check the
-            // state in between at a fixed point instead of after a few ms.
-            const p = new Promise((resolve, reject) => Promise.resolve(r.gate).then(() => setTimeout(() => {
+            // state in between at a fixed point; settle() waits for an answer
+            // only once its gate is open.
+            const p = new Promise((resolve, reject) => Promise.resolve(r.gate).then(() => track(new Promise((sent) => setTimeout(() => {
                 (r.chunks || []).forEach((c) => cb && cb(c));
                 r.fail ? reject(r.fail) : resolve(r.out ?? "");
-            }, r.delay || 10)));
+                sent();
+            }, r.delay || 10)))));
             p.stream = (f) => { cb = f; return p; };
             return p;
         },
@@ -109,7 +129,7 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
 (async () => {
     // 1. Rows: the button where the field offers something, chips as buttons
     const a = boot("de", BASE);
-    await sleep(80);
+    await settle();
     const btn = (n) => rowOf(a.d, n).querySelector("td.az-cell-actions button[data-retag]");
     const withButton = [...a.d.querySelectorAll("#dm-rows tr")].filter((tr) => tr.querySelector("td.az-cell-actions button[data-retag]"))
         .map((tr) => tr.querySelector(".dm-name").textContent);
@@ -130,7 +150,7 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
 
     // 2. The field: configured tag first, groups, locked entries
     b0.click();
-    await sleep(30);
+    await settle();
     console.log("\ndialog:", a.$("dm-dialog-title").textContent);
     assert.strictEqual(a.$("dm-dialog-title").textContent, "Version von plausible ändern?");
     const sel = a.$("dm-retag-select");
@@ -144,7 +164,7 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
         "Patch-Versionen: v2.1.5", "Major-Versionen: v3.2.1", "Folgt jeder neuen Version: latest"]);
     a.$("dm-dialog-cancel").click();
     rowOf(a.d, "glitchtip-postgres").querySelector("button[data-retag]").click();
-    await sleep(30);
+    await settle();
     optionsOf(a.d).forEach((g) => console.log("  ", g));
     assert.deepStrictEqual(optionsOf(a.d), [
         "Laufende Version festsetzen: 16.14-alpine (läuft jetzt)",
@@ -155,7 +175,7 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
         "Folgt jeder neuen Version: alpine – Datenbank-Major, braucht eine Migration [x]"]);
     a.$("dm-dialog-cancel").click();
     rowOf(a.d, "nextcloud-family-app-1").querySelector("button[data-retag]").click();
-    await sleep(30);
+    await settle();
     optionsOf(a.d).forEach((g) => console.log("  ", g));
     assert.deepStrictEqual(optionsOf(a.d), [
         "Laufende Version festsetzen: 34.0.3-apache (läuft jetzt)",
@@ -171,8 +191,7 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
         rollback: REPO + ":rollback-20261015-101500", dumps: [], from_version: "2.1.4", to_version: "2.1.5",
         image: REPO + ":v2.1.5", backup: "/var/backups/image-updates/compose/plausible/20261015-101500" }) + "\n"] };
     // The dry-run and the run answer only when the test opens their gate: the
-    // states while they run are checked at fixed points (a slow host could
-    // otherwise get the answer before a 5 ms wait was over).
+    // states while they run are checked at fixed points.
     let openDry, openRun;
     const dryGate = new Promise((r) => { openDry = r; });
     const runGate = new Promise((r) => { openRun = r; });
@@ -180,14 +199,14 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
         const dry = DRY()(cmd);
         return dry ? { ...dry, gate: dryGate } : { ...runOk, gate: runGate };
     } });
-    await sleep(80);
+    await settle();
     rowOf(c.d, "plausible").querySelector('button.dm-level-btn[data-tag="v2.1.5"]').click();
-    await sleep(5);
+    await settle();
     assert.strictEqual(c.$("dm-retag-select").value, "v2.1.5", "the level's tag is chosen");
     assert.strictEqual(c.$("dm-retag-preview").textContent, "Die Änderung wird geprüft …");
     assert(c.$("dm-dialog-confirm").disabled, "no confirm while planning");
     openDry();
-    await sleep(40);
+    await settle();
     const dry = c.last("retag");
     console.log("\ndry-run:", JSON.stringify(dry.cmd.slice(1)), dry.opts.superuser);
     assert.deepStrictEqual(dry.cmd.slice(1), ["retag", "plausible", "v2.1.5", "--dry-run"]);
@@ -205,10 +224,10 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     const cf = c.$("dm-dialog-confirm");
     assert(!cf.disabled && cf.textContent.trim() === "Version ändern");
     cf.click();
-    await sleep(5);
+    await settle();
     assert(c.$("dm-retag-select").disabled && c.$("dm-dump-check").disabled, "the choice is fixed while it runs");
     openRun();
-    await sleep(60);
+    await settle();
     const run = c.last("retag");
     console.log("run    :", JSON.stringify(run.cmd.slice(1)), run.opts.superuser);
     assert.deepStrictEqual(run.cmd.slice(1), ["retag", "plausible", "v2.1.5", "--expect", FP["v2.1.5"]]);
@@ -220,11 +239,11 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
 
     // 4. A major needs its tick box; without dump -> --no-dump; back to the configured tag
     const m = boot("de", { ...BASE, "diun-update.py retag": (cmd) => DRY()(cmd) || runOk });
-    await sleep(80);
+    await settle();
     rowOf(m.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(m, "v3.2.1");
-    await sleep(40);
+    await settle();
     const mc = m.$("dm-dialog-confirm");
     const mpv = m.$("dm-retag-preview");
     console.log("\nmajor  :", mpv.querySelector(".az-alert--warning").textContent);
@@ -236,21 +255,21 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     assert.strictEqual(mpv.innerHTML, "", "the configured tag: nothing to show");
     assert(mc.disabled, "and nothing to confirm");
     choose(m, "v3.2.1");
-    await sleep(40);
+    await settle();
     assert(mc.disabled, "a new preview asks again");
     tick(m, "dm-major-check", true);
     m.$("dm-dump-check").checked = false;
     mc.click();
-    await sleep(60);
+    await settle();
     assert.deepStrictEqual(m.last("retag").cmd.slice(1), ["retag", "plausible", "v3.2.1", "--expect", FP["v3.2.1"], "--no-dump"]);
 
     // 5. A tag that follows every release: its own warning, not "installed version unknown"
     const f = boot("de", { ...BASE, "diun-update.py retag": DRY() });
-    await sleep(80);
+    await settle();
     rowOf(f.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(f, "latest");
-    await sleep(40);
+    await settle();
     const fw = f.$("dm-retag-preview").querySelector(".dm-gate-group");
     console.log("\nlatest :", fw.textContent.replace(/\s+/g, " ").trim());
     assert.strictEqual(fw.querySelector(".az-alert--warning .az-alert__title").textContent, "Der Tag folgt jeder neuen Version");
@@ -263,12 +282,12 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
 
     // 6. A later answer for an earlier choice is dropped
     const s = boot("de", { ...BASE, "diun-update.py retag": (cmd) => ({ ...DRY()(cmd), delay: cmd[3] === "v3.2.1" ? 80 : 10 }) });
-    await sleep(80);
+    await settle();
     rowOf(s.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(s, "v3.2.1");
     choose(s, "v2");
-    await sleep(120);
+    await settle();
     const sdiff = s.$("dm-retag-preview").querySelector(".dm-diff-new").textContent;
     console.log("\nlast choice wins:", sdiff);
     assert.strictEqual(sdiff, "+     image: " + REPO + ":v2");
@@ -290,11 +309,11 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     ];
     for (const [rt, want] of refusals) {
         const r = boot("de", { ...BASE, "diun-update.py retag": DRY(rt) });
-        await sleep(80);
+        await settle();
         rowOf(r.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-        await sleep(10);
+        await settle();
         choose(r, "v2.1.5");
-        await sleep(40);
+        await settle();
         console.log("refused:", refused(r).slice(1).join(" / "));
         assert.deepStrictEqual(refused(r), [...NOT, want]);
         assert(r.$("dm-dialog-confirm").disabled);
@@ -302,20 +321,20 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     const nf = boot("de", { ...BASE, "diun-update.py retag": (cmd) => ({ out: JSON.stringify({ ...dryRun(cmd[3]), updatable: false,
         reason: "compose-file-missing", missing: ["/opt/plausible/compose.yml"],
         retag: { ...dryRun(cmd[3]).retag, possible: false, reason: "compose-file-missing", changes: [], fingerprint: null } }) }) });
-    await sleep(80);
+    await settle();
     rowOf(nf.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(nf, "v2");
-    await sleep(40);
+    await settle();
     assert.deepStrictEqual(refused(nf), [...NOT, "Die Compose-Datei existiert nicht mehr (/opt/plausible/compose.yml)."]);
     const hv = boot("de", { ...BASE, "diun-update.py retag": DRY({ variable: "PLAUSIBLE_VERSION", git: "/opt",
         changes: [{ file: "/opt/plausible/.env", line: 3, old: "PLAUSIBLE_VERSION=v2.1.4", new: "PLAUSIBLE_VERSION=v2",
                     service: null, sha256: "e".repeat(64) }] }) });
-    await sleep(80);
+    await settle();
     rowOf(hv.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(hv, "v2");
-    await sleep(40);
+    await settle();
     const hints = [...hv.$("dm-retag-preview").querySelectorAll(".az-alert:not(.az-alert--warning)")].map((x) =>
         [x.querySelector(".az-alert__title").textContent, x.querySelector(".az-alert__body").textContent]);
     console.log("hints  :", hints.slice(0, 2).map((x) => x.join(": ")).join(" | "));
@@ -327,11 +346,11 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     assert.deepStrictEqual([...hv.$("dm-retag-preview").querySelectorAll(".az-alert code")].slice(0, 2).map((x) => x.textContent),
                            ["PLAUSIBLE_VERSION", "/opt"], "variable and path as code");
     const na = boot("en", { ...BASE, "diun-update.py retag": { fail: { problem: "access-denied" } } });
-    await sleep(80);
+    await settle();
     rowOf(na.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(na, "v2");
-    await sleep(40);
+    await settle();
     const naAlert = na.$("dm-retag-preview").querySelector(".az-alert--danger");
     assert.deepStrictEqual([naAlert.getAttribute("role"), naAlert.querySelector(".az-alert__title").textContent],
                            ["alert", "The change could not be checked"], "an error, not a warning");
@@ -343,39 +362,39 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
             { op: "20261015-101500-plausible", status: "failed", reason: RS, image: REPO + ":v2" }) + "\n"], fail: { exit_status: 4 } },
         "diun-update.py rollback": { chunks: ["/opt/plausible/compose.yml changed after the tag change – nothing changed.\n"],
                                      fail: { exit_status: 5 } } });
-    await sleep(80);
+    await settle();
     rowOf(fl.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(fl, "v2");
-    await sleep(40);
+    await settle();
     fl.$("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     console.log("\nfailed :", fl.$("dm-dialog-result").textContent);
     assert.strictEqual(fl.$("dm-dialog-result").textContent,
         "Tag-Wechsel fehlgeschlagen – die Container laufen nicht stabil. Zurückrollen stellt die Dateien und das vorherige Image wieder her.");
     assert.strictEqual(fl.d.querySelector("#dm-dialog-reason .dm-reason-line").textContent, "Error: boom");
     assert(!fl.$("dm-dialog-extra").hidden);
     fl.$("dm-dialog-extra").click();
-    await sleep(60);
+    await settle();
     assert.deepStrictEqual(fl.last("rollback").cmd.slice(1), ["rollback", "20261015-101500-plausible"]);
     console.log("rollback:", fl.$("dm-dialog-result").textContent);
     assert.strictEqual(fl.$("dm-dialog-result").textContent, "Rollback abgebrochen, bevor etwas geändert wurde – siehe Ausgabe.");
     const ab = boot("de", { ...BASE, "diun-update.py retag": (cmd) => DRY()(cmd) || { chunks: ["The files changed since the preview\n"],
                                                                                       fail: { exit_status: 5 } } });
-    await sleep(80);
+    await settle();
     rowOf(ab.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(ab, "v2");
-    await sleep(40);
+    await settle();
     ab.$("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     assert.strictEqual(ab.$("dm-dialog-result").textContent, "Abgebrochen, bevor etwas geändert wurde – siehe Ausgabe.");
 
     // 9. History: the tag change under the image; its rollback names the files
     const h = boot("de", { ...BASE, "diun-update.py rollback": { chunks: ['@@RESULT {"status":"ok"}\n'] } });
-    await sleep(80);
+    await settle();
     h.$("dm-tab-btn-backups").click();
-    await sleep(20);
+    await settle();
     const opRow = h.d.querySelector("#dm-ops tr");
     console.log("\nhistory:", [...opRow.querySelectorAll("td")].map((td) => td.textContent.trim()).filter(Boolean).join(" | "));
     assert.strictEqual(opRow.querySelector(".dm-row-note").textContent, "Tag geändert: v2.1.4 → v2");
@@ -384,22 +403,22 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     assert(h.$("dm-dialog-desc").textContent.startsWith(
         "Stellt /opt/plausible/compose.yml, /opt/plausible/.env wieder her, wie sie vor dem Tag-Wechsel waren, setzt " + REPO + ":v2.1.4 wieder auf"));
     h.$("dm-dialog-confirm").click();
-    await sleep(60);
+    await settle();
     assert.strictEqual(h.$("dm-dialog-result").textContent, "Rollback erfolgreich.");
 
     // 10. English: no German in the row, the field, the preview and the history
     const en = boot("en", { ...BASE, "diun-update.py retag": DRY({ variable: "V", git: "/opt" }) });
-    await sleep(80);
+    await settle();
     rowOf(en.d, "glitchtip-postgres").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     const enOpts = optionsOf(en.d).join(" / ");
     en.$("dm-dialog-cancel").click();
     rowOf(en.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
-    await sleep(10);
+    await settle();
     choose(en, "latest");
-    await sleep(40);
+    await settle();
     en.$("dm-tab-btn-backups").click();
-    await sleep(20);
+    await settle();
     const all = en.d.documentElement.outerHTML + enOpts;
     assert(enOpts.includes("18-alpine – database major, needs a migration"));
     assert(all.includes("Tag changed: v2.1.4 → v2") && all.includes("latest follows every new release"));

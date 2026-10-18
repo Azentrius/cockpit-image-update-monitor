@@ -1,7 +1,91 @@
 # Changelog
 
-## Unreleased
+## 0.19.0 – 2026-10-18
 
+Ready for wider use: docker commands and dumps have time limits and a stopped run cleans up before it
+frees the lock, every dump is restored and checked in CI against a real Docker Engine, the page is
+tested in a real Cockpit, the supported systems are named and the packages enforce the minimum
+versions, and a killed update keeps its output. Line tags show the release they run.
+
+**Upgrading:** install the package as usual (`apt` or `dnf` from packages.azentrius.de, or the checked
+release files, on openSUSE with `zypper`); nothing to change by hand.
+New, optional: `DOCKER_TIMEOUT` and `DUMP_TIMEOUT` in `/etc/image-updates.conf` (defaults 30 minutes
+and 4 hours); raise `DUMP_TIMEOUT` for very large databases. Cockpit now checks its version (264 or
+newer), and Docker Compose older than 2.8 counts as missing. The packages now depend on
+`cockpit-bridge` 264 or newer and `python3` 3.8 or newer: on older systems (Ubuntu 20.04, RHEL 8 and
+its derivatives, openSUSE Leap 15.6) the package manager refuses the update.
+
+- **End-to-end test in CI, dumps restored.** `test/e2e-server.sh` runs on every push against the
+  Docker Engine of a throw-away GitHub runner, and before every release. It restores every dump the
+  helper writes into a fresh Postgres, MariaDB and MySQL container and compares rows, views,
+  functions, procedures, triggers, events, indexes, sequences, users and grants with the original;
+  half a dump must be caught. Pulls run against a local registry: nothing newer, registry down with
+  and without a newer image here. The cases that still expected “no change” for a tag that cannot be
+  pulled now expect the stop before any change (exit 5).
+- **The page in a real Cockpit, in CI.** The new job `cockpit` installs Cockpit on a throw-away GitHub
+  runner (Ubuntu 24.04, with systemd and Docker) and drives the page through Cockpit's login in
+  Chromium: this build installed with apt over the release before, the page reloaded and logged in
+  again after that upgrade, found in the menu, without JavaScript or resource errors of its own (and
+  none in Cockpit beyond those it shows without the add-on), with and without administrative access; skopeo and the radar set up from the page and a radar run; on a
+  throw-away compose project an update with its plan, live output and result, and its rollback.
+  The job summary lists the versions and every step, the artifact `cockpit-session` has screenshots.
+- **More checks in CI:** the helper tests on Python 3.8; the packages installed and removed on
+  Debian 12, Ubuntu 22.04 and 24.04, Rocky Linux 9 and 10 and openSUSE Leap 16.0, skopeo installed
+  there the way the page does it; gitleaks over the whole history.
+- **Upgrade test that holds after a release.** The job `upgrade` took the newest release as the base
+  and required another version, so after 0.19.0 every pull request without a new version would have
+  failed. It now starts from the newest release older than the build by Semantic Versioning (not a
+  draft or pre-release, with packages; `tools/upgrade-base.py`), checked against `SHA256SUMS` and its
+  build provenance, and checks on Debian 13 and Fedora 43 that the version went up by the package
+  manager's own comparison, that the installed files are this build's byte for byte and that the
+  data stays over the upgrade and the removal. Without an older release it says so and checks a
+  fresh install.
+- **Packages require the minimum versions.** `cockpit-bridge (>= 264)` and `python3 (>= 3.8)` in the
+  `.deb`, `cockpit-bridge >= 264` and `python3 >= 3.8` in the `.rpm`, instead of any version. CI checks
+  the metadata and that Ubuntu 20.04 (Cockpit 215) and Rocky Linux 8 (`python3` 3.6) refuse the
+  package for that reason.
+- **Releases wait for every test job.** The release workflow checks that the whole test workflow
+  passed for the commit it releases (the end-to-end test, the installs, the upgrade, the Cockpit
+  session), not only the required check `test`.
+- **Security policy and contributing:** `SECURITY.md` says which releases get fixes (the newest) and
+  how to upgrade and report; `CONTRIBUTING.md`, issue forms (with a warning against pasting
+  credentials) and a pull request template.
+- **UI tests without fixed waits.** The plugin tests waited 5 to 400 ms for the stubbed helpers, which
+  a slow CI runner could miss. They now wait until every answer has arrived and the page has handled
+  it; states in between (a slow inventory, a running preview) are checked behind answers the test
+  releases itself.
+- **Maintenance: the page's texts in a file of their own.** The English and German texts (`I18N`)
+  moved unchanged from `plugin/diun.js` to `plugin/i18n.js`, which `index.html` loads first; `diun.js`
+  keeps the code (1755 instead of 2445 lines), and a translation can be reviewed on its own.
+- **Supported systems defined.** The README names what CI tests (every helper against the real Docker
+  Engine of a GitHub runner, Python 3.8 and 3.12), where the packages install (Debian 12/13, Ubuntu
+  22.04/24.04, Fedora 43, Rocky Linux 9/10, openSUSE Leap 16.0) and what is expected but untested.
+  Minimums: Cockpit 264, Docker Compose 2.8 (`up --pull never`; 5.x included), Python 3.8.
+- **Fix: Cockpit never checked the minimum version.** `plugin/manifest.json` said `require`, a key
+  Cockpit does not read; it is now `requires` (Cockpit 264, Ubuntu 22.04's).
+- **Compose older than 2.8 counts as missing.** The requirements check and the Diun setup now say
+  "Docker Compose 2.8 or newer" instead of failing later in an update.
+- **openSUSE:** skopeo installs with zypper as well. README, `SECURITY.md` and the release notes
+  give one way for openSUSE: the release's `.rpm`, checked against `SHA256SUMS` and its build
+  provenance first, then `zypper install --allow-unsigned-rpm`; the package repository has no openSUSE
+  packages. Leap 15.6 (Python 3.6) is not supported.
+- **Time limits for docker commands and dumps.** A `docker compose pull`, `docker compose up`,
+  `docker rmi` or database dump that hung held the update lock for good: no other update, rollback or
+  cleanup could run. Each now has a limit, `DOCKER_TIMEOUT` (default 1800 s) and `DUMP_TIMEOUT`
+  (default 4 h) in `/etc/image-updates.conf`, checked like the cleanup rules. The limit counts for the
+  whole command, also when it prints nothing; then its process group is stopped (SIGTERM, SIGKILL after
+  10 s) and the lock is free again. A pull or dump over its limit stops the update before anything
+  changed and removes the partial dump; a `compose up` over its limit fails the update with its history,
+  output and rollback, and says that the containers may still be changing. The process handling lives
+  in the new `lib/diunproc.py`.
+- **Fix: SIGTERM or SIGHUP left the docker command running and the lock free.** The helper ended at
+  once; a `docker compose up` or dump it had started went on, and the next update or rollback could
+  start meanwhile. Now the first SIGTERM, SIGHUP or Ctrl-C ends the run through its cleanup: the
+  command's process group is stopped, a run that changed no container yet takes back its dumps,
+  rollback copy and files (exit 5), one in the restart fails with its history, output and rollback
+  (exit 4, cause `signal`), and the lock stays held until all that is done; a second signal cannot
+  cut it short. SIGKILL cannot be caught by any program: after it, the docker command keeps the lock
+  until it has ended, and the run stays in the history as aborted with its rollback.
 - **Fix: a line tag showed its own number as the installed version.** A tag such as `cubejs/cube:v1.6`,
   `onlyoffice/documentserver:10.0`, `clickhouse/clickhouse-server:24.12-alpine` or
   `pomerium/pomerium:v0.33` names a line, not a release: the registry has `v1.6.74`, `10.0.0.1`,
@@ -12,6 +96,10 @@
   that version over the tag's number when it refines it. Exact tags (`16.14-alpine`, `v2.1.4`) stay
   as they are, and a version variable in the image still wins. When the registry fails, the same image
   keeps the release and the patch it had, marked as older data.
+- **Fix: a font request that failed on Ubuntu.** The shared stylesheet asked Cockpit for Red Hat
+  Mono (`static/fonts/RedHatMono`), which Ubuntu 24.04's Cockpit 314 does not ship: HTTP 404 on every
+  load of the page, found by the Cockpit session. Code and versions now use the system's monospace
+  font; `test/fonts_test.py` checks that every font the page uses ships with the add-on.
 - **Fix: a killed update kept no output.** The output of an update was written to its log file only
   at the end. A run killed after the restart (SIGKILL) stayed in the history with its rollback, but
   without its output. It now goes to the file as it is printed once the run is in the history, so it is

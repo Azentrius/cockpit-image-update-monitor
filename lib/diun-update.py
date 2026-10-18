@@ -59,6 +59,12 @@ Everything the addon writes lives in /var/backups/image-updates (root only):
 The machine-readable result of update/rollback/cleanup is the last line:
   @@RESULT {"op": "...", "status": "ok|nochange|failed", ...}
 
+SIGTERM, SIGHUP and SIGINT end a run through its cleanup (entry, diunproc):
+the docker command running is stopped, a run that changed no container yet
+takes back what it did (exit 5), one that did is recorded as failed with its
+rollback (exit 4), and only then is the lock free. SIGKILL cannot be caught:
+see diunproc and docs/INTERNALS.md.
+
 Lives in /usr/lib/cockpit-image-updates (root-owned, not mounted into any
 container). DIUN_LANG=de|en selects the language of the log messages.
 """
@@ -74,11 +80,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import deque
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from diunlib import CI_JOB_RE, CI_RUNNER_RE, core, is_ci_job, local_version, nums_of, tag_digits  # noqa: E402
+from diunproc import Interrupted, Timeout, copy as copy_out, held, on_signals, stream as stream_out  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
@@ -139,20 +146,22 @@ def run(cmd, check=True, capture=True, timeout=600):
 
 
 STREAM_TAIL = []          # last lines of the last stream() call, for the failure reason
+# Time limits in seconds (DOCKER_TIMEOUT, DUMP_TIMEOUT in /etc/image-updates.conf, load_limits):
+# one docker / docker compose command that streams (pull, up, rmi), one database dump.
+LIMITS = {"docker": 1800, "dump": 14400}
 
 
 def stream(cmd):
-    """Run a command, pass its output through to our stdout line by line and
-    keep the last lines in STREAM_TAIL."""
+    """Run a docker command, pass its output through to our stdout line by
+    line and keep the last lines in STREAM_TAIL. Ends after LIMITS["docker"]
+    seconds with diunproc.Timeout (the command stopped, STREAM_TAIL filled)."""
     print("+ " + " ".join(cmd), flush=True)
-    tail = deque(maxlen=50)
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
-    for line in p.stdout:
-        sys.stdout.write(line)
-        sys.stdout.flush()
-        tail.append(line.rstrip("\n"))
-    rc = p.wait()
-    STREAM_TAIL[:] = list(tail)
+    try:
+        rc, tail = stream_out(cmd, LIMITS["docker"], sys.stdout, keep_fds=lock_fds())
+    except Timeout as e:
+        STREAM_TAIL[:] = e.tail
+        raise
+    STREAM_TAIL[:] = tail
     return rc
 
 
@@ -222,6 +231,13 @@ def lock():
         raise Abort(75, "Es läuft bereits ein Update oder Rollback.",
                     "An update or rollback is already running.")
     _lock_fh = fh
+
+
+def lock_fds():
+    """The lock for the docker commands a run starts (diunproc keep_fds):
+    should the helper be killed with SIGKILL, the lock stays held until they
+    have ended as well."""
+    return (_lock_fh.fileno(),) if _lock_fh else ()
 
 
 def ensure_base():
@@ -1054,20 +1070,36 @@ def dump_db(project, db, st):
     final = os.path.join(pdir, f"{st}_{db['name']}.sql.gz")
     tmp = final + ".part"
     script = PG_DUMP if db["kind"] == "postgres" else MY_DUMP
-    tail = b""
+    seen = {"tail": b""}
     t0 = time.time()
-    errf = tempfile.TemporaryFile()
-    proc = subprocess.Popen(["docker", "exec", db["name"], "sh", "-c", script],
-                            stdout=subprocess.PIPE, stderr=errf)
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6) as gz:
-        for chunk in iter(lambda: proc.stdout.read(1 << 16), b""):
-            gz.write(chunk)
-            tail = (tail + chunk)[-4096:]
-    rc = proc.wait()
-    errf.seek(0)
-    err = errf.read().decode(errors="replace").strip()
-    errf.close()
+
+    def keep(gz, chunk):
+        gz.write(chunk)
+        seen["tail"] = (seen["tail"] + chunk)[-4096:]
+
+    # The dump has DUMP_TIMEOUT seconds; then docker exec is stopped and the
+    # partial file goes. The dump inside the container ends when it finds
+    # its output closed; the update stops before anything changed.
+    with tempfile.TemporaryFile() as errf:
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6) as gz:
+                rc = copy_out(["docker", "exec", db["name"], "sh", "-c", script],
+                              lambda chunk: keep(gz, chunk), LIMITS["dump"], errf, keep_fds=lock_fds())
+        except BaseException as e:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            if isinstance(e, Timeout):
+                raise Abort(5, f"Dump von {db['name']} nach {e.seconds} s abgebrochen (DUMP_TIMEOUT in {CONF}). "
+                               f"Update abgebrochen – nichts geändert.",
+                            f"Dump of {db['name']} stopped after {e.seconds} s (DUMP_TIMEOUT in {CONF}). "
+                            f"Update aborted – nothing changed.")
+            raise
+        errf.seek(0)
+        err = errf.read().decode(errors="replace").strip()
+    tail = seen["tail"]
     if rc != 0 or DUMP_DONE[db["kind"]] not in tail:
         os.unlink(tmp)
         msg = err[-400:] if err else f"exit {rc}"
@@ -1225,7 +1257,24 @@ def failure_reason(names, compose_rc=0):
 
 def error_reason(e):
     """The cause when the helper itself stopped after the containers were
-    recreated (Docker did not answer, a command failed): source "error"."""
+    recreated (Docker did not answer, a command failed): source "error".
+    A command that did not end within its limit (diunproc.Timeout) gets
+    source "timeout", a signal to the helper (diunproc.Interrupted) source
+    "signal": the command was stopped, but what it asked the Docker daemon to
+    do may go on or have stopped half way, so nobody can say the containers
+    are as before."""
+    if isinstance(e, Interrupted):
+        return {"container": None, "state": None, "exit_code": None, "oom": False, "source": "signal",
+                "line": pick(f"diun-update.py hat {e.name} bekommen und den Neustart oder die Prüfung danach "
+                             f"abgebrochen; Docker kann die Container noch ändern – mit docker ps prüfen.",
+                             f"diun-update.py got {e.name} and stopped the restart or the check after it; Docker "
+                             f"may still be changing the containers – check with docker ps.")}
+    if isinstance(e, Timeout):
+        return {"container": None, "state": None, "exit_code": None, "oom": False, "source": "timeout",
+                "line": pick(f"{' '.join(e.cmd[-6:])} hat nach {e.seconds} s nicht geendet und wurde abgebrochen "
+                             f"(DOCKER_TIMEOUT); die Container können sich noch ändern – mit docker ps prüfen.",
+                             f"{' '.join(e.cmd[-6:])} did not end within {e.seconds} s and was stopped "
+                             f"(DOCKER_TIMEOUT); the containers may still be changing – check with docker ps.")}
     text = (getattr(e, "stderr", None) or str(e) or type(e).__name__).strip()
     line = (text.splitlines() or [type(e).__name__])[-1][:REASON_MAX]
     return {"container": None, "state": None, "exit_code": None, "oom": False, "source": "error",
@@ -1253,14 +1302,15 @@ def record(entry, log=None):
     must survive a crash). log: the name under logs/ that keeps the output
     of this run (keep_log)."""
     ensure_base()
-    fd = os.open(OPS, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    with os.fdopen(fd, "a") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-    _recorded.add(entry.get("id"))
-    if log:
-        keep_log(log)
+    with held():        # a signal waits until the line is on disk (diunproc)
+        fd = os.open(OPS, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        _recorded.add(entry.get("id"))
+        if log:
+            keep_log(log)
 
 
 def keep_log(name):
@@ -1433,9 +1483,25 @@ def result(**kw):
 
 
 # ---------------------------------------------------------------- update ----
+@contextmanager
+def before_change():
+    """A signal (diunproc.Interrupted) while nothing has changed yet: exit 5."""
+    try:
+        yield
+    except Interrupted as e:
+        raise stopped(e, "nichts geändert.", "nothing changed.")
+
+
+def stopped(e, de, en):
+    """Abort(5) for a run that a signal stopped before any container changed."""
+    return Abort(5, f"Abgebrochen durch {e.name}, bevor ein Container geändert wurde – {de}",
+                 f"Stopped by {e.name} before any container changed – {en}")
+
+
 def cmd_update(name, do_dump=True):
     lock()
-    plan, ctx = make_plan(name)
+    with before_change():
+        plan, ctx = make_plan(name)
     if not plan["updatable"]:
         raise Abort(2, f"Nicht aktualisierbar: {plan['reason']}", f"Not updatable: {plan['reason']}")
     return roll_out(name, plan, ctx, do_dump)
@@ -1447,7 +1513,8 @@ def cmd_retag(name, new_tag, expect, do_dump=True):
     if not FP_RE.match(expect):
         raise Abort(64, f"Ungültiger Fingerabdruck: {expect}", f"Invalid fingerprint: {expect}")
     lock()
-    plan, ctx = make_retag(name, new_tag)
+    with before_change():
+        plan, ctx = make_retag(name, new_tag)
     rt = plan["retag"]
     if not rt["possible"]:
         why = rt["reason"] + (f" ({rt['detail']})" if rt.get("detail") else "")
@@ -1460,14 +1527,15 @@ def cmd_retag(name, new_tag, expect, do_dump=True):
 
 def discard(op):
     """A run that stops before any container changed leaves nothing behind:
-    no rollback tag, no dumps."""
-    if op.get("rollback"):
-        run(["docker", "rmi", op["rollback"]], check=False)
-    for rel in op["dumps"]:
-        try:
-            remove_dump(rel)
-        except (Abort, OSError):
-            pass
+    no rollback tag, no dumps. A signal meanwhile waits until it is done."""
+    with held():
+        if op.get("rollback"):
+            run(["docker", "rmi", op["rollback"]], check=False)
+        for rel in op["dumps"]:
+            try:
+                remove_dump(rel)
+            except (Abort, OSError):
+                pass
 
 
 def drop_run(op):
@@ -1476,23 +1544,28 @@ def drop_run(op):
     A run that is in the history already gets the status "discarded" there,
     which hides it, and keeps no output. If the files cannot be put back,
     everything stays: the history keeps the run, and its rollback restores
-    them."""
+    them. Runs once per run, and a signal meanwhile waits until it is done:
+    the cleanup is never cut in two."""
     global _log_name
-    if op.get("backup_files"):
-        try:
-            restore_files(op["backup_files"])
-        except OSError as e:
-            raise Abort(1, f"Wiederherstellen fehlgeschlagen ({e}) – die alten Dateien liegen in {op['backup']}; "
-                           f"der Vorgang steht im Verlauf und lässt sich zurückrollen.",
-                        f"Restoring failed ({e}) – the old files are in {op['backup']}; the operation is in the "
-                        f"history and can be rolled back.")
-        drop_backup(op["backup"])
-    discard(op)
-    if op["id"] in _recorded:
-        record({"id": op["id"], "status": "discarded"})
-        _log_name = None
-        if _tee:
-            _tee.close(keep=False)
+    if op.get("dropped"):
+        return
+    with held():
+        if op.get("backup_files"):
+            try:
+                restore_files(op["backup_files"])
+            except OSError as e:
+                raise Abort(1, f"Wiederherstellen fehlgeschlagen ({e}) – die alten Dateien liegen in "
+                               f"{op['backup']}; der Vorgang steht im Verlauf und lässt sich zurückrollen.",
+                            f"Restoring failed ({e}) – the old files are in {op['backup']}; the operation is in "
+                            f"the history and can be rolled back.")
+            drop_backup(op["backup"])
+        discard(op)
+        if op["id"] in _recorded:
+            record({"id": op["id"], "status": "discarded"})
+            _log_name = None
+            if _tee:
+                _tee.close(keep=False)
+        op["dropped"] = True
 
 
 def change_files(op, ctx, retag, services, st):
@@ -1550,13 +1623,15 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
     new_ref = retag["image"] if retag else ref
     repo, _tag = split_ref(ref)
     services, project = plan["services"], plan["project"]
-    old_ids = {n: inspect(n)["Image"] for n in plan["containers"]}
+    with before_change():
+        old_ids = {n: inspect(n)["Image"] for n in plan["containers"]}
+        from_version = version_of(ref, old_ids[name])
     old_id = old_ids[name]
     op = {"id": op_id, "ts": now_iso(), "kind": "retag" if retag else "update", "container": name,
           "project": project, "workdir": ctx["workdir"], "files": ctx["files"],
           "env_files": ctx["env_files"], "services": services,
           "containers": plan["containers"], "image": ref, "old_id": old_id,
-          "from_version": version_of(ref, old_id), "to_version": None,
+          "from_version": from_version, "to_version": None,
           "rollback": None, "dumps": [], "status": "running", "pid": os.getpid()}
 
     if retag:
@@ -1581,6 +1656,12 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         try:
             for d in dumpable:
                 op["dumps"].append(dump_db(project, d, st))
+        except Interrupted as e:
+            discard(op)
+            raise stopped(e, "die angefangenen Dumps sind gelöscht, nichts geändert. Ein Dump im Container endet, "
+                             "sobald er merkt, dass seine Ausgabe fehlt.",
+                          "the dumps begun are deleted, nothing changed. A dump in the container ends once it "
+                          "notices that its output is gone.")
         except Abort:
             # An aborted update leaves nothing behind, not even the dumps
             # of the other databases that worked.
@@ -1613,7 +1694,14 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         # registry fails, and that looked like "no newer image". A failed pull
         # goes on only with the image to roll out on the server already.
         base = compose_cmd(ctx)
-        pull_rc = stream(base + ["pull", *services])
+        try:
+            pull_rc = stream(base + ["pull", *services])
+        except Timeout as e:
+            drop_run(op)
+            raise Abort(5, f"Der Pull hat nach {e.seconds} s nicht geendet und wurde abgebrochen (DOCKER_TIMEOUT in "
+                           f"{CONF}) – nichts geändert. Docker kann ein begonnenes Herunterladen noch beenden.",
+                        f"The pull did not end within {e.seconds} s and was stopped (DOCKER_TIMEOUT in {CONF}) – "
+                        f"nothing changed. Docker may still finish a download it had started.")
         pull_error = (reason_line(STREAM_TAIL) or f"exit {pull_rc}") if pull_rc else None
         new_id = image_id(new_ref)
         if retag and not new_id:
@@ -1650,6 +1738,12 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         record(op, log=op_id + ".log")
     except Abort:
         raise
+    except Interrupted as e:
+        drop_run(op)
+        raise stopped(e, "Dumps, Rollback-Kopie und geänderte Dateien zurückgenommen, nichts geändert. Ein "
+                         "begonnener Pull kann im Docker-Daemon noch zu Ende laufen.",
+                      "dumps, rollback copy and changed files taken back, nothing changed. A pull that had "
+                      "begun may still finish in the Docker daemon.")
     except BaseException:
         drop_run(op)
         raise
@@ -1670,7 +1764,10 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         if not ok:
             show_logs(failed or plan["containers"])
             op["reason"] = failure_reason(failed or plan["containers"], compose_rc=rc)
-    except Exception as e:
+    except (Exception, Interrupted) as e:
+        # A signal stops the command running (diunproc) and lands here: the
+        # update fails with its history, output and rollback; further signals
+        # wait until that is recorded.
         ok = False
         op["reason"] = error_reason(e)
     if not ok:
@@ -1692,8 +1789,11 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         say("Update erfolgreich.", "Update successful.")
 
     # 5. + 6. Never let these turn a successful update into a failure.
-    cleanup_after_update(project, repo)
-    start_radar()
+    try:
+        cleanup_after_update(project, repo)
+        start_radar()
+    except Interrupted as e:
+        say(f"{e.name}: Aufräumen und Radar-Start übersprungen.", f"{e.name}: cleanup and radar start skipped.")
     result(op=op_id, status="ok", rollback=rb, dumps=op["dumps"], **versions)
     return 0
 
@@ -1784,31 +1884,36 @@ def cmd_rollback(op_id):
     # The files must give the services the operation's image (other_image):
     # without a tag change checked before anything changes, with one once its
     # files are back, which are written again as they were if not.
-    if not saved:
-        other_image(ctx, op)
-    say(f"Rollback von {op['image']} auf {rb} (Projekt {op['project']}) …",
-        f"Rolling {op['image']} back to {rb} (project {op['project']}) …")
-    say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
-        "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
-    if saved:
-        now = {}
-        for x in pending:
-            with open(os.path.realpath(x["path"]), "rb") as f:
-                now[x["path"]] = f.read()
-        restore_files(pending)
-        try:
+    now = {}            # the files as they were before this rollback put any back
+    try:
+        if not saved:
             other_image(ctx, op)
-        except Abort:
+        say(f"Rollback von {op['image']} auf {rb} (Projekt {op['project']}) …",
+            f"Rolling {op['image']} back to {rb} (project {op['project']}) …")
+        say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
+            "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
+        if saved:
+            for x in pending:
+                with open(os.path.realpath(x["path"]), "rb") as f:
+                    now[x["path"]] = f.read()
+            restore_files(pending)
+            other_image(ctx, op)
+            for x in pending:
+                say(f"Wiederhergestellt: {x['path']}", f"Restored: {x['path']}")
+    except (Abort, Interrupted) as e:
+        with held():
             for path, data in now.items():
                 write_like(path, data)
-            raise
-        for x in pending:
-            say(f"Wiederhergestellt: {x['path']}", f"Restored: {x['path']}")
+        if isinstance(e, Interrupted):
+            raise Abort(5, f"Rollback durch {e.name} abgebrochen, bevor ein Container geändert wurde – nichts "
+                           f"geändert.",
+                        f"Rollback stopped by {e.name} before any container changed – nothing changed.")
+        raise
     # The containers change from here on: the output goes to the log as printed.
     keep_log(op_id + ".rollback.log")
-    run(["docker", "tag", rb, op["image"]])
     ok, reason = False, None
     try:
+        run(["docker", "tag", rb, op["image"]])
         rc = stream(compose_cmd(ctx) + ["up", "-d", "--no-deps", "--pull", "never", *op["services"]])
         ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["services"])
         if ok:
@@ -1824,7 +1929,7 @@ def cmd_rollback(op_id):
         else:
             show_logs(failed or op["containers"])
             reason = failure_reason(failed or op["containers"], compose_rc=rc)
-    except Exception as e:
+    except (Exception, Interrupted) as e:
         ok, reason = False, error_reason(e)
     status = "ok" if ok else "failed"
     entry = {"id": op_id, "rolled_back": ok, "rollback_ts": now_iso(), "rollback_status": status,
@@ -1990,13 +2095,66 @@ def cmd_delete_image(ref):
     if not image_id(ref):
         raise Abort(2, f"{ref} nicht gefunden.", f"{ref} not found.")
     # Without -f: Docker refuses if a container still uses the image.
-    return stream(["docker", "rmi", ref])
+    try:
+        return stream(["docker", "rmi", ref])
+    except Timeout as e:
+        raise Abort(1, f"docker rmi hat nach {e.seconds} s nicht geendet und wurde abgebrochen; ob {ref} noch da "
+                       f"ist, zeigt die Übersicht nach dem Neuladen.",
+                    f"docker rmi did not end within {e.seconds} s and was stopped; whether {ref} is still there "
+                    f"shows after a reload.")
+    except Interrupted as e:
+        raise Abort(1, f"docker rmi durch {e.name} abgebrochen; ob {ref} noch da ist, zeigt die Übersicht nach "
+                       f"dem Neuladen.",
+                    f"docker rmi stopped by {e.name}; whether {ref} is still there shows after a reload.")
 
 
 # --------------------------------------------------------------- cleanup ----
 # KEY in /etc/image-updates.conf -> (rule, default). 0 switches a rule off.
 RULES = {"KEEP_DUMPS": ("keep_dumps", 3), "ROLLBACK_IMAGE_DAYS": ("image_days", 14)}
 RULE_VALUE_RE = re.compile(r"^\d{1,4}$")
+# KEY -> (LIMITS key, lowest, highest), in seconds (see LIMITS).
+LIMIT_KEYS = {"DOCKER_TIMEOUT": ("docker", 60, 86400), "DUMP_TIMEOUT": ("dump", 60, 172800)}
+LIMIT_VALUE_RE = re.compile(r"^\d{1,6}$")
+
+
+def read_conf(nothing_de, nothing_en):
+    """{KEY: int} from /etc/image-updates.conf, {} without the file. The file
+    must belong to root and be writable by root only; a line not understood,
+    an unknown key or a value out of range raises Abort(2) with nothing_* as
+    the consequence ("nothing deleted", "nothing changed")."""
+    try:
+        st = os.stat(CONF)
+    except FileNotFoundError:
+        return {}
+    if st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
+        raise Abort(2, f"{CONF} muss root gehören und darf nur für root schreibbar sein – {nothing_de}.",
+                    f"{CONF} must belong to root and be writable by root only – {nothing_en}.")
+    found = {}
+    with open(CONF) as f:
+        for n, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, sep, value = (x.strip() for x in line.partition("="))
+            value = value.strip("\"'")
+            ok = sep and ((key in RULES and RULE_VALUE_RE.match(value))
+                          or (key in LIMIT_KEYS and LIMIT_VALUE_RE.match(value)
+                              and LIMIT_KEYS[key][1] <= int(value) <= LIMIT_KEYS[key][2]))
+            if not ok:
+                hint = (f" ({LIMIT_KEYS[key][1]}–{LIMIT_KEYS[key][2]} s)" if key in LIMIT_KEYS else "")
+                raise Abort(2, f"{CONF}, Zeile {n} nicht verstanden: {line[:60]}{hint} – {nothing_de}.",
+                            f"{CONF}, line {n} not understood: {line[:60]}{hint} – {nothing_en}.")
+            found[key] = int(value)
+    return found
+
+
+def load_limits():
+    """LIMITS from /etc/image-updates.conf, before an update, a rollback or
+    a delete changes anything; a file not understood stops it (exit 2)."""
+    found = read_conf("nichts geändert", "nothing changed")
+    for key, (name, _, _) in LIMIT_KEYS.items():
+        if key in found:
+            LIMITS[name] = found[key]
 
 
 def load_rules():
@@ -2006,24 +2164,11 @@ def load_rules():
     of guessing - a typo must never delete more than intended."""
     rules = {name: default for name, default in RULES.values()}
     rules["file"] = None
-    try:
-        st = os.stat(CONF)
-    except FileNotFoundError:
+    if not os.path.exists(CONF):
         return rules
-    if st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
-        raise Abort(2, f"{CONF} muss root gehören und darf nur für root schreibbar sein – nichts gelöscht.",
-                    f"{CONF} must belong to root and be writable by root only – nothing deleted.")
-    with open(CONF) as f:
-        for n, line in enumerate(f, 1):
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            key, sep, value = (x.strip() for x in line.partition("="))
-            value = value.strip("\"'")
-            if not sep or key not in RULES or not RULE_VALUE_RE.match(value):
-                raise Abort(2, f"{CONF}, Zeile {n} nicht verstanden: {line[:60]} – nichts gelöscht.",
-                            f"{CONF}, line {n} not understood: {line[:60]} – nothing deleted.")
-            rules[RULES[key][0]] = int(value)
+    for key, value in read_conf("nichts gelöscht", "nothing deleted").items():
+        if key in RULES:
+            rules[RULES[key][0]] = value
     rules["file"] = CONF
     return rules
 
@@ -2173,6 +2318,8 @@ def main(argv):
         plan, _ = make_plan(argv[1])
         print(json.dumps(plan, ensure_ascii=False))
         return 0
+    if argv[:1] in (["update"], ["rollback"], ["delete-image"]) or argv[:1] == ["retag"] and "--expect" in argv:
+        load_limits()
     if len(argv) in (2, 3) and argv[0] == "update" and (len(argv) == 2 or argv[2] == "--no-dump"):
         return keep_output(cmd_update, argv[1], do_dump=len(argv) == 2)
     if len(argv) == 2 and argv[0] == "rollback":
@@ -2197,12 +2344,35 @@ def main(argv):
     raise Abort(64, "Unbekannter Befehl: " + " ".join(argv), "Unknown command: " + " ".join(argv))
 
 
-if __name__ == "__main__":
+def entry(argv):
+    """main() as the command line runs it: a message for an error, and the
+    exit code. SIGTERM, SIGHUP and SIGINT end a run through its cleanup
+    (diunproc.on_signals): the docker command running is stopped, the run
+    takes back what it did or records what is left, and only then does the
+    process end and free the lock. The code is the run's own (5: stopped
+    before any change, 4: failed afterwards, with its rollback), else 128 +
+    the signal's number."""
+    guard = None
     try:
-        sys.exit(main(sys.argv[1:]))
+        with on_signals() as guard:
+            code = main(argv)
     except Abort as e:
         print(str(e), flush=True)
-        sys.exit(e.code)
+        code = e.code
     except subprocess.CalledProcessError as e:
         print((e.stderr or str(e)).strip(), flush=True)
-        sys.exit(1)
+        code = 1
+    except (Timeout, subprocess.TimeoutExpired) as e:
+        print(pick(f"Abgebrochen, Zeitgrenze überschritten: {e}", f"Stopped, time limit passed: {e}"), flush=True)
+        code = 1
+    except Interrupted as e:
+        print(pick(f"Abgebrochen durch {e.name}.", f"Stopped by {e.name}."), flush=True)
+        code = 128 + e.signum
+    if guard is not None and guard.repeats:
+        say(f"{guard.repeats} weitere(s) Signal(e) während des Aufräumens nicht beachtet.",
+            f"{guard.repeats} more signal(s) ignored while cleaning up.")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(entry(sys.argv[1:]))

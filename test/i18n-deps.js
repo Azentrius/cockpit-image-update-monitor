@@ -10,7 +10,8 @@ const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
 const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8")
     .replace(/<script[^>]*><\/script>/g, "");
-const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
+// The page as index.html loads it: the texts (i18n.js), then the code (diun.js).
+const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const files = {
     "/var/lib/diun/events.jsonl": fs.readFileSync(path.join(FIX, "events.jsonl"), "utf8"),
@@ -25,7 +26,24 @@ const DEPS_OK = {
     radar: { state: "active", can_install: true },
 };
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Answers of the stubbed helpers that have not arrived yet, for every page of this file.
+const pending = new Set();
+const track = (p) => {
+    const done = p.then(() => {}, () => {});
+    pending.add(done);
+    done.then(() => pending.delete(done));
+};
+// Waits until every stubbed answer has arrived and the page has handled it (also the calls
+// those answers lead to), instead of a fixed number of milliseconds. Fails after a bounded
+// number of rounds, so a page that keeps calling cannot hang the test.
+async function settle() {
+    for (let round = 0; round < 500; round++) {
+        if (pending.size) await Promise.all([...pending]);
+        await new Promise((r) => setImmediate(r));
+        if (!pending.size) return;
+    }
+    throw new Error("the page did not settle: helper calls keep coming");
+}
 
 function boot({ language, deps = DEPS_OK, install } = {}) {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
@@ -58,6 +76,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
                 }, 20);
             });
             p.stream = (cb) => { streamCb = cb; return p; };
+            track(p);
             return p;
         },
         transport: { wait() {} },
@@ -71,7 +90,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     // 1. Language selection
     for (const [lang, expect] of [["de", "de"], ["de_AT", "de"], ["en", "en"], ["fr", "en"], [undefined, "en"]]) {
         const a = boot({ language: lang });
-        await sleep(60);
+        await settle();
         const heads = [...a.d.querySelectorAll("thead th")].map((x) => x.textContent).join("|");
         const btn = a.d.querySelector("#dm-refresh .dm-btn-label").textContent;
         console.log(`language=${String(lang).padEnd(9)} -> html lang=${a.d.documentElement.lang} | ${btn} | ${heads}`);
@@ -82,7 +101,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
 
     // 2. English mode leaves no German strings anywhere (visible text, labels, tooltips)
     const en = boot({ language: "en" });
-    await sleep(60);
+    await settle();
     const all = en.d.documentElement.outerHTML;
     const german = ["Aktualisieren", "Lädt", "Übersicht", "Installierte", "Neue Version", "aktuell<", "unbekannt", "fließend",
                     "Erledigt", "neueste", "vor ", "Datenbank", "Abbrechen", "Voraussetzungen", "Keine laufenden"];
@@ -101,7 +120,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     let currentDeps = missing;
     const b = boot({ language: "de", deps: () => currentDeps,
                      install: { chunks: ["+ apt-get update\n", "…\n", "skopeo installiert.\n"] } });
-    await sleep(60);
+    await settle();
     const panel = b.d.getElementById("dm-deps");
     const items = [...b.d.querySelectorAll(".dm-dep")].map((li) => li.textContent.replace(/\s+/g, " ").trim());
     console.log("\nDE panel visible:", !panel.hidden);
@@ -131,7 +150,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     assert.strictEqual(call.opts.superuser, "require");
     assert.strictEqual(JSON.stringify(call.opts.environ), JSON.stringify(["DIUN_LANG=de"]));
     assert(b.d.getElementById("dm-dialog-cancel").disabled, "cancel locked while running");
-    await sleep(120);
+    await settle();
     console.log("log    :", JSON.stringify(b.d.getElementById("dm-dialog-log").textContent));
     console.log("result :", b.d.getElementById("dm-dialog-result").textContent,
                 "| close btn:", b.d.getElementById("dm-dialog-cancel").textContent);
@@ -150,12 +169,12 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
                                   [{ exit_status: 77 }, DENIED],
                                   [{ problem: "access-denied" }, DENIED]]) {
         const c = boot({ language: "en", deps: missing, install: { chunks: ["Aborted: /opt/diun already exists – nothing overwritten.\n"], fail } });
-        await sleep(60);
+        await settle();
         c.d.querySelector('.dm-dep button[data-target="diun"]').click();
         assert.deepStrictEqual([...c.d.querySelectorAll("#dm-dialog-desc code")].map((x) => x.textContent),
                                ["/opt/diun", "docker compose up -d"]);
         c.d.getElementById("dm-dialog-confirm").click();
-        await sleep(100);
+        await settle();
         const res = c.d.getElementById("dm-dialog-result");
         console.log("fail", JSON.stringify(fail).padEnd(26), "->", res.textContent);
         assert.strictEqual(res.textContent, expect);
@@ -165,7 +184,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     // Docker unreachable: an error (label and panel), the hint is plain text
     const dk = clone(missing); dk.docker = { state: "no-daemon" };
     const g = boot({ language: "en", deps: dk });
-    await sleep(60);
+    await settle();
     const docker = g.d.querySelector(".dm-dep");
     console.log("\ndocker:", docker.textContent.replace(/\s+/g, " ").trim());
     assert.deepStrictEqual([docker.querySelector(".az-label").className, docker.querySelector(".az-label").textContent],
@@ -176,7 +195,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     // 6. Not admin -> single hint instead of a misleading list
     const na = clone(DEPS_OK); na.root = false; na.docker.state = "no-daemon";
     const e = boot({ language: "de", deps: na });
-    await sleep(60);
+    await settle();
     console.log("\nnot admin:", e.d.getElementById("dm-deps-intro").textContent,
                 "| items:", e.d.querySelectorAll(".dm-dep").length);
     assert(!e.d.getElementById("dm-deps").hidden && e.d.querySelectorAll(".dm-dep").length === 0);

@@ -4,7 +4,7 @@
 #
 # Called by the plugin via cockpit.spawn with a FIXED set of arguments only:
 #   diun-deps.sh check            one JSON object on stdout (read-only)
-#   diun-deps.sh install skopeo   install skopeo with apt-get or dnf
+#   diun-deps.sh install skopeo   install skopeo with apt-get, dnf or zypper
 #   diun-deps.sh install diun     deploy Diun + read-only socket proxy to /opt/diun
 #   diun-deps.sh start diun       start the existing /opt/diun stack
 #   diun-deps.sh install radar    enable diun-radar.timer and run the radar once
@@ -61,7 +61,19 @@ json_str() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\
 json_bool() { if [ "$1" = 1 ]; then printf true; else printf false; fi; }
 
 docker_ok() { timeout 10 docker version --format '{{.Server.Version}}' >/dev/null 2>&1; }
-compose_ok() { timeout 10 docker compose version >/dev/null 2>&1; }
+# Compose 2.8 or newer (numbered 5.x since 2025): the helpers run `up --pull never`, which
+# came with Compose 2.8.0. Older ones and the standalone docker-compose 1.x do not count.
+compose_ok() {
+    cv=$(timeout 10 docker compose version --short 2>/dev/null) || return 1
+    cv=${cv#v}
+    cmaj=${cv%%.*}
+    cmin=${cv#*.}
+    cmin=${cmin%%.*}
+    case "$cmaj.$cmin" in
+        *[!0-9.]*|.*|*.) return 1 ;;
+    esac
+    [ "$cmaj" -gt 2 ] || { [ "$cmaj" -eq 2 ] && [ "$cmin" -ge 8 ]; }
+}
 
 # ---------------------------------------------------------------- check ----
 do_check() {
@@ -103,7 +115,7 @@ do_check() {
         sk_state=ok
         sk_ver=$(skopeo --version 2>/dev/null | awk '{print $3}' || true)
     fi
-    if command -v apt-get >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1 || command -v zypper >/dev/null 2>&1; then
         sk_install=1
     fi
 
@@ -164,9 +176,11 @@ install_skopeo() {
         run env DEBIAN_FRONTEND=noninteractive apt-get install -y skopeo
     elif command -v dnf >/dev/null 2>&1; then
         run dnf install -y skopeo
+    elif command -v zypper >/dev/null 2>&1; then
+        run zypper --non-interactive install skopeo
     else
-        die 2 "Kein unterstützter Paketmanager (apt-get oder dnf) gefunden." \
-              "No supported package manager (apt-get or dnf) found."
+        die 2 "Kein unterstützter Paketmanager (apt-get, dnf oder zypper) gefunden." \
+              "No supported package manager (apt-get, dnf or zypper) found."
     fi
     msg "skopeo installiert." "skopeo installed."
 }
@@ -211,7 +225,7 @@ EOF
 install_diun() {
     command -v docker >/dev/null 2>&1 && docker_ok || \
         die 2 "Docker ist nicht erreichbar." "Docker is not reachable."
-    compose_ok || die 2 "Docker Compose fehlt." "Docker Compose is missing."
+    compose_ok || die 2 "Docker Compose 2.8 oder neuer fehlt." "Docker Compose 2.8 or newer is missing."
     fresh=0
     [ "$DRY" = 1 ] && [ "${DIUN_DEPS_FORCE_FRESH:-0}" = 1 ] && fresh=1
     if [ "$fresh" = 0 ]; then

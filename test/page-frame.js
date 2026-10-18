@@ -12,7 +12,8 @@ const { JSDOM } = require("jsdom");
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
 const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
-const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
+// The page as index.html loads it: the texts (i18n.js), then the code (diun.js).
+const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const icons = fs.readFileSync(path.join(PLUGIN, "icons.js"), "utf8");
 const VERSION = /const VERSION = "([^"]+)"/.exec(js)[1];
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
@@ -26,7 +27,9 @@ const files = {
 const DEPS = { root: true, docker: { state: "ok", compose: true }, diun: { state: "running", events: true },
                skopeo: { state: "missing", can_install: true }, radar: { state: "active", running: false },
                cleanup: { state: "active", can_install: true } };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The stubbed helpers answer at once and the page has no timers of its own: one turn of the
+// event loop runs everything that follows from the answers, without waiting for milliseconds.
+const flush = () => new Promise((r) => setImmediate(r));
 
 function boot(language, opts) {
     opts = opts || {};
@@ -75,7 +78,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
 (async () => {
     // 1. Header: the product name Image Update Monitor, suffix "Monitor" (names are never translated), meta, one filled button.
     const a = boot("de", { holdInventory: true });
-    await sleep(20);
+    await flush();
     const title = a.d.querySelector("header.az-page-header h1.az-page-title");
     const suffix = title.querySelector(".az-page-title__suffix");
     console.log("title:", title.textContent.replace(/\s+/g, " "), "| suffix:", suffix.textContent);
@@ -91,7 +94,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert(refresh.disabled && refresh.classList.contains("is-busy") && refresh.textContent.trim() === "Lädt …");
     assert.strictEqual(refresh.getAttribute("aria-busy"), "true");
     a.release();
-    await sleep(40);
+    await flush();
     console.log("loaded :", refresh.textContent.trim(), "| disabled:", refresh.disabled, "| meta:", a.d.getElementById("dm-meta").textContent);
     assert(!refresh.disabled && !refresh.classList.contains("is-busy") && refresh.textContent.trim() === "Aktualisieren");
     assert.strictEqual(refresh.getAttribute("aria-busy"), "false");
@@ -116,7 +119,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     // mouse
     const loadsBefore = a.calls.length;
     tabs[1].click();
-    await sleep(20);
+    await flush();
     console.log("click backups:", state(), "| updates hidden:", a.d.getElementById("dm-tab-updates").hidden);
     assert.strictEqual(state(), "dm-tab-btn-updates:false:-1 dm-tab-btn-backups:true:0");
     assert(a.d.getElementById("dm-tab-updates").hidden && !a.d.getElementById("dm-tab-backups").hidden);
@@ -139,14 +142,14 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert.strictEqual(a.calls.length, loadsBefore, "keyboard switches load nothing either");
     // Refresh keeps the tab that is shown
     refresh.click();
-    await sleep(40);
+    await flush();
     assert.strictEqual(state(), "dm-tab-btn-updates:false:-1 dm-tab-btn-backups:true:0");
     assert(a.count("diun-inventory.py") === 2 && a.count("diun-update.py backups") === 2, "Refresh loads both tabs");
     console.log("refresh keeps the backups tab; inventory runs:", a.count("diun-inventory.py"));
 
     // 3. Status labels with their fixed icons, no gold (az-label only).
     const b = boot("de");
-    await sleep(40);
+    await flush();
     const rows = [...b.d.querySelectorAll("#dm-rows tr")];
     const status = (name) => rows.find((tr) => tr.querySelector(".dm-name").textContent === name).querySelector('td[data-label="Status"] .az-label');
     const want = { ollama: ["az-label az-label--info", "info-circle", "Update verfügbar"],
@@ -211,7 +214,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
 
     // 5. Dialog: the main action filled, Cancel a link; delete confirms in danger
     b.d.querySelector('button[data-update="ollama"]').click();
-    await sleep(30);
+    await flush();
     const confirm = b.d.getElementById("dm-dialog-confirm"), cancel = b.d.getElementById("dm-dialog-cancel");
     console.log("\nupdate dialog:", confirm.className, "|", cancel.className, cancel.textContent);
     assert(confirm.classList.contains("az-btn--primary") && !confirm.classList.contains("az-btn--danger"));
@@ -238,14 +241,14 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert.strictEqual(b.d.getElementById("dm-sig-version").textContent, `Image Update Monitor ${VERSION}`);
     assert.deepStrictEqual([b.d.getElementById("dm-sig-host").textContent, b.d.getElementById("dm-sig-host").hidden], ["docker-host", false]);
     const e = boot("en", { files: { ...files, "/etc/hostname": null } });
-    await sleep(40);
+    await flush();
     assert.strictEqual(e.d.getElementById("dm-sig-version").textContent, `Image Update Monitor ${VERSION}`);
     assert(e.d.getElementById("dm-sig-host").hidden, "no host name -> product only");
     assert.strictEqual(e.d.querySelector(".az-page-title").textContent.replace(/\s+/g, " ").trim(), "Image Update Monitor");
 
     // 7. Messages under the tab bar as an alert with its icon
     const f = boot("en", { inventoryFails: true });
-    await sleep(40);
+    await flush();
     const st = f.d.getElementById("dm-status");
     console.log("status:", st.className, iconOf(st), st.getAttribute("role"), "|", st.textContent);
     assert(!st.hidden && st.classList.contains("az-alert") && iconOf(st) === "info-circle");
@@ -253,7 +256,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
         ["Container inventory unavailable", "status"]);
     // Without the inventory and without Diun events: an empty state that says why
     const q = boot("en", { inventoryFails: true, files: { ...files, "/var/lib/diun/events.jsonl": "" } });
-    await sleep(40);
+    await flush();
     const empty = q.d.getElementById("dm-empty");
     console.log("empty:", empty.className, iconOf(empty), "|", empty.textContent.replace(/\s+/g, " ").trim());
     assert(!empty.hidden && empty.classList.contains("az-empty") && iconOf(empty) === "info-circle");

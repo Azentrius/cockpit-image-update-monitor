@@ -195,11 +195,19 @@ the update): compose would start that one, not the rollback copy. Afterwards it 
 containers really run the rollback copy. A rollback that failed can be tried again once the cause is
 fixed.
 
-**An update that was cut off** (the helper killed, a power cut, Docker not answering after the
-restart) stays in the history with its rollback copy: the helper writes it there before any container
-changes. The backups tab shows it as “aborted” and offers the rollback. Its output is kept up to the
-cut, because it goes to the log file as it is printed (after a power cut the last lines can be
-missing).
+**An update that was stopped** with SIGTERM, SIGHUP or Ctrl-C (a `systemctl stop`, a closed
+terminal) ends through its cleanup and keeps the update lock until that is done: the docker command
+it ran is stopped; before any container changed, the dumps, the rollback copy and changed files are
+taken back (exit 5); during the restart the update fails with its history, output and rollback
+(exit 4), and the cause says that Docker may still be changing the containers. A second signal does
+not cut the cleanup short.
+
+**An update that was cut off** (the helper killed with SIGKILL, a power cut, Docker not answering
+after the restart) stays in the history with its rollback copy: the helper writes it there before any
+container changes. The backups tab shows it as “aborted” and offers the rollback. Its output is kept
+up to the cut, because it goes to the log file as it is printed (after a power cut the last lines can
+be missing). After SIGKILL the docker command it ran goes on and keeps the update lock until it ends;
+check `docker ps` before rolling back.
 
 **Unknown jump size:** if the installed version is unknown and the tag fixes no version number
 (`latest`, `stable` …), nobody can tell what the update brings. The plan says so first: it may be a new
@@ -293,9 +301,28 @@ If the project lies in a git repository, the dialog says so; the add-on never co
 
   A line that is not understood stops the cleanup with a message instead of guessing.
 
+**Time limits** (same file, since 0.19.0)
+
+| Limit | Default | Key | Allowed |
+|---|---|---|---|
+| One `docker compose pull`, `docker compose up` or `docker rmi` | 1800 s | `DOCKER_TIMEOUT` | 60–86400 |
+| One database dump | 14400 s (4 h) | `DUMP_TIMEOUT` | 60–172800 |
+
+- A command that does not end in time is stopped: its process group gets SIGTERM, ten seconds later
+  SIGKILL, and the helper waits for it, so the update lock is free again afterwards. The limit counts
+  for the whole command, also when it prints nothing at all.
+- **Pull or dump too slow:** the update stops before anything changed (exit 5); a partial dump is
+  removed. Docker may still finish a download it had started.
+- **`compose up` too slow:** the containers were already being changed. The update counts as failed
+  (exit 4) with its history, output and rollback, and the message says the containers may still be
+  changing: check `docker ps` before rolling back. Stopping the docker client does not stop what the
+  Docker daemon is doing.
+- Very large databases need a larger `DUMP_TIMEOUT`. A value outside the range, or not a number, stops
+  updates, rollbacks and the cleanup (exit 2) until it is fixed.
+
 **Restoring a dump (manually, with care)**
 
-A `pg_dumpall` dump creates roles and databases anew. It belongs in an **empty** Postgres instance. Restored into a running instance with the same databases, it gives “already exists” errors and mixed states. A proven way: stop the app, back up or rename the data volume, start the database container with an empty volume, then:
+A `pg_dumpall` dump creates roles and databases anew. It belongs in an **empty** Postgres instance. Restored into a running instance with the same databases, it gives “already exists” errors and mixed states. A proven way: stop the app, back up or rename the data volume, start the database container with an empty volume and the **same image** (the same major version), then:
 
 ```bash
 # Postgres
@@ -305,8 +332,20 @@ zcat /var/backups/image-updates/dumps/<project>/<file>.sql.gz \
 # MariaDB
 zcat /var/backups/image-updates/dumps/<project>/<file>.sql.gz \
   | docker exec -i <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
-# MySQL: mysql -uroot -p"$MYSQL_ROOT_PASSWORD"
+docker exec <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "FLUSH PRIVILEGES"'
+# MySQL: the same with mysql and $MYSQL_ROOT_PASSWORD
 ```
+
+- **Postgres:** one error is expected and harmless: `role "postgres" already exists` (the new instance
+  made it). Any other `ERROR` line means the restore is incomplete: start again with an empty volume.
+- **MariaDB, MySQL:** the dump holds all databases including the users (`mysql`), so start the new
+  container with the **root password of the dumped one**; afterwards the old users and passwords apply.
+  The client stops at the first error and exits with 1.
+- **Check** the result before the app writes to it again: the tables, row counts and the users you
+  expect. The end-to-end test (`test/e2e-server.sh`, in CI on every change) restores every dump it makes
+  this way into a fresh Postgres, MariaDB and MySQL container and compares rows, views, functions,
+  procedures, triggers, events, indexes, sequences, users and grants with the original; half a dump is
+  caught as a failed restore.
 
 ---
 
@@ -358,6 +397,7 @@ flowchart LR
 | `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run |
 | `lib/diun-deps.sh` | `/usr/lib/cockpit-image-updates/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
 | `lib/diunlib.py` | `/usr/lib/cockpit-image-updates/` | shared functions (tag scheme, version variables, reach) |
+| `lib/diunproc.py` | `/usr/lib/cockpit-image-updates/` | docker commands and dumps with a time limit (process group stopped, never left behind), signals turned into a cleanup |
 | `systemd/diun-radar.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install radar` enables the timer; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
 | `systemd/diun-cleanup.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install cleanup` enables the timer; runs daily (04:40) |
 | Diun stack | `/opt/diun/`, data `/var/lib/diun/` | created by `diun-deps.sh install diun`: Diun 4.33.0 + `docker-socket-proxy` (read-only), the script notifier writes JSON lines |
@@ -385,18 +425,49 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 
 ## Requirements
 
-- Linux server with **Cockpit ≥ 266** (systemd)
-- **Docker Engine** with **Compose v2** (`docker compose`)
-- **Python ≥ 3.8** (standard library only) and `bash`
-- For the radar: **skopeo** (the add-on installs it on request with `apt-get` or `dnf`)
+- Linux with **systemd** and **Cockpit 264** or newer (the package depends on `cockpit-bridge` 264 or newer,
+  and `plugin/manifest.json` makes Cockpit check it)
+- **Docker Engine** with the **Docker Compose plugin 2.8** or newer (`docker compose`; Compose counts
+  5.x since 2025, that is fine). The helpers run `up --pull never`, which came with Compose 2.8.0. The
+  standalone `docker-compose` 1.x is not supported; Debian 12's own `docker.io` brings only that, so
+  use Docker's packages there.
+- **Python 3.8** or newer (the package depends on `python3` 3.8 or newer), standard library only;
+  `/bin/sh`, `flock`, `timeout` (coreutils), `systemctl`
+- For the radar: **skopeo** (the add-on installs it on request with `apt-get`, `dnf` or `zypper`)
 - For digest updates: **Diun** (the add-on sets up `/opt/diun` on request)
+
+### Supported systems
+
+What CI really runs, and what is expected but not tested. A package that builds or installs is not a
+tested system by itself.
+
+| | Systems | What is checked |
+|---|---|---|
+| **Tested** | Ubuntu 24.04 (GitHub runner) with Docker Engine and Compose from the runner image | every helper against the real Docker Engine: updates, rollbacks, pulls against a registry, dumps and their restore into Postgres 16, MariaDB 11 and MySQL 8 (job `e2e`, also before every release) |
+| **Tested** | Ubuntu 24.04 (GitHub runner) with Ubuntu's Cockpit, systemd and Docker | the page in a real Cockpit session in Chromium (job `cockpit`): installed with apt over the release before, reloaded and logged in again after that upgrade, found in the menu, no JavaScript or resource errors of the add-on (and none in Cockpit beyond those it shows without the add-on), with and without administrative access, skopeo and the radar set up from the page and a radar run, an update with its live output and result and its rollback on a throw-away compose project; versions, steps and screenshots in the job summary and the artifact `cockpit-session` |
+| **Tested** | Python 3.8 and 3.12 | the helper tests (fake Docker); 3.8 is the oldest supported |
+| **Package installs** | Debian 12 and 13, Ubuntu 22.04 and 24.04, Fedora 43, Rocky Linux 9 and 10 (for RHEL 9 and 10), openSUSE Leap 16.0 | the package installs with the distribution's own dependencies (`cockpit-bridge` 264 or newer, `python3` 3.8 or newer), the helpers answer, skopeo installs the way the page does it (`apt-get`, `dnf`, `zypper`), the package removes cleanly; on Debian 13 and Fedora 43 also an upgrade from the newest older release, the installed files checked against this build and the data kept. No Cockpit, Docker or systemd runs there. |
+| **Expected, untested** | the systems of the row above, besides Ubuntu 24.04, with Cockpit 264 or newer and Docker's Engine and Compose packages (on RHEL: `docker-ce` and `docker-compose-plugin` from Docker's repository; on openSUSE: `docker`, `docker-compose` with zypper) | the page in a real Cockpit there, Diun, the radar's registry access |
+| **Refused** | Ubuntu 20.04 (Cockpit 215), Rocky Linux 8 (`python3` is 3.6) | checked in CI: the package manager refuses the package for the dependency that is too old |
+| **Not supported** | Podman (also with `podman-docker`), Compose 1.x and below 2.8, Swarm, Kubernetes, rootless Docker, systems without systemd, openSUSE Leap 15.6 (Python 3.6, end of life) | |
+
+Containers not started by Compose are shown, but not updated.
 
 ---
 
 ## Install, update, uninstall
 
-**From the Azentrius package repository.** Set up [packages.azentrius.de](https://packages.azentrius.de)
-once:
+Two ways, the same package:
+
+| | Debian, Ubuntu | Fedora, RHEL | openSUSE |
+|---|---|---|---|
+| [Azentrius package repository](https://packages.azentrius.de) (`apt`, `dnf`) | yes | yes (set-up tested on Fedora; RHEL derivatives use the same `dnf` set-up, untested) | no |
+| [Release files](https://github.com/Azentrius/cockpit-image-update-monitor/releases), checked first | yes | yes | yes, the only way (`zypper`) |
+
+Which systems are tested how: [Supported systems](#supported-systems).
+
+**From the Azentrius package repository** (Debian, Ubuntu, Fedora, RHEL). Set up
+[packages.azentrius.de](https://packages.azentrius.de) once:
 
 ```bash
 # Debian and Ubuntu
@@ -404,7 +475,7 @@ curl -fsSLO https://packages.azentrius.de/azentrius-repository.deb
 sudo apt install ./azentrius-repository.deb
 sudo apt update
 
-# Fedora, RHEL and openSUSE
+# Fedora and RHEL (Rocky, Alma)
 sudo rpm --import https://packages.azentrius.de/azentrius.asc
 sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
 ```
@@ -412,17 +483,25 @@ sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
 Then install **Image Update Monitor** in Cockpit under **Applications** (with administrative access), or on the
 console with `sudo apt install cockpit-image-update-monitor` or `sudo dnf install cockpit-image-update-monitor`. The
 system's updates keep it current. The repository takes a package only after checking that this
-repository's release workflow built it.
+repository's release workflow built it, and signs it.
 
-**From a release.** Every [release](https://github.com/Azentrius/cockpit-image-update-monitor/releases) has the
-`.deb` and the `.rpm`, `SHA256SUMS` and a signed build provenance (`X.Y.Z` is the version):
+**From the files of a release** (every system; on openSUSE the only way). Every
+[release](https://github.com/Azentrius/cockpit-image-update-monitor/releases) has the `.deb` and the `.rpm`,
+`SHA256SUMS` and a signed build provenance. Download the package and `SHA256SUMS` into one folder,
+check both, then install (`X.Y.Z` is the version):
 
 ```bash
-sudo apt install ./cockpit-image-update-monitor_X.Y.Z-1_all.deb     # Debian, Ubuntu
-sudo dnf install ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm  # Fedora, RHEL, openSUSE
-sha256sum --ignore-missing -c SHA256SUMS                     # check a download
-gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor   # built by the release workflow
+sha256sum --ignore-missing -c SHA256SUMS                                     # complete and unchanged
+gh attestation verify <file> --repo Azentrius/cockpit-image-update-monitor   # built by this repository's release workflow
+
+sudo apt install ./cockpit-image-update-monitor_X.Y.Z-1_all.deb                              # Debian, Ubuntu
+sudo dnf install ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm                           # Fedora, RHEL
+sudo zypper install --allow-unsigned-rpm ./cockpit-image-update-monitor-X.Y.Z-1.noarch.rpm   # openSUSE
 ```
+
+The `.rpm` of a release carries no package signature (the repository signs its own copy): `zypper`
+needs `--allow-unsigned-rpm`, and the two checks above take the place of the signature. To update,
+do the same with the files of the newer release; the package manager replaces the installed version.
 
 The package puts the page into `/usr/share/cockpit/image-updates/`, the root helpers into `/usr/lib/cockpit-image-updates/` and the units `diun-radar` and `diun-cleanup` into `/usr/lib/systemd/system/` (off until you set them up). After an update it starts a radar run if the radar is set up. It also takes over an installation made with `install.sh` (up to 0.11): the old page in `/usr/share/cockpit/diun`, the old helpers in `/usr/local/lib/diun-radar` and the copies of the units in `/etc/systemd/system` go (a timer changed by hand stays and keeps overriding the package's), the `backup-*` folders of `install.sh` and all data stay, and timers that were on keep running.
 
@@ -449,7 +528,7 @@ sudo /usr/lib/cockpit-image-updates/diun-deps.sh install cleanup  # diun-cleanup
 **Uninstall**
 
 ```bash
-sudo apt remove cockpit-image-update-monitor      # or: sudo dnf remove cockpit-image-update-monitor
+sudo apt remove cockpit-image-update-monitor      # or: sudo dnf remove / sudo zypper remove cockpit-image-update-monitor
 ```
 
 This stops the timers and removes the page, the helpers and the units. On purpose it keeps the radar data (`/var/lib/diun-radar`), the dumps (`/var/backups/image-updates`), `/etc/image-updates.conf`, the rollback images and the Diun stack:
@@ -489,7 +568,7 @@ tail -n 5 /var/lib/diun/events.jsonl
 |---|---|
 | “Container inventory unavailable” | Switch on administrative access in Cockpit, otherwise check Docker. |
 | Column *Installed* shows `?` after an update | Label/digest come from the radar, which starts after every update and takes a few minutes. *Run radar now* or `diun-update.py radar` runs it again. |
-| “Cleanup rules: … not understood” | Fix the line in `/etc/image-updates.conf` (only `KEEP_DUMPS` and `ROLLBACK_IMAGE_DAYS`, numbers) or make it root-only (`chown root:root`, `chmod 644`). Until then nothing is deleted. |
+| “Cleanup rules: … not understood” | Fix the line in `/etc/image-updates.conf` (only `KEEP_DUMPS`, `ROLLBACK_IMAGE_DAYS`, `DOCKER_TIMEOUT` and `DUMP_TIMEOUT`, numbers in their range) or make it root-only (`chown root:root`, `chmod 644`). Until then nothing is deleted, and updates stop before they change anything. |
 | “Radar: no data yet” / “(outdated)” | Timer missing or not running: *Missing requirements* panel or `systemctl status diun-radar.timer`. |
 | “Registry error”, “(older data)” | Registry unreachable, rate limit or server error; the last good result stays visible and the next run tries again. |
 | “not in a registry”, status “Unknown” | No registry shows the image: it was built or tagged on the server (`build:` in the compose file, `docker build -t`), or it is private. The radar cannot find newer versions; update the image where it is built. |
@@ -516,7 +595,7 @@ tail -n 5 /var/lib/diun/events.jsonl
 ## Development
 
 ```
-plugin/            Cockpit package (manifest, index.html, diun.js, diun.css, menu translation) and
+plugin/            Cockpit package (manifest, index.html, diun.js, i18n.js, diun.css, menu translation) and
                    the shared design files (azentrius.css, azentrius-theme.js, icons.js, fonts)
 lib/               root helpers (Python 3 / POSIX sh), installed to /usr/lib/cockpit-image-updates
 systemd/           units (radar, cleanup), installed to /usr/lib/systemd/system
@@ -613,7 +692,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 
 ## Known limits
 
-- **Docker with Compose v2 only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated.
+- **Docker with Compose 2.8 or newer only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated. See [Supported systems](#supported-systems).
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “not in a registry”, like images built on the server.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Database majors** are manual (dump, new instance, restore), see stage 5.

@@ -13,7 +13,8 @@ const { JSDOM } = require("jsdom");
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
 const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
-const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
+// The page as index.html loads it: the texts (i18n.js), then the code (diun.js).
+const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const icons = fs.readFileSync(path.join(PLUGIN, "icons.js"), "utf8");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const radar = JSON.parse(fs.readFileSync(path.join(FIX, "versions2.json"), "utf8"));
@@ -58,7 +59,9 @@ function boot(language, files, inventoryOut) {
 }
 const FILES = { "/var/lib/diun-radar/versions.json": radar, "/var/lib/diun/events.jsonl": EVENTS,
                 "/var/lib/diun/dismissed.json": null };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The stubbed helpers answer at once and the page has no timers of its own: one turn of the
+// event loop runs everything that follows from the answers, without waiting for milliseconds.
+const flush = () => new Promise((r) => setImmediate(r));
 const rows = (d) => [...d.querySelectorAll("#dm-rows tr")];
 const row = (d, name) => rows(d).find((tr) => tr.querySelector(".dm-name").textContent === name);
 const status = (d, name) => row(d, name).querySelectorAll("td")[5].textContent.trim();
@@ -66,7 +69,7 @@ const updateButton = (d, name) => d.querySelector(`[data-update="${name}"][data-
 
 (async () => {
     const d = boot("en", FILES, () => Promise.resolve(inventory));
-    await sleep(60);
+    await flush();
 
     // the event of its own tag: update, and "Dismiss" acknowledges that event
     console.log("calcom-db:", status(d, "calcom-db"));
@@ -96,7 +99,7 @@ const updateButton = (d, name) => d.querySelector(`[data-update="${name}"][data-
     // a dismissed event: no update any more
     const dis = { ["docker-host|docker.io/library/postgres:15-alpine|" + NEW]: true };
     const g = boot("en", { ...FILES, "/var/lib/diun/dismissed.json": dis }, () => Promise.resolve(inventory));
-    await sleep(60);
+    await flush();
     assert.notStrictEqual(status(g, "calcom-db"), "Update available");
 
     // A new digest of the tag, but the build that runs: Docker Hub published
@@ -114,7 +117,7 @@ const updateButton = (d, name) => d.querySelector(`[data-update="${name}"][data-
         ["a fixed date proves nothing (reproducible builds)", "1970-01-01 00:00:00 +0000 UTC", "1970-01-01T00:00:00Z", true]]) {
         const evs = event("2026-10-16T00:00:00Z", "docker.io/library/postgres:15-alpine", NEW, { created: evCreated }) + "\n";
         const x = boot("en", { ...FILES, "/var/lib/diun/events.jsonl": evs }, () => Promise.resolve(withCreated(rowCreated)));
-        await sleep(60);
+        await flush();
         console.log(what + ":", status(x, "calcom-db"));
         assert.strictEqual(status(x, "calcom-db") === "Update available", want, what);
     }
@@ -122,7 +125,7 @@ const updateButton = (d, name) => d.querySelector(`[data-update="${name}"][data-
     // without an inventory the rows come from the events: one per image and
     // tag, none for a reference with a digest
     const f = boot("en", FILES, () => Promise.reject(Object.assign(new Error("denied"), { problem: "access-denied" })));
-    await sleep(60);
+    await flush();
     const shown = rows(f).map((tr) => tr.querySelectorAll("td")[1].textContent.trim() + ":" +
                                        tr.querySelector(".dm-cfg").textContent).sort();
     console.log("events only:", shown.join(", "));

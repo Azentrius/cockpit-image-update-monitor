@@ -10,14 +10,17 @@ const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
 const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8")
     .replace(/<script[^>]*><\/script>/g, "");
-const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
+// The page as index.html loads it: the texts (i18n.js), then the code (diun.js).
+const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const files = {
     "/var/lib/diun/events.jsonl": fs.readFileSync(path.join(FIX, "events.jsonl"), "utf8"),
     "/var/lib/diun-radar/versions.json": JSON.parse(fs.readFileSync(path.join(FIX, "versions2.json"), "utf8")),
     "/var/lib/diun/dismissed.json": null,
 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The stubbed helpers answer at once and the page has no timers of its own: one turn of the
+// event loop runs everything that follows from the answers, without waiting for milliseconds.
+const flush = () => new Promise((r) => setImmediate(r));
 // Every load also lists the backups (both tabs load together).
 const BACKUPS_EMPTY = JSON.stringify({ dumps: [], images: [], ops: [], dump_bytes: 0, free_bytes: 0, dir: "/var/backups/image-updates" });
 
@@ -61,17 +64,22 @@ function boot(spawnImpl) {
 }
 
 (async () => {
-    const slow = () => new Promise((r) => setTimeout(() => r(inventory), 300));
+    // A slow inventory: it answers when the test releases it, so the states
+    // while it runs are checked at fixed points.
+    const held = [];
+    const slow = () => new Promise((r) => held.push(() => r(inventory)));
+    const release = () => held.splice(0).forEach((answer) => answer());
 
     // 1. First load, slow inventory
     const a = boot(slow);
     console.log("vor JS        :", JSON.stringify(a.before));
     assert(a.before.loader && a.before.btnDisabled && !a.before.tableVisible, "loader must show in static HTML");
-    await sleep(100);
+    await flush();
     const during = a.state();
     console.log("while loading :", JSON.stringify(during));
     assert(during.loader && during.btnDisabled && during.btnBusy && !during.tableVisible && during.ariaBusy === "true");
-    await sleep(400);
+    release();
+    await flush();
     const after = a.state();
     console.log("nach Laden    :", JSON.stringify(after));
     assert(!after.loader && !after.btnDisabled && !after.btnBusy && after.tableVisible && after.rows === 31 && after.ariaBusy === "false");
@@ -79,12 +87,13 @@ function boot(spawnImpl) {
 
     // 2. Refresh click: table stays, dimmed; first-load block stays hidden
     a.d.getElementById("dm-refresh").click();
-    await sleep(100);
+    await flush();
     const refreshing = a.state();
     console.log("Aktualisieren :", JSON.stringify(refreshing));
     assert(!refreshing.loader && refreshing.btnDisabled && refreshing.wrapBusy && refreshing.tableVisible && refreshing.rows === 31);
     assert.strictEqual(refreshing.btnLabel, "Lädt …");
-    await sleep(400);
+    release();
+    await flush();
     const refreshed = a.state();
     console.log("danach        :", JSON.stringify(refreshed));
     assert(!refreshed.btnDisabled && !refreshed.wrapBusy && refreshed.rows === 31);
@@ -92,14 +101,14 @@ function boot(spawnImpl) {
 
     // 3. Inventory fails -> loader gone, fallback banner, button usable again
     const b = boot(() => Promise.reject(new Error("not permitted")));
-    await sleep(100);
+    await flush();
     const failed = b.state();
     console.log("inventory error:", JSON.stringify(failed));
     assert(!failed.loader && !failed.btnDisabled && failed.status.includes("Inventar nicht verfügbar"));
 
     // 4. spawn throws synchronously -> indicator must not get stuck
     const c = boot(() => { throw new Error("boom"); });
-    await sleep(100);
+    await flush();
     const thrown = c.state();
     console.log("spawn wirft   :", JSON.stringify(thrown));
     assert(!thrown.loader && !thrown.btnDisabled && thrown.status.startsWith("Die Übersicht konnte nicht geladen werden") &&
