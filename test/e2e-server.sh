@@ -321,11 +321,11 @@ check "Rollback tag exists" 'docker image inspect "$RB1" >/dev/null 2>&1'
 CAUSE=$(jget "$R1" '(d["reason"] or {}).get("container") == "imgupd-test-app" and d["reason"]["exit_code"] == 3 and d["reason"]["line"] == "Error: e2e app failure"')
 check "Most likely cause in the result: the app and its error line" '[ "$CAUSE" = True ]'
 check "Most likely cause in the output" 'grep -q "Most likely cause (imgupd-test-app): Error: e2e app failure" /tmp/e2e-1.log'
-HCAUSE=$(OP=$OP1 python3 -c 'import json,os; o=[json.loads(l) for l in open("'"$OPS"'") if json.loads(l).get("id")==os.environ["OP"]][0]; print((o.get("reason") or {}).get("line"))')
+HCAUSE=$(OP=$OP1 python3 -c 'import json,os; o={}; [o.update(e) for e in map(json.loads, open("'"$OPS"'")) if e.get("id")==os.environ["OP"]]; print((o.get("reason") or {}).get("line"))')
 check "Most likely cause in operations.jsonl" '[ "$HCAUSE" = "Error: e2e app failure" ]'
 check "Output kept: root only, without @@RESULT" \
     '[ "$(stat -c %a "$LOGS/$OP1.log")" = 600 ] && grep -q "Most likely cause" "$LOGS/$OP1.log" && ! grep -q "^@@RESULT" "$LOGS/$OP1.log"'
-NDIG=$(OP=$OP1 python3 -c 'import json,os; o=[json.loads(l) for l in open("'"$OPS"'") if json.loads(l).get("id")==os.environ["OP"]][0]; print(len(o.get("new_digests") or []))')
+NDIG=$(OP=$OP1 python3 -c 'import json,os; o={}; [o.update(e) for e in map(json.loads, open("'"$OPS"'")) if e.get("id")==os.environ["OP"]]; print(len(o.get("new_digests") or []))')
 check "Registry digests of the new build in the history ($NDIG)" '[ "$NDIG" -ge 1 ]'
 check "The pull of a tag only this host has failed, the newer image here was rolled out with a warning" \
     'grep -q "Warning: the pull failed" /tmp/e2e-1.log'
@@ -377,7 +377,7 @@ RB2=$(jget "$R2" 'd["rollback"]')
 VERS=$(jget "$R2" '(d["from_version"], d["to_version"])')
 WANT_VERS="('$(pg_version "$OLD_IMAGE")', '$(pg_version "$NEW_IMAGE")')"
 check "Versions in the result: $VERS" '[ "$VERS" = "$WANT_VERS" ]'
-HVERS=$(OP=$(jget "$R2" 'd["op"]') python3 -c 'import json,os; o=[json.loads(l) for l in open("'"$OPS"'") if json.loads(l).get("id")==os.environ["OP"]][0]; print((o["from_version"], o["to_version"]))')
+HVERS=$(OP=$(jget "$R2" 'd["op"]') python3 -c 'import json,os; o={}; [o.update(e) for e in map(json.loads, open("'"$OPS"'")) if e.get("id")==os.environ["OP"]]; print((o["from_version"], o["to_version"]))')
 check "Versions in operations.jsonl" '[ "$HVERS" = "$WANT_VERS" ]'
 N_DUMPS=$(find "$DUMPS/$P" -name '*.sql.gz' | wc -l)
 if [ "$KEEP" -gt 0 ] && [ "$KEEP" -lt 4 ]; then EXP_DUMPS=$KEEP; else EXP_DUMPS=4; fi
