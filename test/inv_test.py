@@ -24,8 +24,8 @@ C = [{"Name": "/glitchtip-postgres", "Image": "sha256:old", "Config": {"Image": 
      {"Name": "/ollama", "Image": "sha256:oll", "Config": {"Image": "ollama/ollama:latest", "Labels": {}}},
      # a CI job of the Forgejo runner (a CI host, 2026-10-17): no labels, a volume at /var/run/act
      {"Name": "/FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", "Image": "sha256:ci",
-      "Config": {"Image": "sanctum-ci:1", "Labels": {}},
-      "Mounts": [{"Type": "volume", "Destination": "/workspace/Azentrius/sanctum"},
+      "Config": {"Image": "example-ci:1", "Labels": {}},
+      "Mounts": [{"Type": "volume", "Destination": "/workspace/example/app"},
                  {"Type": "volume", "Destination": "/var/run/act"}]}]
 IMAGES = {
     "sha256:old": {"Id": "sha256:old", "RepoDigests": ["postgres@sha256:16bc"],
