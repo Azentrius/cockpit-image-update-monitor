@@ -100,6 +100,16 @@ UNLISTED_RE = re.compile(r"requested access to the resource is denied|unauthoriz
                          r"|name unknown|repository name not known", re.I)
 RETRY_MISS = timedelta(days=7)
 BUILD_AFTER_GAP = timedelta(days=1)   # see build_after
+BASE_NEWER_GAP = timedelta(hours=1)   # see base_state
+DOCKERFILE_MAX = 1 << 20              # Dockerfiles larger than this are not read
+L_PROJECT = "com.docker.compose.project"
+L_SERVICE = "com.docker.compose.service"
+L_WORKDIR = "com.docker.compose.project.working_dir"
+L_FILES = "com.docker.compose.project.config_files"
+FROM_RE = re.compile(r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$", re.I)
+ARG_RE = re.compile(r"^\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)(?:=(\S*))?\s*$", re.I)
+VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?")
 LEVELS = ("patch", "minor", "major")
 ORDER = {"major": 0, "minor": 1, "patch": 2, "current": 3, "unknown": 4, "error": 5, "unlisted": 6}
 
@@ -148,8 +158,11 @@ def collect():
     for c in containers:
         ref = c["Config"]["Image"]
         key = split_ref(ref)
-        g = groups.setdefault(key, {"containers": [], "ids": set()})
+        g = groups.setdefault(key, {"containers": [], "ids": set(), "labels": {}})
         g["containers"].append(c["Name"].lstrip("/"))
+        labels = c["Config"].get("Labels") or {}
+        if not g["labels"] and labels.get(L_PROJECT):
+            g["labels"] = labels
         g["ids"].add(c["Image"])
         local = "" if "@" in ref else tag_to_id.get(f"{norm(key[0])}:{key[1]}", "")
         if local:
@@ -420,6 +433,155 @@ def newest_plain(tags):
     return best[1] if best else None
 
 
+# --------------------------------------------------------- built images ----
+# An image built on this server (compose `build:`) is in no registry, but the
+# images its Dockerfile starts FROM are: caddy-caddy is Caddy with a DNS plugin
+# built by xcaddy on caddy:2-builder and copied onto caddy:2. When those move
+# on after the build, rebuilding brings the new base.
+def parse_ts(s):
+    """'2026-06-15T20:35:36.21+02:00' / '…Z' / '2026-10-14 01:36:06 +0000 UTC'
+    -> aware datetime in UTC, or None."""
+    m = TIME_RE.match(s or "")
+    if not m:
+        return None
+    t = datetime.strptime(m.group(1) + " " + m.group(2), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    z = m.group(3)
+    if z and z != "Z":
+        sign = 1 if z[0] == "+" else -1
+        t -= sign * timedelta(hours=int(z[1:3]), minutes=int(z[-2:]))
+    return t
+
+
+def parse_from(text):
+    """The images a Dockerfile starts FROM: [{"image", "tag", "final"[, "pinned"]}].
+    "final" marks the base of the image that runs (the last stage, followed
+    through stage names). Stage references, scratch and references with
+    variables the global ARGs do not fill are left out."""
+    args, stage_base, found, last, seen_from = {}, {}, [], None, False
+    for line in text.splitlines():
+        m = ARG_RE.match(line)
+        if m and not seen_from:
+            args[m.group(1)] = m.group(2) or ""
+            continue
+        m = FROM_RE.match(line)
+        if not m:
+            continue
+        seen_from = True
+        ref = VAR_RE.sub(lambda v: args.get(v.group(1) or v.group(2), v.group(0)), m.group(1))
+        key = ref.lower()
+        if key in stage_base:
+            entry = stage_base[key]
+        elif "$" in ref or key == "scratch":
+            entry = None
+        else:
+            repo, tag = split_ref(ref)
+            entry = {"image": repo, "tag": tag, "final": False}
+            if "@" in ref:
+                entry["pinned"] = True
+            found.append(entry)
+        if m.group(2):
+            stage_base[m.group(2).lower()] = entry
+        last = entry
+    if last is not None:
+        last["final"] = True
+    out = []
+    for e in found:
+        same = [x for x in out if (x["image"], x["tag"]) == (e["image"], e["tag"])]
+        if same:
+            same[0]["final"] = same[0]["final"] or e["final"]
+        else:
+            out.append(e)
+    return out
+
+
+def dockerfile_of(labels):
+    """Path of the Dockerfile a compose service is built from, or None (not a
+    compose service, or not built on this server)."""
+    project, service = labels.get(L_PROJECT), labels.get(L_SERVICE)
+    workdir, files = labels.get(L_WORKDIR), labels.get(L_FILES)
+    if not (project and service and workdir and files):
+        return None
+    cmd = ["docker", "compose", "-p", project, "--project-directory", workdir]
+    for f in files.split(","):
+        cmd += ["-f", f]
+    cfg = json.loads(run(cmd + ["config", "--format", "json"]))
+    build = ((cfg.get("services") or {}).get(service) or {}).get("build")
+    if not build:
+        return None
+    if isinstance(build, str):
+        build = {"context": build}
+    context = build.get("context") or workdir
+    if "://" in context or context.startswith("git@"):
+        return None                          # a remote context: nothing to read here
+    if not os.path.isabs(context):
+        context = os.path.join(workdir, context)
+    name = build.get("dockerfile") or "Dockerfile"
+    return name if os.path.isabs(name) else os.path.join(context, name)
+
+
+def base_pushed(repo, tag, image):
+    """When the registry got the base tag's current image for this server's
+    platform: Docker Hub tells per platform (a new list of platforms alone
+    changes nothing); other registries give the image's creation time."""
+    path = hub_path(repo)
+    if path:
+        info = hub_tag(path, tag)
+        arch = image.get("Architecture") or "amd64"
+        for i in info.get("images") or []:
+            if i.get("architecture") == arch and (i.get("os") or "linux") == "linux" and i.get("last_pushed"):
+                return parse_ts(i["last_pushed"])
+        return parse_ts(info.get("tag_last_pushed") or info.get("last_updated"))
+    out = run(["skopeo", "inspect", f"docker://{qualify(repo)}:{tag}"])
+    return parse_ts(json.loads(out).get("Created"))
+
+
+def base_state(entry, image):
+    """One base image of a local build: what its tag points to now ("now"),
+    the version the build carries ("version", final stage only, from the
+    image's variables), when the registry got it ("pushed") and whether it is
+    newer than the build. A pinned base (FROM x@sha256:…) never moves."""
+    out = dict(entry)
+    if entry.get("pinned"):
+        out["newer"] = False
+        return out
+    repo, tag = entry["image"], entry["tag"]
+    try:
+        if entry.get("final"):
+            out["version"] = local_version(repo, tag, image)[0]
+        tags = list_tags(repo)
+        if tag_digits(tag) < 2:
+            out["now"] = (resolve_tag(repo, tag, tags, None) or {}).get("version")
+        else:
+            out["now"] = core(tag)
+        pushed = base_pushed(repo, tag, image)
+        out["pushed"] = iso(pushed) if pushed else None
+        built = parse_ts(image.get("Created"))
+        later = bool(pushed and built and pushed - built > BASE_NEWER_GAP)
+        ahead = bool(out.get("version") and out.get("now") and nums_of(out["now"]) > nums_of(out["version"]))
+        out["newer"] = later or ahead
+    except Exception as e:  # registry or Hub API down, bad JSON, …
+        out["error"] = str(e)[-200:]
+    return out
+
+
+def built_from(group):
+    """For an image built on this server: (build time, [base_state…]) or None."""
+    path = dockerfile_of(group.get("labels") or {})
+    if not path:
+        return None
+    path = os.path.realpath(path)
+    if not os.path.isfile(path) or os.path.getsize(path) > DOCKERFILE_MAX:
+        return None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        bases = parse_from(f.read())
+    if not bases:
+        return None
+    images = sorted(group["images"].values(), key=lambda i: parse_ts(i.get("Created")) or datetime.min.replace(tzinfo=timezone.utc))
+    image = images[-1]
+    built = parse_ts(image.get("Created"))
+    return (iso(built) if built else None), [base_state(b, image) for b in bases]
+
+
 # --------------------------------------------------------------- analyse ----
 def resolve(repo, tag, iid, image, tagset, tags, cache, now):
     """Installed version of one local image: {"version", "src", ["tag"]}."""
@@ -466,6 +628,13 @@ def analyse(item, cache, now, tag_cache=None):
     rec["installed"] = installed
     if error:
         rec["status"], rec["error"] = "unlisted" if unlisted else "error", error
+        if unlisted:
+            try:
+                found = built_from(group)
+            except Exception:  # compose or the Dockerfile unreadable: the record as it was
+                found = None
+            if found:
+                rec["built"], rec["base"] = found
         return rec
 
     # A floating tag: which version it points to right now.

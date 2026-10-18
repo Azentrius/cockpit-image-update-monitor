@@ -116,6 +116,20 @@
             "ver.registryErrorTip": "The registry did not answer properly in this run (unreachable, rate limit, server error); the next run tries again.",
             "ver.unlisted": "not in a registry",
             "ver.unlistedTip": "No registry shows {image}: it was built or tagged on this server, or it is private and the radar has no login. The radar cannot find newer versions; update it where it is built.",
+            "ver.baseNewer": "base newer: {ref}",
+            "ver.baseNewerNow": "base newer: {ref} = {now}",
+            "ver.baseCurrent": "base current",
+            "ver.baseUnchecked": "base not checked",
+            "ver.baseBuilt": "Built on this server on {date}. No registry shows the image itself, but the images its Dockerfile starts from:",
+            "ver.baseFinal": "runtime",
+            "ver.baseStage": "build stage",
+            "ver.baseLine": "{ref} ({role}): now {now}, published on {pushed}",
+            "ver.baseCarries": "; the build carries {version}",
+            "ver.baseIsNewer": " – newer than the build",
+            "ver.basePinned": "{ref}: pinned by digest, does not move",
+            "ver.baseError": "{ref}: not checked ({error})",
+            "ver.baseRebuild": "Rebuilding brings it: docker compose build --pull {service}, then docker compose up -d {service}, in {dir}.",
+            "ver.baseCurrentTip": "The build is newer than the images it starts from. Changes to the project's own files are not checked.",
             "ver.upToDateTip": "Installed = newest version (same tag scheme).",
             "ver.newestOnly": "newest: {v}",
             "ver.newestOnlyTip": "Installed version unknown – no comparison possible.",
@@ -443,6 +457,20 @@
             "ver.registryErrorTip": "Die Registry hat bei diesem Lauf nicht richtig geantwortet (nicht erreichbar, Rate-Limit, Serverfehler); der nächste Lauf versucht es erneut.",
             "ver.unlisted": "nicht in einer Registry",
             "ver.unlistedTip": "Keine Registry zeigt {image}: Es wurde auf diesem Server gebaut oder getaggt, oder es ist privat und der Radar hat keine Anmeldung. Neuere Versionen kann der Radar nicht finden; aktualisieren Sie es dort, wo es gebaut wird.",
+            "ver.baseNewer": "Basis neuer: {ref}",
+            "ver.baseNewerNow": "Basis neuer: {ref} = {now}",
+            "ver.baseCurrent": "Basis aktuell",
+            "ver.baseUnchecked": "Basis nicht geprüft",
+            "ver.baseBuilt": "Auf diesem Server gebaut am {date}. Keine Registry zeigt das Image selbst, wohl aber die Images, auf denen sein Dockerfile aufbaut:",
+            "ver.baseFinal": "Laufzeit",
+            "ver.baseStage": "Build-Stufe",
+            "ver.baseLine": "{ref} ({role}): jetzt {now}, veröffentlicht am {pushed}",
+            "ver.baseCarries": "; der Build enthält {version}",
+            "ver.baseIsNewer": " – neuer als der Build",
+            "ver.basePinned": "{ref}: per Digest festgelegt, ändert sich nicht",
+            "ver.baseError": "{ref}: nicht geprüft ({error})",
+            "ver.baseRebuild": "Neu bauen bringt es: docker compose build --pull {service}, dann docker compose up -d {service}, in {dir}.",
+            "ver.baseCurrentTip": "Der Build ist neuer als die Images, auf denen er aufbaut. Eigene Änderungen im Projekt prüft der Radar nicht.",
             "ver.upToDateTip": "Installiert = neueste Version (gleiches Tag-Schema).",
             "ver.newestOnly": "neueste: {v}",
             "ver.newestOnlyTip": "Installierte Version unbekannt – kein Vergleich möglich.",
@@ -1038,6 +1066,39 @@
     const REACH = { update: ["az-label az-label--info", "info-circle"], tag: ["az-label", ""],
                     migration: ["az-label", "ban"] };
 
+    // An image built on this server (compose `build:`): no registry shows it,
+    // but the radar checks the images its Dockerfile starts FROM (rec.base).
+    // A base published after the build, or with a newer version than the
+    // build carries, is news; the tooltip says how to rebuild. With every base
+    // older than the build the row is up to date as far as the radar can tell.
+    function baseCell(ctn, rec, muted) {
+        const ref = (b) => `${b.image}:${b.tag}`;
+        const lines = [t("ver.baseBuilt", { date: fmtDay(rec.built) })];
+        rec.base.forEach((b) => {
+            if (b.pinned) { lines.push(t("ver.basePinned", { ref: ref(b) })); return; }
+            if (b.error) { lines.push(t("ver.baseError", { ref: ref(b), error: b.error })); return; }
+            lines.push(t("ver.baseLine", { ref: ref(b), role: t(b.final ? "ver.baseFinal" : "ver.baseStage"),
+                                          now: b.now || "?", pushed: fmtDay(b.pushed) }) +
+                       (b.version ? t("ver.baseCarries", { version: b.version }) : "") +
+                       (b.newer ? t("ver.baseIsNewer") : ""));
+        });
+        const checked = rec.base.filter((b) => !b.pinned && !b.error);
+        const newer = checked.filter((b) => b.newer);
+        if (newer.length) {
+            const first = newer.find((b) => b.final) || newer[0];
+            const files = ctn.files || [];
+            const dir = files.length ? files[0].slice(0, files[0].lastIndexOf("/")) || "/" : "?";
+            lines.push(t("ver.baseRebuild", { service: ctn.service || "?", dir }));
+            const text = first.now ? t("ver.baseNewerNow", { ref: ref(first), now: first.now }) : t("ver.baseNewer", { ref: ref(first) });
+            return { html: `<span class="az-label az-label--info dm-level" data-level="base" title="${esc(lines.join("\n"))}">` +
+                           `${icon("info-circle")}${esc(text)}</span>`, news: true, compared: true, baseChecked: true };
+        }
+        if (!checked.length && rec.base.some((b) => b.error)) return { ...muted(t("ver.baseUnchecked"), lines.join("\n")), compared: false };
+        lines.push(t("ver.baseCurrentTip"));
+        return { html: `<span class="dm-uptodate" title="${esc(lines.join("\n"))}">${icon("check-circle")}` +
+                       `<span>${esc(t("ver.baseCurrent"))}</span></span>`, news: false, compared: true, baseChecked: true };
+    }
+
     // A tag like latest that no release tag shares a digest with, pushed to
     // Docker Hub after the newest release (radar: tag_now.after; MobSF's latest
     // is a 4.5.4 build while v4.5.3 is the newest release). Only while that
@@ -1071,6 +1132,7 @@
         if (!cmp || cmp.status === "unknown") cmp = rec.by_tag || null;   // pg17 -> pg18
         if (!cmp) {
             const detail = (key, vars) => [t(key, vars), rec.error].filter(Boolean).join("\n");
+            if (rec.status === "unlisted" && Array.isArray(rec.base) && rec.base.length) return baseCell(ctn, rec, muted);
             if (rec.status === "unlisted") return muted(t("ver.unlisted"), detail("ver.unlistedTip", { image: ctn.image }));
             if (rec.status === "error") return muted(t("ver.registryError"), detail("ver.registryErrorTip"));
             const after = buildAfter(rec);
@@ -1190,7 +1252,7 @@
         // date" would be a guess: Docker gives locally built images a digest
         // too, and Diun reports nothing for them. Not a guess: the container
         // runs the build a tag like latest points to now (sameBuild).
-        if (kind === "ok" && radarOk && rec && ((!inst.v && !ver.sameBuild) || !ver.compared)) kind = "unknown";
+        if (kind === "ok" && radarOk && rec && ((!inst.v && !ver.sameBuild && !ver.baseChecked) || !ver.compared)) kind = "unknown";
         const failedBuild = kind === "update" ? sameFailedBuild(ctn, ev) : null;
         rowFailed.set(ctn.name, failedBuild);
         const note = failedBuild
