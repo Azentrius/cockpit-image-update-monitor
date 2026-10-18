@@ -969,16 +969,22 @@
     // Installed version of a container, first known source wins:
     //   inventory: the tag itself or the image's version variable (always fresh)
     //   radar:     image label or digest comparison with the registry (every 6 h)
+    // A line tag (cubejs/cube:v1.6, 24.12-alpine) names only its line: the
+    // radar's version wins when it refines the tag's number (1.6 -> 1.6.74).
+    const refines = (found, v) => !!found && (!v || found.startsWith(v + "."));
     function installedOf(ctn, rec) {
-        if (ctn.version) return { v: ctn.version, src: ctn.version_src || "tag" };
         const r = rec && rec.installed && ctn.imgid ? rec.installed[ctn.imgid] : null;
+        const fromTag = (ctn.version_src || "tag") === "tag";
+        if (ctn.version && !(fromTag && r && refines(r.version, ctn.version))) {
+            return { v: ctn.version, src: ctn.version_src || "tag" };
+        }
         if (r && r.version) return { v: r.version, src: r.src, tag: r.tag };
         return { v: null, src: null, looked: !!r };
     }
     function pulledVersionOf(ctn, rec) {
-        if (ctn.pulled_version) return ctn.pulled_version;
         const r = rec && rec.installed && ctn.tagid ? rec.installed[ctn.tagid] : null;
-        return r && r.version ? r.version : null;
+        const found = r && r.version ? r.version : null;
+        return refines(found, ctn.pulled_version) ? found : ctn.pulled_version || found;
     }
     function sourceText(inst) {
         const s = inst.src || "";

@@ -291,27 +291,39 @@ def jump_of(installed, target):
     return "major" if a[:1] != b[:1] else "minor" if a[:2] != b[:2] else "patch"
 
 
+def refines(found, version):
+    """`found` names the release of what `version` names only by its line:
+    1.6.74 for 1.6 (a line tag such as v1.6), or a version for none."""
+    return bool(found) and (not version or found.startswith(version + "."))
+
+
 def version_of(ref, image_id):
-    """Version of a local image for the history: the tag or the app's version
-    variable (diunlib), otherwise what the radar found for this image ID
-    (label, digest). None if unknown. Never fails - the history is only info."""
+    """Version of a local image for the history and the plan: the app's
+    version variable or the tag (diunlib), otherwise what the radar found for
+    this image ID (label, digest). The radar's version also wins when it
+    only refines the tag's number: a line tag (cubejs/cube:v1.6) names its
+    line, the radar the release (1.6.74). None if unknown. Never fails -
+    the history is only info."""
     if not image_id:
         return None
     repo, tag = split_ref(ref)
+    v = src = None
     try:
-        v = local_version(repo, tag, docker_json("image", "inspect", image_id)[0])[0]
-        if v:
-            return v
+        v, src = local_version(repo, tag, docker_json("image", "inspect", image_id)[0])
     except Exception:
         pass
+    if v and src != "tag":
+        return v
+    found = None
     try:
         with open(VERSIONS) as f:
             for r in json.load(f).get("images") or []:
                 if r.get("image") == repo and r.get("tag") == tag:
-                    return ((r.get("installed") or {}).get(image_id) or {}).get("version")
+                    found = ((r.get("installed") or {}).get(image_id) or {}).get("version")
+                    break
     except Exception:
         pass
-    return None
+    return found if refines(found, v) else v
 
 
 def radar_versions():
@@ -1868,10 +1880,9 @@ def cmd_backups():
                              and not o["active"]
                              and not (o.get("rolled_back") and o.get("rollback_status") != "failed")
                              and norm_ref(o.get("rollback") or "") in rb_refs)
-        if not o.get("from_version") and known.get(o.get("old_id")):
-            o["from_version"] = known[o["old_id"]]
-        if not o.get("to_version") and known.get(o.get("new_id")):
-            o["to_version"] = known[o["new_id"]]
+        for k, iid in (("from_version", o.get("old_id")), ("to_version", o.get("new_id"))):
+            if refines(known.get(iid), o.get(k)):
+                o[k] = known[iid]
         for k in ("workdir", "files", "env_files", "old_id", "new_id", "backup_files", "pid"):
             o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))

@@ -142,13 +142,13 @@ Inputs are checked by regex:
 
 | Field | Meaning |
 |---|---|
-| `installed` | per **image ID**, also for the newer image that is already pulled. `src` is `tag`, `env:<NAME>`, `label` or `digest`. Digest matches are the cache for the next run: hits are kept for good, `version: null` is retried after 7 days. |
+| `installed` | per **image ID**, also for the newer image that is already pulled. `src` is `tag`, `env:<NAME>`, `label` or `digest`. Digest matches are the cache for the next run: hits are kept for good, `version: null` is retried after 7 days. A **line tag** (since 0.18.2: a tag with two or more numbers under which the registry has longer versions of the same scheme, `v1.6` → `v1.6.74`, `10.0` → `10.0.0.1`, `24.12-alpine` → `24.12.6.70-alpine`) names only its line: its number counts only when neither the label nor the digest names the release, as `{"version": "1.6", "src": "tag", "digest_ts": "…"}` (`digest_ts` keeps the miss for the cache). An exact tag such as `16.14-alpine` has no longer versions under it. |
 | `versions[<installed version>]` | newer tags in the scheme of the installed version. `status: "unknown"` when there is no matching scheme (e.g. pgvector `pg17` with `PG_VERSION` 17.10). |
 | `versions[…].choices` | (since 0.11.0, for the stage-2 selection field) what can replace the configured tag, in the installed version's scheme and never older: `pin` = the installed version's own tag, `null` if the registry lacks it; `lines` = major and minor lines (`5`, `5.4`, `16-alpine`; one or two blocks, never more) and the newest version tag in each, broad lines first, at most 12: only lines with a released version in them (a bare `9.2` before `9.2.0` may be a pre-release), the running version's own lines always, the others newest first; `newer` = exact tags with `level` `patch` / `minor` / `major`: every newer patch of the installed minor line (at most 10), the newest of each newer minor line and of each newer major (at most 15 each), newest first per level; `floating` = `latest`, `stable`, `production` (with the flavour suffix, e.g. `stable-apache`, or the bare flavour `apache`) when the registry has them. Pre-releases (`-rc.1`), other flavours and `v`-prefixed twins never count. Missing without a scheme and in data from radars before 0.11.0. |
 | `by_tag` | comparison with the configured tag itself. Only when the tag contains numbers; the plugin uses it as a fallback. |
 | `reach` | levels the configured tag delivers with the Update button. |
 | `newest` | highest plain version tag. Shown when the installed version is unknown. |
-| `tag_now` | (since 0.10.0) only for floating tags (fewer than two version blocks: `latest`, `16-alpine`, `5`): the digest the tag has in the registry right now (Docker Hub API or `skopeo inspect --raw`, no pull) and the version tag with the same digest (`version` / `tag`, `null` if none). Reused while the digest stays the same; missing when the lookup failed. |
+| `tag_now` | (since 0.10.0) only for floating tags (fewer than two version blocks: `latest`, `16-alpine`, `5`) and, since 0.18.2, line tags (`v1.6`): the digest the tag has in the registry right now (Docker Hub API or `skopeo inspect --raw`, no pull) and the version tag with the same digest (`version` / `tag`, `null` if none). Reused while the digest stays the same; missing when the lookup failed. |
 | `tag_now.pushed` / `tag_now.after` | only for a tag without numbers (`latest`, `main`) whose digest no version tag shares, and only on Docker Hub, the one registry that says when a tag was pushed: `after` = the newest release (`newest`) as `{"tag": "v4.5.3", "pushed": "…"}` and `pushed` = when the tag itself was pushed, at least a day later (two builds of one release are minutes apart). MobSF builds `latest` from its development branch. Asked again on every run, also while the digest stays the same. Missing in data from older radars. |
 | `status` | `major`, `minor`, `patch`, `current`, `unknown`, `error` or `unlisted`, for sorting and for the table. |
 | `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. |
@@ -159,6 +159,8 @@ How the plugin computes:
 
 ```
 installed = inventory.version  ||  versions.installed[imgid].version
+            (the radar's wins when the inventory read the tag's number and the radar's
+            refines it: line tag v1.6, inventory 1.6, radar 1.6.74; same for the pulled image)
 compare   = versions.versions[installed]  (if missing or "unknown": by_tag)
 newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+major = grey
 status    = "Unknown" instead of "Up to date" when nothing was compared: installed version
@@ -396,7 +398,9 @@ rollback marks the operation with `rolled_back`, `rollback_ts`, `rollback_status
   the new image (`diunlib.local_version`), otherwise what the radar found for that image ID
   (label / digest), otherwise `null`. Older entries do not have them; the plugin shows “—”. Since the
   radar names a new image only after the update, `backups` fills a `null` version from the radar's
-  `installed` entry for `old_id` / `new_id` (the history file stays as written).
+  `installed` entry for `old_id` / `new_id`, and since 0.18.2 also replaces a line tag's number that
+  the radar refines (`1.6` → `1.6.74`; the history file stays as written). `update`, `retag` and
+  `plan` take the radar's version over the tag's number the same way (`version_of`).
 - `reason` (since 0.8.0): on a failed update, the same object as in `@@RESULT`. A rollback adds
   `rollback_status` (`ok` / `failed`) and `rollback_reason` (`null` when it went through). Since 0.18.1
   `rolled_back` is `true` only when it went through; a failed one may be tried again, and its output is
@@ -589,7 +593,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 
 | File | Checks |
 |---|---|
-| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
+| `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, line tags (release by digest, the tag's number on a miss, exact tags untouched), a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
 | `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream` |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
@@ -599,7 +603,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, no update for the same build under a new digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
-| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the revision of a development build, the bases of an image built here |
+| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the revision of a development build, the bases of an image built here, a line tag refined by the radar |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
 | `test/contrast_test.py` | WCAG contrast of every colour pair the page uses, light and dark (text 4.5:1, borders and icons 3:1) |
 | `tools/check-design-files.sh` | the shared design files match `tools/design-files.sha256` |

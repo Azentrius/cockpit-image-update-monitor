@@ -855,6 +855,20 @@ check("version unknown", U.version_of("ollama/ollama:latest", "sha256:unknown"),
 with open(U.VERSIONS, "w") as f:
     f.write("{")
 check("version: broken radar file is no error", U.version_of("ollama/ollama:latest", "sha256:oll"), None)
+# A line tag (cubejs/cube:v1.6) names only its line: the radar's release
+# refines the tag's number (plan and history), a version that does not fit
+# leaves it; a version variable is not overridden.
+D.images["sha256:cube"] = {"Id": "sha256:cube", "Config": {"Env": []}}
+D.images["sha256:rds"] = {"Id": "sha256:rds", "Config": {"Env": ["REDIS_VERSION=7.4.11"]}}
+with open(U.VERSIONS, "w") as f:
+    json.dump({"images": [{"image": "cubejs/cube", "tag": "v1.6", "installed": {"sha256:cube": {"version": "1.6.74"}}},
+                          {"image": "cubejs/cube", "tag": "v1.7", "installed": {"sha256:cube": {"version": "2.0.1"}}},
+                          {"image": "redis", "tag": "7.4-alpine", "installed": {"sha256:rds": {"version": "7.4.12"}}}]}, f)
+check("line tag: the radar's release refines the tag's number, nothing else does",
+      (U.version_of("cubejs/cube:v1.6", "sha256:cube"), U.version_of("cubejs/cube:v1.7", "sha256:cube"),
+       U.version_of("redis:7.4-alpine", "sha256:rds")), ("1.6.74", "1.7", "7.4.11"))
+with open(U.VERSIONS, "w") as f:
+    f.write("{")
 
 # Failed health check -> exit 4, no cleanup, no radar; then rollback
 D.pull_to = ("postgres:16-alpine", "sha256:newer")
@@ -1206,18 +1220,27 @@ U.record({"id": "20261004-030000-ollama", "ts": "x", "kind": "update", "containe
 U.record({"id": "20261004-040000-mcp", "ts": "x", "kind": "update", "container": "mcp", "project": "o",
           "image": "x/mcp:latest", "old_id": "sha256:mcp1", "new_id": "sha256:mcp2",
           "from_version": None, "to_version": None, "rollback": None, "dumps": [], "status": "ok"})
+# A line tag (cubejs/cube:v1.6): the history recorded the tag's number, the radar names the release.
+U.record({"id": "20261004-050000-cube", "ts": "x", "kind": "retag", "container": "cube", "project": "o",
+          "image": "cubejs/cube:v1.6.6", "old_id": "sha256:cube1", "new_id": "sha256:cube2",
+          "from_version": "1.6.6", "to_version": "1.6", "rollback": None, "dumps": [], "status": "ok"})
 vers = lambda: {o["id"]: (o["from_version"], o["to_version"])
                 for o in json.loads(quiet(U.cmd_backups)[1])["ops"] if o["project"] == "o"}
 check("backups: broken radar file -> versions stay unknown", vers(),
-      {"20261004-030000-ollama": ("0.30.11", None), "20261004-040000-mcp": (None, None)})
+      {"20261004-030000-ollama": ("0.30.11", None), "20261004-040000-mcp": (None, None),
+       "20261004-050000-cube": ("1.6.6", "1.6")})
 with open(U.VERSIONS, "w") as f:
     json.dump({"images": [{"image": "ollama/ollama", "tag": "latest",
                            "installed": {"sha256:oll2": {"version": "0.40.6", "src": "digest"}}},
                           {"image": "x/mcp", "tag": "latest",
                            "installed": {"sha256:mcp2": {"version": "0.199.4", "src": "label"},
-                                         "sha256:mcp1": {"version": None, "src": None}}}]}, f)
-check("backups: missing versions from the radar, known ones kept", vers(),
-      {"20261004-030000-ollama": ("0.30.11", "0.40.6"), "20261004-040000-mcp": (None, "0.199.4")})
+                                         "sha256:mcp1": {"version": None, "src": None}}},
+                          {"image": "cubejs/cube", "tag": "v1.6",
+                           "installed": {"sha256:cube2": {"version": "1.6.74", "src": "digest"},
+                                         "sha256:cube1": {"version": "2.0.0", "src": "digest"}}}]}, f)
+check("backups: missing versions from the radar, a line tag's number refined, others kept", vers(),
+      {"20261004-030000-ollama": ("0.30.11", "0.40.6"), "20261004-040000-mcp": (None, "0.199.4"),
+       "20261004-050000-cube": ("1.6.6", "1.6.74")})
 check("backups: the history file itself is not changed",
       (ops()["20261004-030000-ollama"]["to_version"], ops()["20261004-040000-mcp"]["from_version"]), (None, None))
 U.record({"id": "20261006-030000-a-db", "ts": "x", "kind": "update", "container": "a-db", "project": "a",
