@@ -16,7 +16,7 @@ const icons = fs.readFileSync(path.join(PLUGIN, "icons.js"), "utf8");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const radar = JSON.parse(fs.readFileSync(path.join(FIX, "versions2.json"), "utf8"));
 
-function boot(language, files) {
+function boot(language, files, inv = inventory) {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
     const w = dom.window;
     w.Date.now = () => Date.parse("2026-10-12T02:50:00Z");
@@ -24,7 +24,7 @@ function boot(language, files) {
         language,
         file(p) { return { read: () => Promise.resolve(files[p] ?? null), watch: () => {}, replace: () => Promise.resolve() }; },
         spawn(cmd) {
-            const p = cmd[0].endsWith("diun-inventory.py") ? Promise.resolve(inventory)
+            const p = cmd[0].endsWith("diun-inventory.py") ? Promise.resolve(inv)
                 : cmd[0].endsWith("diun-deps.sh") ? Promise.resolve(JSON.stringify({ root: true, docker: { state: "ok" },
                     diun: { state: "running", events: true }, skopeo: { state: "ok" }, radar: { state: "active" } }))
                 : Promise.reject(new Error("unexpected " + cmd.join(" ")));
@@ -108,6 +108,27 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     assert.strictEqual(c[3].textContent.trim(), "?");
     assert.strictEqual(c[4].textContent.trim(), "neueste: 6.0.2");
     assert.strictEqual(c[5].textContent.trim(), "Unbekannt");
+
+    // A development build without a version that names its source revision
+    // (pomerium:main on a test host, 2026-10-18): "latest @35b2a97" instead of
+    // "?". With a known version the revision is not shown.
+    const REV = "35b2a975d74519de0678486bdbd46f644533b710";
+    const withRev = inventory.trim().split("\n").map((l) => JSON.parse(l)).map((x) =>
+        (x.name === "formbricks-app" || x.name === "ollama" ? { ...x, revision: REV, created: "2026-10-13T23:30:19Z" } : x))
+        .map((x) => JSON.stringify(x)).join("\n") + "\n";
+    for (const [lang, start] of [["de", "Keine Versionsnummer: Das Image nennt nur den Quellstand, aus dem es gebaut wurde, " + REV + "."],
+                                 ["en", "No version number: the image names only the source revision it was built from, " + REV + "."]]) {
+        const r = boot(lang, FILES, withRev);
+        await sleep(60);
+        const cell = cells(row(r, "formbricks-app"))[3];
+        console.log("revision " + lang + ":", cell.textContent.trim(), "|", cell.querySelector(".dm-ver").title.replace(/\n/g, " / "));
+        assert.strictEqual(cell.textContent.trim(), "latest @35b2a97");
+        const tip = cell.querySelector(".dm-ver").title.split("\n");
+        assert.strictEqual(tip[0], start);
+        assert(tip[1].startsWith(lang === "de" ? "Gebaut am " : "Built on "), tip[1]);
+        assert.strictEqual(cells(row(r, "formbricks-app"))[5].textContent.trim(), lang === "de" ? "Unbekannt" : "Unknown");
+        assert.strictEqual(cells(row(r, "ollama"))[3].textContent.trim(), "0.30.11", "a known version wins");
+    }
 
     // stale registry data is marked
     assert(cells(row(d, "diun-socket-proxy"))[4].textContent.includes("(Stand älter)"));

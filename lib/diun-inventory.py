@@ -24,6 +24,10 @@ Emits one JSON object per running container:
   created  when the image it runs on was built (Docker's Created, "" if
            unknown); Diun reports the same for a build, so a new list of
            platforms under the same tag is no update
+  revision the source revision the image names (label
+           org.opencontainers.image.revision or org.label-schema.vcs-ref, "" if
+           none): a development build such as pomerium:main has no version,
+           but its commit tells which build runs
 
 Invoked by the plugin via cockpit.spawn (superuser) on every load, so it
 uses a handful of docker calls instead of several per container.
@@ -44,6 +48,16 @@ L_PROJECT = "com.docker.compose.project"
 L_SERVICE = "com.docker.compose.service"
 L_WORKDIR = "com.docker.compose.project.working_dir"
 L_FILES = "com.docker.compose.project.config_files"
+
+
+def revision_of(image):
+    """The source revision an image names, or ""."""
+    labels = (image.get("Config") or {}).get("Labels") or {}
+    for key in ("org.opencontainers.image.revision", "org.label-schema.vcs-ref"):
+        value = str(labels.get(key) or "").strip()
+        if value:
+            return value[:64]
+    return ""
 
 
 def docker(*args):
@@ -111,6 +125,7 @@ def main():
             "files": [f for f in (labels.get(L_FILES) or "").split(",") if f],
             "ci_job": is_ci_job(c),
             "created": img.get("Created") or "",
+            "revision": revision_of(img),
         }, ensure_ascii=False), flush=True)
     return 0
 
