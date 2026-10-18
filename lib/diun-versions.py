@@ -9,7 +9,10 @@ answers the questions Diun cannot:
   2. Which newer versions exist?          (patch / minor / major)
 
 Installed version, first match wins:
-  tag       the tag itself is an exact version (v2.1.4, 24.3.3.102-alpine)
+  tag       the tag itself is an exact version (v2.1.4, 24.3.3.102-alpine);
+            a line tag (v1.6 while the registry has v1.6.74, 24.12-alpine
+            next to 24.12.6.70-alpine) names only its line: its number counts
+            only when neither label nor digest name the release
   env       the app's version variable in the image (PG_VERSION=16.14,
             GLITCHTIP_VERSION=6.1.8) - must fit the tag (16-alpine -> 16.x)
   label     org.opencontainers.image.version, but only if that version
@@ -22,8 +25,8 @@ Installed version, first match wins:
             goes further back). Results are cached per image id in the
             output file (positive forever, misses 7 days).
 
-What a floating tag (latest, stable, 16-alpine, 5) points to right now is
-resolved the same way, without a pull: its digest in the registry and the
+What a floating tag (latest, stable, 16-alpine, 5) or a line tag (v1.6)
+points to right now is resolved the same way, without a pull: its digest in the registry and the
 version tag with that digest ("tag_now", e.g. latest = 6.0.2). Reused while
 the digest stays the same. A latest that no version tag shares a digest with
 is often a development build: on Docker Hub the radar notes the newest release
@@ -583,14 +586,43 @@ def built_from(group):
 
 
 # --------------------------------------------------------------- analyse ----
-def resolve(repo, tag, iid, image, tagset, tags, cache, now):
-    """Installed version of one local image: {"version", "src", ["tag"]}."""
+def line_tag(tag, tags):
+    """A tag with version numbers that names a line, not a release: the
+    registry has longer versions of the same scheme under it (v1.6 ->
+    v1.6.74, 10.0 -> 10.0.0.1, 24.12-alpine -> 24.12.6.70-alpine). An exact
+    tag has none (16.14-alpine, v2.1.4); tags with fewer than two numbers
+    (latest, 16-alpine) float anyway."""
+    sc = scheme(tag)
+    if not sc or sc[1] < 2:
+        return False
+    for t in tags:
+        x = scheme(t)
+        if x and x[0] == sc[0] and x[2] == sc[2] and x[1] > sc[1] and x[3][:sc[1]] == sc[3]:
+            return True
+    return False
+
+
+def resolve(repo, tag, iid, image, tagset, tags, cache, now, line=False):
+    """Installed version of one local image: {"version", "src", ["tag"]}.
+    line: the configured tag is a line tag (line_tag). Its number then counts
+    only when neither the label nor the digest names the release: as
+    {"version", "src": "tag", "digest_ts"}, where digest_ts keeps the miss
+    for the cache."""
     v, src = local_version(repo, tag, image)
-    if v:
+    if v and not (line and src == "tag"):
         return {"version": v, "src": src}
     label = core(((image.get("Config") or {}).get("Labels") or {}).get("org.opencontainers.image.version"))
     if label and tagset and find_scheme(label, tag, tagset, exact=True):
         return {"version": label, "src": "label"}
+    res = by_digest(repo, iid, image, tags, cache, now)
+    if v and not res.get("version"):
+        return {"version": v, "src": "tag", "digest_ts": res.get("ts")}
+    return res
+
+
+def by_digest(repo, iid, image, tags, cache, now):
+    """Which version tag points to exactly this image (src "digest"),
+    cached per image id: hits for good, misses for RETRY_MISS."""
     hit = cache.get(iid)
     if hit and hit.get("src") == "digest":
         if hit.get("version") or (now - (parse_iso(hit.get("ts")) or now)) < RETRY_MISS:
@@ -619,10 +651,11 @@ def analyse(item, cache, now, tag_cache=None):
         error = str(e)[-300:]
     tagset = set(tags)
 
+    line = line_tag(tag, tags)
     installed = {}
     for iid, image in group["images"].items():
         try:
-            installed[iid] = resolve(repo, tag, iid, image, tagset, tags, cache, now)
+            installed[iid] = resolve(repo, tag, iid, image, tagset, tags, cache, now, line)
         except Exception as e:  # Hub API down, manifest error, ...
             installed[iid] = {"version": None, "src": None, "error": str(e)[-200:]}
     rec["installed"] = installed
@@ -637,8 +670,8 @@ def analyse(item, cache, now, tag_cache=None):
                 rec["built"], rec["base"] = found
         return rec
 
-    # A floating tag: which version it points to right now.
-    if tag_digits(tag) < 2:
+    # A floating tag or a line tag: which version it points to right now.
+    if tag_digits(tag) < 2 or line:
         try:
             now_ = resolve_tag(repo, tag, tags, (tag_cache or {}).get((repo, tag)))
         except Exception:  # Hub API down, manifest error: no tag_now this run
@@ -677,13 +710,16 @@ def load_previous(path):
 
 
 def digest_cache(prev):
-    """{image id: resolved entry} of earlier digest lookups."""
+    """{image id: resolved entry} of earlier digest lookups; the miss of a
+    line tag that fell back to its number (digest_ts) counts as a miss."""
     cache = {}
     for r in prev:
         installed = r.get("installed") if isinstance(r, dict) else None
         for iid, e in (installed or {}).items():
             if isinstance(e, dict) and e.get("src") == "digest":
                 cache[iid] = e
+            elif isinstance(e, dict) and e.get("digest_ts"):
+                cache[iid] = {"version": None, "src": "digest", "ts": e["digest_ts"]}
     return cache
 
 

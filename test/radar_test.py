@@ -376,6 +376,58 @@ limits.clear()
 R.analyse((("docker.io/ollama/ollama", "latest"), groups[("docker.io/ollama/ollama", "latest")]), miss, now)
 check("old miss retried, only the newest tags", (hub_calls, limits), (["docker.io/ollama/ollama"], [R.REGISTRY_CANDIDATES]))
 
+# Line tags (cubejs/cube:v1.6, onlyoffice/documentserver:10.0, clickhouse
+# 24.12-alpine and pomerium:v0.33 on test hosts, 2026-10-18): the tag names a
+# line, the registry has its releases under it. The installed release comes
+# from the digest, compared in its own scheme; the tag's number only when no
+# release shares the digest.
+CUBE_TAGS = ["v1.6", "v1.6.74", "v1.6.75", "v1.8", "v1.8.8", "latest"]
+check("line tag: longer versions of the same scheme under it",
+      [R.line_tag(t, tags) for t, tags in (
+          ("v1.6", CUBE_TAGS), ("10.0", ["10.0", "10.0.0", "10.0.0.1"]),
+          ("24.12-alpine", ["24.12-alpine", "24.12.6.70-alpine"]), ("24.12-alpine", ["24.12.6.70"]),
+          ("16.14-alpine", PG_TAGS), ("v2.1.4", ["v2.1.4", "v2.1.5"]), ("latest", CUBE_TAGS), ("16-alpine", PG_TAGS))],
+      [True, True, True, False, False, False, False, False])
+TAGS["cubejs/cube"] = CUBE_TAGS
+line_hits = {}
+
+
+def line_match(repo, digest, created, tags, limit=20):
+    if created is None:
+        tag_matches.append(repo)
+        return "v1.6.75"
+    hub_calls.append(repo)
+    return line_hits.get(digest)
+
+
+R.match_digest = line_match
+CUBE = (("cubejs/cube", "v1.6"), {"containers": ["formbricks-cube"],
+                                  "images": {"idc": img(digests=["cubejs/cube@sha256:c74"])}})
+line_hits["sha256:c74"] = "v1.6.74"
+hub_calls.clear()
+tag_digests.clear()
+cu = R.analyse(CUBE, {}, now)
+check("line tag: the release by digest, compared in its scheme, what the line points to now",
+      ({k: cu["installed"]["idc"][k] for k in ("version", "src", "tag")}, cu["versions"]["1.6.74"]["patch"],
+       cu["versions"]["1.6.74"]["minor"], cu["status"], cu["tag_now"]["version"], tag_digests, cu["reach"]),
+      ({"version": "1.6.74", "src": "digest", "tag": "v1.6.74"}, "v1.6.75", "v1.8.8", "minor", "1.6.75",
+       [("cubejs/cube", "v1.6")], ["patch"]))
+line_hits.clear()
+miss = R.analyse(CUBE, {}, now)
+check("line tag, no release shares the digest: the tag's number, the miss kept",
+      (miss["installed"]["idc"], miss["versions"]["1.6"]["minor"], miss["status"]),
+      ({"version": "1.6", "src": "tag", "digest_ts": "2026-10-12T00:00:00Z"}, "v1.8", "minor"))
+hub_calls.clear()
+again = R.analyse(CUBE, R.digest_cache([miss]), now)
+check("line tag: the miss is not searched again within 7 days, still the tag's number",
+      (hub_calls, again["installed"]["idc"]["version"]), ([], "1.6"))
+hub_calls.clear()
+exact = R.analyse((("postgres", "16.14-alpine"), {"containers": ["x"], "images": {"idp": img(digests=["postgres@sha256:p"])}}),
+                  {}, now)
+check("an exact tag with two numbers: the tag, no digest search, no tag_now",
+      (exact["installed"]["idp"], hub_calls, "tag_now" in exact), ({"version": "16.14", "src": "tag"}, [], False))
+R.match_digest = fake_match
+
 # registry error keeps previous good record, marks it stale
 R.list_tags = lambda repo: (_ for _ in ()).throw(RuntimeError("registry down"))
 err = R.analyse((("glitchtip/glitchtip", "latest"), groups[("glitchtip/glitchtip", "latest")]), {}, now)

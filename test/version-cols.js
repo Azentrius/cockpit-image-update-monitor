@@ -130,6 +130,35 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
         assert.strictEqual(cells(row(r, "ollama"))[3].textContent.trim(), "0.30.11", "a known version wins");
     }
 
+    // A line tag (cubejs/cube:v1.6 on a test host, 2026-10-18) names only its
+    // line: the inventory reads 1.6 from it, the radar names the release by
+    // digest. The radar's version wins when it refines the tag's number; an
+    // older radar that read 1.6 from the tag as well leaves it at 1.6.
+    const lineInv = inventory.trim().split("\n").map((l) => JSON.parse(l)).map((x) =>
+        (x.name === "formbricks-cube" ? { ...x, tag: "v1.6", version: "1.6", version_src: "tag" } : x))
+        .map((x) => JSON.stringify(x)).join("\n") + "\n";
+    const lineRadar = (inst, versions, extra) => {
+        const r2 = JSON.parse(JSON.stringify(radar));
+        const cube = r2.images.find((x) => x.image === "cubejs/cube");
+        Object.assign(cube, { tag: "v1.6", reach: ["patch"], installed: { "sha256:formbricks-cube": inst }, versions,
+                              by_tag: { patch: null, minor: "v1.8", major: null, status: "minor" }, status: "patch" }, extra);
+        return { ...FILES, "/var/lib/diun-radar/versions.json": r2 };
+    };
+    const lr = boot("de", lineRadar({ version: "1.6.74", src: "digest", tag: "v1.6.74" },
+        { "1.6.74": { patch: "v1.6.75", minor: "v1.8.8", major: null, status: "patch", as_tag: "v1.6.74" } },
+        { tag_now: { digest: "sha256:now-v1.6", version: "1.6.75", tag: "v1.6.75" } }), lineInv);
+    await sleep(60);
+    c = cells(row(lr, "formbricks-cube"));
+    console.log("line tag:", c.slice(2, 6).map((x) => x.textContent.trim()).join(" | "));
+    assert.deepStrictEqual(c.slice(2, 4).map((x) => x.textContent.trim()), ["v1.6 = 1.6.75", "1.6.74"]);
+    assert(c[3].querySelector(".dm-ver").title.includes("Registry-Tag v1.6.74"), "the source is the digest");
+    assert.deepStrictEqual(levels(c[4]).map((x) => `${x.dataset.level}:${x.dataset.reach}:${x.textContent.trim()}`),
+                           ["patch:update:Patch v1.6.75", "minor:tag:Minor v1.8.8"]);
+    const lo = boot("de", lineRadar({ version: "1.6", src: "tag" },
+        { "1.6": { patch: null, minor: "v1.8", major: null, status: "minor", as_tag: "v1.6" } }), lineInv);
+    await sleep(60);
+    assert.strictEqual(cells(row(lo, "formbricks-cube"))[3].textContent.trim(), "1.6", "an older radar: the tag's number");
+
     // stale registry data is marked
     assert(cells(row(d, "diun-socket-proxy"))[4].textContent.includes("(Stand älter)"));
     const legend = d.getElementById("dm-legend");

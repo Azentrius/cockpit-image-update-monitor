@@ -137,6 +137,7 @@ v2.1.4             -> "v"  3 ""
 - **Database images** (postgres, mariadb, mysql, redis, valkey, clickhouse, mongo …) are marked. Their majors appear as grey info.
 - If a registry fails, the last good result stays and is marked “(older data)”.
 - **Floating tags** (`latest`, `stable`, `16-alpine`, `5` …): the radar looks up the digest the tag has in the registry right now (Docker Hub API or the manifest, no pull) and the version tag with the same digest. The overview shows it next to the tag, and the update dialog says what the update brings.
+- **Line tags** (`v1.6`, `10.0`, `24.12-alpine`): a tag with numbers under which the registry has longer versions names only its line. The installed version then comes from the digest (`v1.6` → 1.6.74), and the tag shows what it points to now, as a floating tag does. Only when no release shares the digest the tag's number stands for it.
 - **When:** every 6 hours (`diun-radar.timer`), in the background after every successful update or
   rollback, and on **“Run radar now”** in the *Running containers* card. The button stays busy until
   the run is over; systemd never runs the radar twice at once.

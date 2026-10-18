@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: a line tag showed its own number as the installed version.** A tag such as `cubejs/cube:v1.6`,
+  `onlyoffice/documentserver:10.0`, `clickhouse/clickhouse-server:24.12-alpine` or
+  `pomerium/pomerium:v0.33` names a line, not a release: the registry has `v1.6.74`, `10.0.0.1`,
+  `24.12.6.70-alpine` and `v0.33.4` under it. The add-on took the tag's number as the exact version, so
+  the installed column showed “1.6” and the history “1.6.6 → 1.6”. The radar now recognises a line tag
+  by those longer versions and names the release by digest (1.6.74), compares it in that scheme and
+  shows what the line points to now (“v1.6 = 1.6.75”). The page, the update plan and the history take
+  that version over the tag's number when it refines it. Exact tags (`16.14-alpine`, `v2.1.4`) stay
+  as they are, and a version variable in the image still wins.
+
 ## 0.18.1 – 2026-10-18
 
 Updates stay recoverable: one cut off after the restart keeps its history and rollback, a rollback
