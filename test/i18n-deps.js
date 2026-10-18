@@ -10,7 +10,8 @@ const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
 const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8")
     .replace(/<script[^>]*><\/script>/g, "");
-const js = fs.readFileSync(path.join(PLUGIN, "diun.js"), "utf8");
+// The page as index.html loads it: the texts (i18n.js), then the code (diun.js).
+const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const files = {
     "/var/lib/diun/events.jsonl": fs.readFileSync(path.join(FIX, "events.jsonl"), "utf8"),

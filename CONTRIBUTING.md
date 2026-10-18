@@ -69,7 +69,7 @@ Interfaces, formats and exit codes are described in [docs/INTERNALS.md](docs/INT
 ## Requirements for a change
 
 - **English and German.** Every user-facing text goes into `I18N.en` and `I18N.de` in
-  `plugin/diun.js`; helper messages go through `say(de, en)` (Python) or `msg de en` (shell). German
+  `plugin/i18n.js`; helper messages go through `say(de, en)` (Python) or `msg de en` (shell). German
   addresses the user formally ("Sie"). The tests check that the English UI contains no German.
 - **English in the repository.** Code, comments, docs, commit messages and pull requests are in
   English; the only German is the translation and the tests that check it.

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Maintenance: the page's texts in a file of their own.** The English and German texts (`I18N`)
+  moved unchanged from `plugin/diun.js` to `plugin/i18n.js`, which `index.html` loads first; `diun.js`
+  keeps the code (1755 instead of 2445 lines), and a translation can be reviewed on its own.
 - **Supported systems defined.** The README names what CI tests (every helper against the real Docker
   Engine of a GitHub runner, Python 3.8 and 3.12), where the packages install (Debian 12/13, Ubuntu
   22.04/24.04, Fedora 43, Rocky Linux 9/10, openSUSE Leap 16.0) and what is expected but untested.

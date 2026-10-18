@@ -532,7 +532,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 - **Version:** `const VERSION` in `diun.js`; `index.html` loads `diun.js` and `diun.css` with
   `?v=<version>`. `tools/check-version.sh` keeps them and `CHANGELOG.md` in step.
 - **Language:** `../base1/po.js` sets `cockpit.language`. `de*` → German, otherwise English.
-  - Texts live in `I18N.en` / `I18N.de` in `diun.js`. Static texts in the HTML carry `data-i18n`.
+  - Texts live in `I18N.en` / `I18N.de` in `i18n.js` (since 0.19.0; `window.ImageUpdatesI18n`, loaded
+    before `diun.js`, which keeps only the code). Static texts in the HTML carry `data-i18n`.
   - The menu entry is the product name, Image Update Monitor, and is not translated (`po.manifest.de.js` stays empty).
 - **Loading:** `safeLoad()` never loads twice; a request during a load is repeated once afterwards.
   - `cockpit.file().watch()` triggers a reload only on a **changed** tag.
