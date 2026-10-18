@@ -173,54 +173,46 @@ jobs:
             esac
             test ! -e /usr/lib/cockpit-image-updates'
 
-  # An upgrade from the newest release over this build, and the removal, on Debian and Fedora:
-  # the release files are checked against their SHA256SUMS first.
+  # An upgrade over a published release, and the removal, on Debian 13 and Fedora 43
+  # (test/package-upgrade.sh). The release is the newest one older than this build by
+  # Semantic Versioning, not a draft or pre-release, with packages (tools/upgrade-base.sh):
+  # a build of a version that is released already upgrades from the release before it. Its
+  # files are checked against its SHA256SUMS and its build provenance first. Without such a
+  # release there is no upgrade to test: the job says so (warning, summary) and checks a fresh
+  # install of this build instead.
   upgrade:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Packages of this build and of the newest release
+      - name: Packages of this build and of the release to upgrade from
+        id: base
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
           make packages
-          mkdir prev
-          gh release download --repo "$GITHUB_REPOSITORY" --dir prev --pattern '*.deb' --pattern '*.rpm' --pattern SHA256SUMS
-          (cd prev && sha256sum --ignore-missing -c SHA256SUMS)
-          ls prev dist
+          version=$(sh tools/check-version.sh)
+          out=$(sh tools/upgrade-base.sh prev)
+          printf '%s\nversion=%s\n' "$out" "$version" >> "$GITHUB_OUTPUT"
+          base=$(printf '%s\n' "$out" | sed -n 's/^BASE=//p')
+          echo "Upgrade test: ${base:-no older release with packages, only a fresh install} -> $version (this build)" >> "$GITHUB_STEP_SUMMARY"
+          ls -l prev dist
       - name: Upgrade and remove on Debian 13 and Fedora 43
+        env:
+          BASE: ${{ steps.base.outputs.BASE }}
+          VERSION: ${{ steps.base.outputs.version }}
         run: |
-          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/prev:/prev:ro" debian:13 sh -ec '
-            apt-get update -qq
-            apt-get install -y -qq /prev/*.deb > /dev/null
-            old=$(dpkg-query -W -f="\${Version}" cockpit-image-update-monitor)
-            mkdir -p /var/backups/image-updates
-            echo "{\"id\": \"20260101-000000-x\", \"kind\": \"update\", \"status\": \"ok\"}" > /var/backups/image-updates/operations.jsonl
-            apt-get install -y -qq /dist/*.deb > /dev/null
-            new=$(dpkg-query -W -f="\${Version}" cockpit-image-update-monitor)
-            echo "upgraded $old -> $new"
-            test "$old" != "$new"
-            test -f /usr/lib/cockpit-image-updates/diunproc.py
-            grep -q 20260101-000000-x /var/backups/image-updates/operations.jsonl
-            apt-get remove -y -qq cockpit-image-update-monitor > /dev/null
-            test ! -e /usr/lib/cockpit-image-updates
-            test -f /var/backups/image-updates/operations.jsonl'
-          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/prev:/prev:ro" fedora:43 sh -ec '
-            dnf install -y -q /prev/*.rpm
-            old=$(rpm -q cockpit-image-update-monitor)
-            dnf install -y -q /dist/*.rpm
-            new=$(rpm -q cockpit-image-update-monitor)
-            echo "upgraded $old -> $new"
-            test "$old" != "$new"
-            rpm -V cockpit-image-update-monitor
-            test -f /usr/lib/cockpit-image-updates/diunproc.py
-            dnf remove -y -q cockpit-image-update-monitor
-            test ! -e /usr/lib/cockpit-image-updates'
+          for kind_image in deb:debian:13 rpm:fedora:43; do
+            docker run --rm -e BASE -e VERSION -v "$PWD/dist:/dist:ro" -v "$PWD/prev:/prev:ro" \
+              -v "$PWD/test/package-upgrade.sh:/package-upgrade.sh:ro" "${kind_image#*:}" sh /package-upgrade.sh "${kind_image%%:*}"
+          done
 
   # Secrets in the files and in the whole history (gitleaks, pinned with its checksum). The
   # findings are redacted in the log; GitHub's own secret scanning with push protection runs
