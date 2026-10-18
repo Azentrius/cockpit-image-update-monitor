@@ -277,6 +277,18 @@ if radar_unit; then
 fi
 check "Dependent service watched and still running" 'grep -q "Dependent services keep running" /tmp/e2e-4.log && [ "$(docker inspect -f "{{.State.Running}}" imgupd-test-side)" = true ]'
 
+echo "=== 5b. Rollback refused while the compose file names another image ==="
+# The rollback only takes the old tag back: with an image line edited after
+# the update, compose would start that image instead (up to 0.18.0 it did, and
+# the rollback said "successful"). The compose file comes back unchanged.
+OP2=$(jget "$R2" 'd["op"]')
+sed -i 's#^    image: imgupd-test/pg:16$#    image: imgupd-test/pg:16-edited#' "$D/docker-compose.yml"
+python3 $H rollback "$OP2" > /tmp/e2e-5b.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-5b.log
+check "Rollback with another image in the compose file refused (5), nothing changed" \
+    '[ $RC = 5 ] && grep -q "The compose files now give app: imgupd-test/pg:16-edited" /tmp/e2e-5b.log && [ "$(img_of imgupd-test-db)" = "$NEW" ] && [ "$(img_of imgupd-test-app)" = "$NEW" ]'
+write_compose "sleep infinity"
+
 echo "=== 6. Again – nothing newer ==="
 python3 $H update imgupd-test-db --no-dump > /tmp/e2e-5.log 2>&1; RC=$?
 R3=$(result_of /tmp/e2e-5.log)

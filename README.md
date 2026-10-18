@@ -157,19 +157,22 @@ sequenceDiagram
     U->>H: update <container> [--no-dump]
     H->>D: pg_dumpall / mariadb-dump per DB container of the project
     H->>D: docker tag <old image> <repo>:rollback-<time>
-    H->>D: compose pull --ignore-pull-failures <services>
+    H->>D: compose pull <services>
     alt pull failed, old image
         H-->>U: stopped, nothing changed (rollback tag and dumps removed again)
     else no newer image
         H-->>U: nochange (rollback tag removed again)
     else newer image
+        H->>H: operation into the history (before any container changes)
         H->>D: compose up -d --no-deps --pull never <services>
         H->>D: wait until healthy / 15 s stable (max. 180 s)
         H->>H: on ok: cleanup of this project by the rules, start the radar
         H-->>U: ok (16.14 → 16.15) or failed (+ log lines)
     end
     U->>H: rollback <op-id> (optional)
+    H->>D: compose config: do the files still give the services this image?
     H->>D: tag back to the rollback image, compose up -d --no-deps
+    H->>D: do the containers run the rollback image?
 ```
 
 **What is included:** all services of the compose project that use **the same image** and were started from **the same compose files**. With GlitchTip, for example, `web`, `worker` and `migrate`. A service of the same project in another compose file (started on its own with `-f docker-compose.emu.yml`) is not included: it shows “Roll-out pending” afterwards and is rolled out from its own file. One-off jobs that end with exit 0 (migrations) count as successful. The overview says so under the container name (“together with …”).
@@ -182,7 +185,18 @@ sequenceDiagram
 - **Whether a container counts as a database:** only if its command really starts the server. A `command:` with options only (`--log-bin=binlog`, `-c max_connections=200`) counts, because the image's entrypoint starts the server with them. Helper containers that merely use the Postgres image (`sh -c …`) are not dumped.
 - **When it stops:** if a dump fails or is incomplete (end marker missing), for example because of a wrong password, or there is too little free space. Then the update stops **before any change** (exit 5); dumps of the other databases made in that attempt are removed again.
 
-**Rollback** points the tag back to the rollback copy and recreates the same services.
+**When the pull fails** (registry down, rate limit), the update stops before any change, unless the
+newer image is on the server already: then it is rolled out, and the output says that the pull failed.
+
+**Rollback** points the tag back to the rollback copy and recreates the same services. It stops before
+any change if the compose files give the services another image by now (an `image:` line edited since
+the update): compose would start that one, not the rollback copy. Afterwards it checks that the
+containers really run the rollback copy. A rollback that failed can be tried again once the cause is
+fixed.
+
+**An update that was cut off** (the helper killed, a power cut, Docker not answering after the
+restart) stays in the history with its rollback copy: the helper writes it there before any container
+changes. The backups tab shows it as “aborted” and offers the rollback.
 
 **Unknown jump size:** if the installed version is unknown and the tag fixes no version number
 (`latest`, `stable` …), nobody can tell what the update brings. The plan says so first: it may be a new

@@ -275,6 +275,7 @@
             "upd.busy": "Another update or rollback is already running.",
             "upd.reasonTitle": "Most likely cause ({name})",
             "upd.reasonComposeTitle": "Most likely cause (docker compose)",
+            "upd.reasonErrorTitle": "Cause (update helper)",
             "upd.reasonHealth": "Health check: {line}",
             "upd.reasonOom": "Stopped because it ran out of memory.",
             "upd.reasonExit": "Stopped with exit code {code}; the log shows no error line.",
@@ -375,6 +376,7 @@
             "res.nochange": "no change",
             "res.failed": "failed",
             "res.running": "aborted",
+            "res.active": "running",
             "res.rolledBack": "rolled back",
             "res.rollbackFailed": "rollback failed",
             "img.inUse": "in use",
@@ -618,6 +620,7 @@
             "upd.busy": "Es läuft bereits ein Update oder Rollback.",
             "upd.reasonTitle": "Vermutliche Ursache ({name})",
             "upd.reasonComposeTitle": "Vermutliche Ursache (docker compose)",
+            "upd.reasonErrorTitle": "Ursache (Update-Helfer)",
             "upd.reasonHealth": "Health-Check: {line}",
             "upd.reasonOom": "Wegen Speichermangels beendet.",
             "upd.reasonExit": "Mit Exit-Code {code} beendet; im Log steht keine Fehlerzeile.",
@@ -718,6 +721,7 @@
             "res.nochange": "keine Änderung",
             "res.failed": "fehlgeschlagen",
             "res.running": "abgebrochen",
+            "res.active": "läuft",
             "res.rolledBack": "zurückgerollt",
             "res.rollbackFailed": "Rollback fehlgeschlagen",
             "img.inUse": "in Benutzung",
@@ -1590,7 +1594,8 @@
                 el.innerHTML = "";
                 return;
             }
-            const title = r.container ? t("upd.reasonTitle", { name: r.container }) : t("upd.reasonComposeTitle");
+            const title = r.container ? t("upd.reasonTitle", { name: r.container })
+                : t(r.source === "error" ? "upd.reasonErrorTitle" : "upd.reasonComposeTitle");
             el.innerHTML = `<span class="az-alert__icon">${icon("exclamation-circle")}</span>` +
                            `<p class="az-alert__title">${esc(title)}</p>` +
                            `<p class="az-alert__body dm-reason-line">${esc(reasonText(r))}</p>`;
@@ -2046,12 +2051,13 @@
             });
     }
 
+    // A failed rollback may be tried again; up to 0.18.0 it was marked
+    // rolled_back as well. "running" without a process that still runs
+    // (active) is an update that ended without its last line.
     function opResult(o) {
-        if (o.rolled_back) {
-            return o.rollback_status === "failed"
-                ? label("danger", "exclamation-circle", t("res.rollbackFailed"))
-                : label("", null, t("res.rolledBack"));
-        }
+        if (o.rollback_status === "failed") return label("danger", "exclamation-circle", t("res.rollbackFailed"));
+        if (o.rolled_back) return label("", null, t("res.rolledBack"));
+        if (o.active) return label("", null, t("res.active"));
         const map = { ok: ["success", "check-circle", "res.ok"], nochange: ["", null, "res.nochange"],
                       failed: ["danger", "exclamation-circle", "res.failed"],
                       running: ["warning", "exclamation-triangle", "res.running"] };
@@ -2084,7 +2090,7 @@
 
     // Under the result: why the rollback or, otherwise, the update failed.
     function opReason(o) {
-        const r = (o.rolled_back && o.rollback_status === "failed" && o.rollback_reason) ||
+        const r = (o.rollback_status === "failed" && o.rollback_reason) ||
                   (o.status === "failed" && o.reason) || null;
         if (!r) return "";
         const text = (r.container ? r.container + ": " : "") + reasonText(r);

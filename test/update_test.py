@@ -125,6 +125,28 @@ def ops():
     return U.load_ops()
 
 
+def last_result(out):
+    return json.loads([ln for ln in out.splitlines() if ln.startswith("@@RESULT ")][-1][9:])
+
+
+def history(op_id):
+    """The operation as the backups tab gets it."""
+    return [o for o in json.loads(quiet(U.cmd_backups)[1])["ops"] if o["id"] == op_id][0]
+
+
+def interrupted(argv):
+    """main(argv) ended by KeyboardInterrupt, as a kill ends a run (without
+    its last lines): the output up to there."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), as_uid(0):
+        try:
+            U.main(argv)
+        except KeyboardInterrupt:
+            pass
+    release_lock()
+    return out.getvalue()
+
+
 # ------------------------------------------------------------- fake Docker
 L = {"project": U.L_PROJECT, "service": U.L_SERVICE, "workdir": U.L_WORKDIR,
      "files": U.L_FILES, "hash": U.L_HASH}
@@ -161,7 +183,11 @@ class Docker:
         self.up_rc = 0
         self.up_out = []             # what a failing `compose up` prints
         self.images_from = None      # () -> {service: image} read from the files, as compose does
-        self.pull_rc = 0             # exit code of `compose pull`; the tag stays where it is
+        self.pull_rc = 0             # exit code of `compose pull` on a service the files do not define
+        self.registry_down = False   # the registry fails: `compose pull` exits 1, or 0 with
+                                     # --ignore-pull-failures (docker/compose pkg/compose/pull.go)
+        self.pull_raises = None      # exception the pull raises (the helper itself stops there)
+        self.up_runs = None          # image ID recreated containers run, whatever the tag names
         self.undefined = set()       # services the compose files no longer define
 
     def add(self, c):
@@ -247,9 +273,16 @@ class Docker:
 
     def stream(self, cmd):
         self.streamed.append(list(cmd))
+        if "pull" in cmd and self.pull_raises:
+            raise self.pull_raises
         if "pull" in cmd and self.pull_rc:
             U.STREAM_TAIL[:] = ["no such service: " + cmd[-1]]
             return self.pull_rc
+        if "pull" in cmd and self.registry_down:
+            U.STREAM_TAIL[:] = [" postgres Pulling ",
+                                ' postgres Error Get "https://registry-1.docker.io/v2/": dial tcp: lookup '
+                                "registry-1.docker.io: no such host"]
+            return 0 if "--ignore-pull-failures" in cmd else 1
         if "pull" in cmd and self.pull_to:
             ref, iid = self.pull_to
             self.tags[U.norm_ref(ref)] = iid
@@ -264,7 +297,7 @@ class Docker:
                     c["Config"]["Image"] = refs[svc]
                 iid = self.tags.get(U.norm_ref(c["Config"]["Image"]))
                 if iid and svc in cmd:
-                    c["Image"] = iid
+                    c["Image"] = self.up_runs or iid
         return 0
 
 
@@ -774,8 +807,43 @@ check("failed pull: no rollback tag, no dump, no history entry, nothing recreate
       (True, dumps_before, True, []))
 check("failed pull: says so, not 'no newer image'",
       ("The pull failed and there is no newer image on the server – nothing changed." in out,
-       "No newer image available" in out, "continuing with the image available locally" in out), (True, False, False))
+       "No newer image available" in out, "is rolled out" in out), (True, False, False))
 D.pull_rc = 0
+
+# The registry fails (no network, rate limit). Up to 0.18.0 the pull ran with
+# --ignore-pull-failures: compose exited 0, and with the old image still there
+# the run ended as "no newer image" (exit 0). Now: exit 5, nothing left.
+D.registry_down = True
+D.streamed.clear()
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
+rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+release_lock()
+check("registry down, old image -> exit 5, not 'nochange'",
+      (rc, "No newer image available" in out, '"status": "nochange"' in out), (5, False, False))
+check("registry down: pulled without --ignore-pull-failures, the error in the message",
+      (["--ignore-pull-failures" in c for c in D.streamed if "pull" in c],
+       'nothing changed. Pull: postgres Error Get "https://registry-1.docker.io/v2/"' in out), ([False], True))
+check("registry down: no rollback tag, no dump, no history entry, nothing recreated",
+      (D.tags == tags_before, dumps_of("glitchtip"), ops() == ops_before, [c for c in D.streamed if "up" in c]),
+      (True, dumps_before, True, []))
+# A newer image on the server already (pulled by hand, or before the registry
+# went down) is still rolled out, with a warning that names it.
+D.images["sha256:prepulled"] = {"Id": "sha256:prepulled", "Config": {"Env": ["PG_VERSION=16.16"]}}
+D.tags["postgres:16-alpine"] = "sha256:prepulled"
+rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
+release_lock()
+res = last_result(out)
+check("registry down, newer image on the server -> rolled out, exit 0",
+      (rc, res["status"], res["to_version"], [D.containers[n]["Image"] for n in ("glitchtip-postgres", "glitchtip-migrate")]),
+      (0, "ok", "16.16", ["sha256:prepulled"] * 2))
+check("registry down, newer image on the server: the warning says so",
+      ("Warning: the pull failed (postgres Error Get" in out
+       and "postgres:16-alpine is on the server already (prepulled) and is rolled out." in out), True)
+D.registry_down = False
+rc, _ = quiet(U.cmd_rollback, res["op"])
+release_lock()
+check("registry down: its update rolled back", (rc, D.tags["postgres:16-alpine"], D.containers["glitchtip-postgres"]["Image"]),
+      (0, "sha256:new", "sha256:new"))
 
 # Version only known to the radar (latest without a version variable)
 D.images["sha256:oll"] = {"Id": "sha256:oll", "Config": {"Env": []}}
@@ -843,6 +911,115 @@ check("failed rollback: cause in the history",
 LOGS.clear()
 U.wait_healthy = lambda project, services: (True, [], {})
 
+# A failed rollback may be tried again once the cause is fixed. Up to 0.18.0
+# it was marked rolled_back as well, and a second try ended with exit 3.
+failed_op = res["op"]
+check("failed rollback: not marked rolled back, offered again",
+      (ops()[failed_op]["rolled_back"], history(failed_op)["can_rollback"]), (False, True))
+rc, out = quiet(U.cmd_rollback, failed_op)
+release_lock()
+check("failed rollback tried again -> exit 0, rolled back, its old cause cleared",
+      (rc, ops()[failed_op]["rolled_back"], ops()[failed_op]["rollback_status"], ops()[failed_op]["rollback_reason"]),
+      (0, True, "ok", None))
+check("a rollback that went through is not repeated -> 3", quiet(U.cmd_rollback, failed_op)[0], 3)
+release_lock()
+U.record({"id": failed_op, "rolled_back": True, "rollback_status": "failed"})
+check("a history line up to 0.18.0 (rolled_back and failed) -> offered again", history(failed_op)["can_rollback"], True)
+U.record({"id": failed_op, "rolled_back": True, "rollback_status": "ok"})
+
+# The helper itself stops after the containers were recreated (docker inspect
+# fails while it waits for them). Up to 0.18.0 the operation was recorded only
+# afterwards: no history, no output, no rollback from the page.
+D.pull_to = ("postgres:16-alpine", "sha256:v20")
+D.images["sha256:v20"] = {"Id": "sha256:v20", "Config": {"Env": ["PG_VERSION=16.20"]}}
+
+
+def docker_gone(project, services):
+    raise subprocess.CalledProcessError(1, ["docker", "inspect"], "", "Cannot connect to the Docker daemon")
+
+
+U.wait_healthy = docker_gone
+with as_uid(0):
+    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+release_lock()
+res = last_result(out)
+op = ops()[res["op"]]
+check("exception after the restart -> exit 4, failed, its cause in the result and the history",
+      (rc, res["status"], op["status"], op["reason"]["source"], op["reason"]["line"]),
+      (4, "failed", "failed", "error", "Check after the restart stopped: Cannot connect to the Docker daemon"))
+check("exception after the restart: output kept, rollback offered",
+      (os.path.exists(os.path.join(U.LOGS, res["op"] + ".log")), history(res["op"])["can_rollback"]), (True, True))
+U.wait_healthy = lambda project, services: (True, [], {})
+rc, _ = quiet(U.cmd_rollback, res["op"])
+release_lock()
+check("exception after the restart: rollback -> exit 0, the image from before again",
+      (rc, [D.containers[n]["Image"] for n in ("glitchtip-postgres", "glitchtip-migrate")]), (0, ["sha256:new"] * 2))
+
+# A run that ends for good after the restart (killed, power cut) keeps its
+# entry ("running", the page shows "aborted") with the rollback copy.
+D.pull_to = ("postgres:16-alpine", "sha256:v21")
+D.images["sha256:v21"] = {"Id": "sha256:v21", "Config": {"Env": ["PG_VERSION=16.21"]}}
+
+
+def killed(project, services):
+    raise KeyboardInterrupt
+
+
+U.wait_healthy = killed
+out = interrupted(["update", "glitchtip-postgres", "--no-dump"])
+op = [o for o in ops().values() if o.get("new_id") == "sha256:v21"][0]
+h = history(op["id"])
+check("run ended after the restart: in the history with its rollback copy and its output",
+      (op["status"], D.tags.get(op["rollback"]), D.containers["glitchtip-postgres"]["Image"], h["active"],
+       h["can_rollback"], os.path.exists(os.path.join(U.LOGS, op["id"] + ".log"))),
+      ("running", "sha256:new", "sha256:v21", False, True, True))
+real_alive, U.helper_alive = U.helper_alive, lambda pid: pid == os.getpid()
+h = history(op["id"])
+check("an update whose process still runs is not offered for rollback", (h["active"], h["can_rollback"]), (True, False))
+U.helper_alive = real_alive
+U.wait_healthy = lambda project, services: (True, [], {})
+rc, _ = quiet(U.cmd_rollback, op["id"])
+release_lock()
+check("run ended after the restart: rollback -> exit 0, the image from before again",
+      (rc, D.containers["glitchtip-postgres"]["Image"], ops()[op["id"]]["rolled_back"]), (0, "sha256:new", True))
+
+# The compose file names another image since the update (latest -> 2, here
+# 16 -> 17): the rollback put only the old tag back, compose started the other
+# image, and the rollback said "ok". Now refused before anything changes.
+D.pull_to = ("postgres:16-alpine", "sha256:v22")
+D.images["sha256:v22"] = {"Id": "sha256:v22", "Config": {"Env": ["PG_VERSION=16.22"]}}
+rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
+release_lock()
+res = last_result(out)
+D.images_from = lambda: {"postgres": "postgres:17-alpine", "migrate": "postgres:16-alpine"}
+D.streamed.clear()
+tags_before = dict(D.tags)
+rc, out = quiet(U.cmd_rollback, res["op"])
+release_lock()
+check("rollback, the compose file names another image now -> exit 5, nothing changed",
+      (rc, D.tags == tags_before, [c for c in D.streamed if "up" in c], ops()[res["op"]].get("rolled_back"),
+       D.containers["glitchtip-postgres"]["Image"]), (5, True, [], None, "sha256:v22"))
+check("rollback, another image: the message names it",
+      "The compose files now give postgres: postgres:17-alpine instead of postgres:16-alpine – nothing changed" in out,
+      True)
+D.images_from = None
+# Compose starts something else than the rollback copy all the same: the image
+# IDs that run are checked; the rollback fails and can be tried again.
+D.up_runs = "sha256:elsewhere"
+rc, out = quiet(U.cmd_rollback, res["op"])
+release_lock()
+rres = last_result(out)
+check("rollback, the containers run another image -> exit 4, failed, not 'ok'",
+      (rc, rres["status"], rres["reason"]["source"], rres["reason"]["container"], ops()[res["op"]]["rolled_back"]),
+      (4, "failed", "image", "glitchtip-migrate", False))
+check("rollback, another image: the cause names both",
+      rres["reason"]["line"].startswith("runs elsewhere instead of the rollback copy postgres:rollback-"), True)
+D.up_runs = None
+rc, _ = quiet(U.cmd_rollback, res["op"])
+release_lock()
+check("rollback tried again -> exit 0, on the rollback copy",
+      (rc, [D.containers[n]["Image"] for n in ("glitchtip-postgres", "glitchtip-migrate")]), (0, ["sha256:new"] * 2))
+
 # kept output (through main, as the plugin calls it) and the new build's digests
 D.pull_to = ("postgres:16-alpine", "sha256:v18")
 D.images["sha256:v18"] = {"Id": "sha256:v18", "Config": {"Env": ["PG_VERSION=16.18"]},
@@ -861,6 +1038,9 @@ check("kept output: the whole run, without @@RESULT, root only",
        oct(os.stat(logf).st_mode & 0o777)), (4, True, True, False, "0o600"))
 check("kept output: the caller still sees everything", "@@RESULT" in out and "Updating postgres:16-alpine" in out, True)
 check("new build: its registry digests in the history", ops()[res["op"]]["new_digests"], ["sha256:dddd"])
+with as_uid(0):
+    rc1, _ = quiet(U.main, ["rollback", res["op"]])
+release_lock()
 U.wait_healthy = lambda project, services: (True, [], {})
 with as_uid(0):
     rc, _ = quiet(U.main, ["rollback", res["op"]])
@@ -869,6 +1049,9 @@ with as_uid(0):
     rc, out = quiet(U.main, ["log", res["op"]])
 check("log: the update, then its rollback",
       (rc, out.index("Updating") < out.index("--- Rollback ---") < out.index("Rolling")), (0, True))
+check("log: a rollback tried again after a failure keeps both outputs",
+      (rc1, out.count("Rolling postgres:16-alpine back"), out.index("Rollback failed") < out.index("--- Tried again ---")
+       < out.index("Rollback successful")), (4, 2, True))
 bk = json.loads(quiet(U.cmd_backups)[1])
 o = [x for x in bk["ops"] if x["id"] == res["op"]][0]
 check("backups: which outputs are kept, digests of the new build",
@@ -1444,6 +1627,53 @@ fp = retag("formbricks-app", "5.0.3")["retag"]["fingerprint"]
 rc, res, out = apply("formbricks-app", "5.0.3", fp)
 check("retag: the new image cannot be pulled -> exit 5, file restored, nothing left",
       (rc, raw(fb_file) == FB_BEFORE, leftovers()), (5, True, ([], [], 0)))
+
+# The helper itself stops after the file was written, before a container
+# changed (here in the pull): the file comes back, nothing is left, and the
+# entry it had in the history is marked discarded (hidden, no output kept).
+fp = retag("formbricks-app", "5.4.5")["retag"]["fingerprint"]
+logs_before = sorted(os.listdir(U.LOGS))
+D.pull_raises = OSError("docker: connection reset by peer")
+with contextlib.redirect_stdout(io.StringIO()), as_uid(0):
+    try:
+        U.main(["retag", "formbricks-app", "5.4.5", "--expect", fp, "--no-dump"])
+        raised = None
+    except OSError as e:
+        raised = str(e)
+release_lock()
+D.pull_raises = None
+check("retag, the helper stops before the restart -> file restored, nothing left, no output kept",
+      (raised, raw(fb_file) == FB_BEFORE, leftovers(), sorted(os.listdir(U.LOGS)) == logs_before),
+      ("docker: connection reset by peer", True, ([], [], 0), True))
+with open(U.OPS) as f:
+    check("retag, the helper stops before the restart: the entry is marked discarded",
+          [json.loads(ln).get("status") for ln in f][-2:], ["running", "discarded"])
+
+# A tag change that ends for good after the restart keeps its entry with the
+# file copies; a rollback that fails after putting the file back can be tried
+# again, and then leaves the file as it is.
+fp = retag("formbricks-app", "5.4.5")["retag"]["fingerprint"]
+U.wait_healthy = killed
+interrupted(["retag", "formbricks-app", "5.4.5", "--expect", fp, "--no-dump"])
+op = [o for o in ops().values() if o["status"] == "running"][0]
+check("retag ended after the restart: in the history with its file copies, the containers on the new tag",
+      (op["to_tag"], len(op["backup_files"]), history(op["id"])["can_rollback"], raw(fb_file) == FB_BEFORE,
+       sorted((c["Config"]["Image"], c["Image"]) for c in D.containers.values())),
+      ("5.4.5", 1, True, False, [(FB + ":5.4.5", "sha256:fb545")] * 2))
+U.wait_healthy = lambda project, services: (False, ["formbricks-app"], {})
+with as_uid(0):
+    rc1, _ = quiet(U.main, ["rollback", op["id"]])
+release_lock()
+check("retag rollback fails after putting the file back -> exit 4, file back, offered again",
+      (rc1, raw(fb_file) == FB_BEFORE, history(op["id"])["can_rollback"]), (4, True, True))
+U.wait_healthy = lambda project, services: (True, [], {})
+with as_uid(0):
+    rc2, out2 = quiet(U.main, ["rollback", op["id"]])
+release_lock()
+check("retag rollback tried again, the file back already -> exit 0, file untouched, containers on the old tag",
+      (rc2, raw(fb_file) == FB_BEFORE, "Restored:" in out2,
+       sorted((c["Config"]["Image"], c["Image"]) for c in D.containers.values())),
+      (0, True, False, [(FB + ":5.0.2", "sha256:fb")] * 2))
 del D.containers["formbricks-app"], D.containers["formbricks-migrate"]
 
 # The tag in a variable of the .env file: that file changes and comes back.
@@ -1458,6 +1688,19 @@ rc, res, out = apply("plausible", "v2.1.5", fp)
 check("retag via .env: only the variable's line changes, the container runs the new tag",
       (rc, raw(pl_env), raw(pl_file) == PLY_BEFORE, D.containers["plausible"]["Config"]["Image"]),
       (0, b"PLAUSIBLE_VERSION=v2.1.5  # keep with the db\n", True, PL + ":v2.1.5"))
+# Once the .env is back, compose must give the old image. Here the compose file
+# names a tag of its own since the change: the .env is written back as it was
+# before this try, and nothing else changes.
+with open(pl_file, "w") as f:
+    f.write("services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:v2.1.5\n")
+with as_uid(0):
+    rc2, out2 = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+check("retag rollback: another image once the .env is back -> exit 5, the .env as before the try",
+      (rc2, raw(pl_env), D.containers["plausible"]["Image"], "instead of " + PL + ":v2.1.4 – nothing changed" in out2),
+      (5, b"PLAUSIBLE_VERSION=v2.1.5  # keep with the db\n", "sha256:pl215", True))
+with open(pl_file, "wb") as f:
+    f.write(PLY_BEFORE)
 with as_uid(0):
     rc, out = quiet(U.main, ["rollback", res["op"]])
 release_lock()

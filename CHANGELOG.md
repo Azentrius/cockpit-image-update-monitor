@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: an update cut off after the restart kept no history.** The operation was written only after
+  the containers were recreated and checked. If the helper stopped in between (Docker not answering,
+  the process killed), the new image ran without a history entry, kept output or a rollback from the
+  page. The run is now in the history before the first change a rollback has to undo: before a tag
+  change writes its files and before the containers are recreated. An error after the restart fails
+  the update with its cause; a run that ends without its last line stays “aborted” with its rollback.
+  A run that stops before any container changed still takes back what it did and leaves no entry.
+- **Fix: a rollback could report success on the wrong image.** It only pointed the old tag back to the
+  rollback copy and started what the compose files name now. With an `image:` line edited after the
+  update (`latest` → `2`), compose started the other image and the rollback said “successful”. The
+  rollback now stops before any change when the files give the services another image, and afterwards
+  checks that the containers run the rollback copy.
+- **Fix: a failed rollback could not be tried again.** It was marked “rolled back” as well, and a
+  second try was refused while the new image still ran. A failed rollback is now offered again; a tag
+  change's files that are back already stay as they are, and the outputs of both tries are kept. A
+  rollback that went through is still not repeated.
+- **Fix: a registry error looked like “no newer image”.** The pull ran with `--ignore-pull-failures`,
+  so compose exited 0 when the registry failed, and with the old image still there the update ended as
+  “no change”. The pull now reports the error: the update stops before any change and names it, unless
+  the newer image is on the server already, which is then rolled out with a warning.
+
 ## 0.18.0 – 2026-10-18
 
 Images without a registry version say more: a development build shows its commit, and an image built
