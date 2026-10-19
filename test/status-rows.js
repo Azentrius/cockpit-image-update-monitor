@@ -11,8 +11,7 @@ const { JSDOM } = require("jsdom");
 
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
-const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8")
-    .replace(/<script[^>]*><\/script>/g, "");
+const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
 const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const files = {
     "/var/lib/diun/events.jsonl": fs.readFileSync(path.join(FIX, "events.jsonl"), "utf8"),
@@ -28,6 +27,7 @@ const DEPS = '{"root":true,"docker":{"state":"ok","version":"29.5.2","compose":t
 (async () => {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
     const w = dom.window;
+    w.document.querySelectorAll("script").forEach((s) => s.remove());   // the page's own tags never run
     w.Date.now = () => Date.parse(status.checked_at);          // the time the fixture was made for
     w.cockpit = {
         language: "en",

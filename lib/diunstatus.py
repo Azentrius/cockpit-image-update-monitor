@@ -57,6 +57,7 @@ VERSION_RE = re.compile(r'^\s*const VERSION = "([^"]{1,40})";', re.M)
 # The timestamps of Docker, Diun and the radar (builtAt in plugin/diun.js).
 TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?", re.A)
 EPOCH_1980 = 315532800         # earlier build dates prove nothing (reproducible builds: 1970)
+HUB_PREFIX_RE = re.compile(r"^(?:docker\.io/)?(?:library/)?")   # repoKey's two replace() calls
 
 
 def now_utc():
@@ -177,12 +178,8 @@ def tag_split(ref):
 
 
 def repo_key(ref):
-    r = tag_split(ref)[0]
-    if r.startswith("docker.io/"):
-        r = r[len("docker.io/"):]
-    if r.startswith("library/"):
-        r = r[len("library/"):]
-    return r.lower()
+    """repoKey: the repo without Docker Hub's prefixes, lower case (a name, not a URL)."""
+    return HUB_PREFIX_RE.sub("", tag_split(ref)[0]).lower()
 
 
 def ver_key(image, tag):
