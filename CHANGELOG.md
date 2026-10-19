@@ -5,6 +5,11 @@
 Cockpit's menu shows how the add-on stands: an icon next to “Image Update Monitor” with the summary
 of its status as the tooltip.
 
+This release also brings 0.20.0 and 0.20.1, which were not released on their own: the status for the
+Azentrius Status Board (`diun-update.py status --lang en|de`, also without root) and the removal of the
+helpers' `__pycache__` together with the package; their sections in
+[CHANGELOG.md](https://github.com/Azentrius/cockpit-image-update-monitor/blob/main/CHANGELOG.md) tell more.
+
 **Upgrading:** nothing to do. The icon appears after the next login, once the radar has run.
 
 - **Status icon in the menu.** The same state as for the Status Board, with Cockpit's own icons: red
