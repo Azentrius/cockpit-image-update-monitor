@@ -203,11 +203,13 @@ jobs:
             test -f /usr/lib/cockpit-image-updates/diunstatus.py
             /usr/lib/cockpit-image-updates/diun-deps.sh check | python3 -c "import json, sys; json.load(sys.stdin)"
             # The status for the Status Board, as root and without root (nobody): no status.json yet,
-            # so state none with the reason. -B: no __pycache__ left in the package folder.
+            # so state none with the reason. Without -B, as on a server: the run as root leaves
+            # __pycache__ in the package folder, which no package owns; the removal takes it along.
             for who in root nobody; do
-              python3 -c "import os, sys; sys.argv[1] == \"root\" or (os.setgroups([]), os.setgid(65534), os.setuid(65534)); os.execv(sys.executable, [sys.executable, \"-B\", \"/usr/lib/cockpit-image-updates/diun-update.py\", \"status\", \"--lang\", \"de\"])" "$who" |
+              python3 -c "import os, sys; sys.argv[1] == \"root\" or (os.setgroups([]), os.setgid(65534), os.setuid(65534)); os.execv(sys.executable, [sys.executable, \"/usr/lib/cockpit-image-updates/diun-update.py\", \"status\", \"--lang\", \"de\"])" "$who" |
                 python3 -c "import json, sys; d = json.load(sys.stdin); assert (d[\"schema\"], d[\"addon\"], d[\"state\"], d[\"items\"]) == (1, \"image-updates\", \"none\", []), d; print(sys.argv[1] + \": \" + d[\"summary\"])" "$who"
             done
+            test -d /usr/lib/cockpit-image-updates/__pycache__
             python3 -c "import json; m = json.load(open(\"/usr/share/cockpit/image-updates/manifest.json\")); assert m[\"azentrius\"][\"status\"] == [\"/usr/lib/cockpit-image-updates/diun-update.py\", \"status\"], m"
             # skopeo as the page installs it (apt-get, dnf or zypper, from the distribution). On
             # openSUSE it comes from the same mirrors, so it gets the same tries; the helper itself

@@ -13,7 +13,8 @@
 #   - the package database names this build's version, and the files on disk are this build's,
 #     byte for byte (not those of the release, nor a mix),
 #   - the data is unchanged,
-# then removes the package: its files go, the data stays.
+# then runs a helper as root and removes the package: its files go, with the __pycache__ the helper
+# left in the package folder, the data stays.
 # With BASE empty (no older release with packages) it says so and checks the same with a fresh
 # install of this build; it never passes an upgrade it did not run.
 set -eu
@@ -88,6 +89,10 @@ fi
 same_files
 sha256sum -c --quiet /tmp/data.sha256
 /usr/lib/cockpit-image-updates/diun-deps.sh check | python3 -c 'import json, sys; json.load(sys.stdin)'
+# A helper as root, as the page and the timers run them on a server: Python leaves __pycache__ in
+# the package folder, which no package owns; the removal takes it along.
+/usr/lib/cockpit-image-updates/diun-update.py status --lang en | python3 -c 'import json, sys; json.load(sys.stdin)'
+test -d /usr/lib/cockpit-image-updates/__pycache__
 pkg_remove
 test ! -e /usr/lib/cockpit-image-updates
 test ! -e /usr/share/cockpit/image-updates
