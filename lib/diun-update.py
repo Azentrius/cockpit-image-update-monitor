@@ -33,6 +33,9 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 the rules in /etc/image-updates.conf (also run
                                 daily by diun-cleanup.timer)
   radar                         run the version radar now and wait for it
+  status [--lang en|de]         read-only, also without root: the add-on's
+                                status for the Status Board (schema 1, see
+                                diunstatus), from /var/lib/diun-radar/status.json
   retag <container> <tag> --dry-run
                                 read-only: the plan of a tag change (stage 2):
                                 what the radar offers the tag as, the version
@@ -58,6 +61,7 @@ Everything the addon writes lives in /var/backups/image-updates (root only):
 
 The machine-readable result of update/rollback/cleanup is the last line:
   @@RESULT {"op": "...", "status": "ok|nochange|failed", ...}
+After them (also after a failure) status.json is written anew, silently.
 
 SIGTERM, SIGHUP and SIGINT end a run through its cleanup (entry, diunproc):
 the docker command running is stopped, a run that changed no container yet
@@ -86,6 +90,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from diunlib import CI_JOB_RE, CI_RUNNER_RE, core, is_ci_job, local_version, nums_of, tag_digits  # noqa: E402
 from diunproc import Interrupted, Timeout, copy as copy_out, held, on_signals, stream as stream_out  # noqa: E402
+import diunstatus  # noqa: E402
 
 BASE = "/var/backups/image-updates"
 DUMPS = os.path.join(BASE, "dumps")
@@ -108,6 +113,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 OP_RE = re.compile(r"^\d{8}-\d{6}-[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 DUMP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}/\d{8}-\d{6}_[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.sql\.gz$")
 ROLLBACK_TAG_RE = re.compile(r"^rollback-\d{8}-\d{6}$")
+LANG_ARG_RE = re.compile(r"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$")   # status --lang: en, de, de-DE, pt_BR
 PG_RE = re.compile(r"(^|/)(postgres|postgresql|postgis|pgvector|timescaledb[a-z0-9-]*)$")
 MY_RE = re.compile(r"(^|/)(mariadb|mysql|percona-server)$")
 # Markers the official images set themselves - catches renamed/derived images.
@@ -2310,8 +2316,31 @@ def cmd_radar():
     return 0
 
 
+# ---------------------------------------------------------------- status ----
+def cmd_status(args):
+    """The status contract (diunstatus): read-only, without a lock and also
+    without root. German for de, de-DE, …; English otherwise."""
+    if args and not (len(args) == 2 and args[0] == "--lang" and LANG_ARG_RE.match(args[1])):
+        raise Abort(64, "Aufruf: status --lang en|de", "Usage: status --lang en|de")
+    lang = "de" if args and args[1].lower().startswith("de") else "en"
+    print(json.dumps(diunstatus.show(lang), ensure_ascii=False))
+    return 0
+
+
+def refresh_status():
+    """status.json anew after an update, a tag change, a rollback or a
+    cleanup, so the Status Board sees the result before the next radar run.
+    Silent, so @@RESULT stays the last line; a problem keeps the last file."""
+    try:
+        diunstatus.refresh()
+    except Exception:
+        pass
+
+
 # ------------------------------------------------------------------ main ----
 def main(argv):
+    if argv[:1] == ["status"]:
+        return cmd_status(argv[1:])
     if os.geteuid() != 0:
         raise Abort(77, "Dafür werden Administratorrechte benötigt.", "This requires administrator privileges.")
     if len(argv) == 2 and argv[0] == "plan":
@@ -2371,6 +2400,9 @@ def entry(argv):
     if guard is not None and guard.repeats:
         say(f"{guard.repeats} weitere(s) Signal(e) während des Aufräumens nicht beachtet.",
             f"{guard.repeats} more signal(s) ignored while cleaning up.")
+    if argv[:1] in (["update"], ["retag"], ["rollback"], ["cleanup"]) and "--dry-run" not in argv \
+            and code not in (64, 75, 77):
+        refresh_status()
     return code
 
 

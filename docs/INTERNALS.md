@@ -9,8 +9,9 @@ together.
 | Path | Content | Owner / mode |
 |---|---|---|
 | `/usr/share/cockpit/image-updates/` | plugin (package `cockpit-image-updates`) | root, 644 |
-| `/usr/lib/cockpit-image-updates/` | helpers (`*.py`, `*.sh` 755, `diunlib.py` 644) | root |
+| `/usr/lib/cockpit-image-updates/` | helpers (`*.py`, `*.sh` 755; `diunlib.py`, `diunproc.py`, `diunstatus.py` 644) | root |
 | `/var/lib/diun-radar/versions.json` | result of the version radar | root, 644 (StateDirectory) |
+| `/var/lib/diun-radar/status.json` | the add-on's status for the Status Board (since 0.20.0, see [`status`](#status-diun-updatepy-since-0200)): names of containers, states and times only | root, 644 |
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
 | `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log`, `compose/<project>/<stamp>/<n>_<file>` (the compose / `.env` files a tag change wrote, byte-exact as they were) | root, 700 / 600 |
@@ -43,7 +44,8 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `radar` | action, no dialog | text; waits for the radar run (`systemctl start diun-radar.service`) |
 | | `retag <container> <tag> --dry-run` | read (since 0.11.0; the preview in “Change version”) | one JSON object: the `plan` plus `retag`, see below |
 | | `retag <container> <tag> --expect <fingerprint> [--no-dump]` | action (since 0.11.0) | text + `@@RESULT {…}` |
-| `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – |
+| | `status --lang en\|de` | read (since 0.20.0; the Status Board, also **without root**) | one JSON object, schema 1, see [`status`](#status-diun-updatepy-since-0200) |
+| `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – (`--output` also writes `status.json` next to the file) |
 
 Inputs are checked by regex:
 
@@ -55,8 +57,12 @@ Inputs are checked by regex:
 | rollback tag | `^rollback-\d{8}-\d{6}$` |
 | target tag (`retag`) | `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`, and it must be one of the radar's `choices` |
 | fingerprint (`retag --expect`) | `^[0-9a-f]{64}$` |
+| language (`status --lang`) | `^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})?$`; `de…` is German, every other one English |
 
 `DIUN_LANG` only selects the language of the text output.
+
+`status` is the only verb that runs without root (and without a lock); every other one ends with
+exit 77 without it.
 
 ### Exit codes (all helpers)
 
@@ -390,6 +396,77 @@ with `op`. The versions can be `null` (unknown).
   Stack frames never count, colour codes are removed, at most 300 characters. `null` when nothing fits;
   the plugin then names the state (out of memory, exit code, not ready in time).
 
+### `status` (diun-update.py, since 0.20.0)
+
+The shared status contract of the Azentrius add-ons, schema 1: the Status Board on the Cockpit bastion
+calls `status --lang <xx>` on every host with `superuser: "try"` and shows a tile per host and add-on.
+It finds the command in `plugin/manifest.json`:
+
+```json
+"azentrius": {"status": ["/usr/lib/cockpit-image-updates/diun-update.py", "status"]}
+```
+
+The answer, here for the real host data of `test/fixtures/` (`test/fixtures/status.json`, the file as
+written, with its `facts`):
+
+```json
+{"schema": 1, "addon": "image-updates", "label": "Image Update Monitor", "version": "0.20.0",
+ "checked_at": "2026-10-12T02:50:00Z", "state": "info",
+ "summary": "2 updates available, 3 roll-outs pending, 17 new versions",
+ "items": [
+   {"id": "updates", "state": "info", "title": "Updates available", "value": "2",
+    "detail": "ollama, prod-mcp-1", "checked_at": "2026-10-12T02:50:00Z", "stale_after": 86400},
+   {"id": "failed", "state": "ok", "title": "Failed updates", "value": "0",
+    "checked_at": "2026-10-12T02:50:00Z", "stale_after": 86400},
+   {"id": "radar", "state": "ok", "title": "Version radar", "value": "< 1 h",
+    "checked_at": "2026-10-12T02:17:34Z", "stale_after": 86400},
+   {"id": "rollout", "state": "info", "title": "Roll-out pending", "value": "3",
+    "detail": "docuseal-db, glitchtip-postgres, plausible_db", "checked_at": "2026-10-12T02:50:00Z",
+    "stale_after": 86400},
+   {"id": "new-versions", "state": "info", "title": "New versions", "value": "17",
+    "detail": "actual-ai, actual_server, calcom-db, diun-socket-proxy, docuseal +12",
+    "checked_at": "2026-10-12T02:17:34Z", "stale_after": 86400}]}
+```
+
+| Item | State | Counts |
+|---|---|---|
+| `updates` | `info` with containers, else `ok`; `none` while Diun has written no event | the rows the page marks “Update available”: Diun's newest event of the image and tag names another digest than the one running, not dismissed and not the same build (`sameBuild`) |
+| `failed` | `danger` with entries, else `ok` | per compose project and image the newest `update` or `retag` of the history, when it failed and was not rolled back, its rollback failed, or it ended without its last line (`running` while no process runs it: aborted). A later successful update of the image, or a run still in progress, clears it |
+| `radar` | `ok`; `warning` when `versions.json` is older than 24 hours (the page's “outdated”) or its time is unreadable; `none` without `versions.json` | `value` is the age (“2 h”, “3 days”) |
+| `rollout` | `info` with containers, else `ok` | the rows “Roll-out pending” (`pulled`) |
+| `new-versions` | `info` with containers, else `ok`; `none` without `versions.json` | the rows “New version”: a newer patch or minor, a major of an image that is no database, or a newer base of an image built here |
+
+- **The page's rules.** `updates`, `rollout` and `new-versions` are the rows of the page's status
+  column (`rowFor`, `versionCell`, `installedOf` in `diun.js`, ported to `diunstatus.py`); CI job
+  containers are no rows. `test/status-rows.js` checks with the fixtures that the page shows exactly
+  the rows `status.json` names. A rule that changes on the page changes there as well.
+- **State and summary** as the contract says: the gravest of `danger` > `warning` > `info`, otherwise
+  `ok` when an item is `ok`, otherwise `none`. The summary names the findings, the gravest first (“1
+  failed update, version radar outdated, 2 updates available”), or says “No updates or problems
+  found”.
+- `detail`: at most five names, then “+N”; `value`: a number as text, the radar's age; no `link` (the
+  page has no addresses for its tabs). `stale_after` is 86400 on every item.
+- **Who writes `status.json`:** the radar run (`diun-versions.py --output`, next to `versions.json`; a
+  problem there only prints `status not written: …` and never fails the run) and `diun-update.py`
+  after `update`, `retag … --expect`, `rollback` and `cleanup`, also after a failure, but not after a
+  wrong call, a taken lock or without root (exit 64, 75, 77). That write is silent, so `@@RESULT`
+  stays the last line; a problem (Docker not answering) keeps the last file. It reads the inventory
+  (`records()` of `diun-inventory.py`, without its lock), `events.jsonl` and `dismissed.json` (as data:
+  only regular files, no link, no pipe; of `events.jsonl` the newest 16 MiB), `versions.json` and the
+  history. Written atomically (temporary file in the same folder, `rename`), 0644.
+- **Its content:** the contract's JSON in English plus `facts`, the same without words: per item the
+  container names (`null` where the source is missing), the failed runs as `{"name", "how"}` (`how`:
+  `failed`, `rollback`, `aborted`), the radar's `generated` and the times. Names of containers only:
+  no compose paths, projects, addresses or user names.
+- **`status` reads only files:** no Docker, no lock, also without root. `status.json`, rendered from its
+  `facts` in the language asked for; `versions.json` again for the radar's age now; as root also the
+  history again for `failed` (cheap, and it catches a killed run before the next write). `version` is
+  the page's (`const VERSION` in `diun.js`). Without `status.json` the state is `none`, without items,
+  and the summary says why (the radar is not set up or has not run yet, or its next run brings it); an
+  unreadable file is `none` as well. Exit 0 then too, and for `danger`; 64 for a wrong call.
+- Every text exists in English and in German (with “Sie”); the tests check that the English ones carry
+  no German.
+
 ### Cleanup rules (`/etc/image-updates.conf`)
 
 ```
@@ -566,6 +643,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   success, failed danger, aborted warning, no change and rolled back neutral.
 - **Version:** `const VERSION` in `diun.js`; `index.html` loads `diun.js` and `diun.css` with
   `?v=<version>`. `tools/check-version.sh` keeps them and `CHANGELOG.md` in step.
+- **Manifest:** besides the menu entry, `azentrius.status` names the status command for the Status
+  Board (see [`status`](#status-diun-updatepy-since-0200)); Cockpit ignores the section.
 - **Language:** `../base1/po.js` sets `cockpit.language`. `de*` → German, otherwise English.
   - Texts live in `I18N.en` / `I18N.de` in `i18n.js` (since 0.19.0; `window.ImageUpdatesI18n`, loaded
     before `diun.js`, which keeps only the code). Static texts in the HTML carry `data-i18n`.
@@ -651,6 +730,8 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, line tags (release by digest, the tag's number on a miss, exact tags untouched, a registry outage keeping the release per image ID), a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
+| `test/status_test.py` | `diunstatus.py` and `diun-update.py status`: the page's rules for the rows (Diun's event of the tag, `docker.io/library/`, another tag, a digest reference, dismissed, the same build in Docker's and Diun's time, a date before 1980, the newest event, roll-out first, CI jobs, no digest, a newer patch, a database major, `by_tag`, an empty comparison, a line tag refined by the radar, the base of an image built here), failed updates from the history (rolled back, a failed rollback also as written up to 0.18.0, aborted, still running, the newest per image, `discarded`), the radar's age, state and summary in English and German with plurals, the contract's shape, no German in English, the fixture `status.json` of real host data, `status` without the file, with an unreadable one, from the file in German, the radar's age judged when asked, the history as root and the file without root, Docker not answering (the last file stays), `events.jsonl` as a link or a pipe and a large one, the arguments (exit 64, no root needed), the write after `rollback` and `cleanup` (silent) and none after `--dry-run`, a wrong call or without root, the radar run writing it and not failing for it |
+| `test/status-rows.js` | the page with the fixtures of a real host marks exactly the containers “Update available”, “Roll-out pending” and “New version” that `test/fixtures/status.json` names |
 | `test/proc_test.py` | `diunproc` with real child processes: a silent hang, endless output, children that ignore SIGTERM (the group killed), a dump that hangs, the next command after a timeout; signals: no handler changed on import, `on_signals` restores the handlers before it, `held` defers a signal; a helper that holds a lock gets SIGTERM or SIGHUP while its command runs (silent and printing, `stream` and `copy`) and keeps the lock until the stop has reached the command (synchronised through FIFOs), children that ignore SIGTERM with SIGTERM and SIGHUP again during the cleanup (SIGKILL after the grace time, repeats only counted), the next operation afterwards, SIGKILL (the command runs on and keeps the lock until it ends) |
 | `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes), signals (SIGTERM during the dump: exit 5, partial dump and everything else taken back; SIGHUP during the pull: exit 5; SIGTERM during `compose up`: exit 4 with history, output, rollback and the cause `signal`; SIGHUP during a rollback's restart: failed, offered again; a signal before the rollback changed a container: exit 5; the same with the real helper (`entry`), a real dump process and a real `compose up` process: state before the signal, the command gone, the lock free afterwards, the rollback), time limits (a pull or dump over its limit stops before any change, `compose up` over its limit fails with its rollback, the limits from the settings file and their ranges) |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
@@ -668,7 +749,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
 | `tools/check-units.sh` | `systemd-analyze verify` for the units (CI lint step, next to shellcheck and ruff) |
-| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres), `imgupd-test-my` (MariaDB, MySQL) and `imgupd-test-reg` (pulls against a local registry: nothing newer, registry down without and with a newer image here); since 0.19.0 every dump is restored into a fresh Postgres, MariaDB and MySQL container and compared object by object with the original (half a dump must be caught), the update lock is held by a separate process instead of a race, and CI runs it (job `e2e`, and before every release); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again); since 0.18.1 a rollback refused while the compose file names another image. `E2E_LIB=<folder>` runs helpers that are not installed yet. |
+| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres), `imgupd-test-my` (MariaDB, MySQL) and `imgupd-test-reg` (pulls against a local registry: nothing newer, registry down without and with a newer image here); since 0.19.0 every dump is restored into a fresh Postgres, MariaDB and MySQL container and compared object by object with the original (half a dump must be caught), the update lock is held by a separate process instead of a race, and CI runs it (job `e2e`, and before every release); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again); since 0.18.1 a rollback refused while the compose file names another image; since 0.20.0 `status.json` after the failed update (644, without the project folder), `status` as root and without root (`nobody`, German) with the failure, and without it after the rollback; at the end `status.json` is written again without the test project. `E2E_LIB=<folder>` runs helpers that are not installed yet. |
 | `test/upgrade_base_test.py` | `tools/upgrade-base.py`, the release the CI upgrade test starts from: a build newer than the newest release, a build of a version released already (the release before it), no older release with packages (exit 3), Semantic Versioning precedence instead of text order, drafts, pre-releases and releases without packages left out |
 | `test/package-upgrade.sh` | CI (job `upgrade`), in a throw-away Debian 13 or Fedora 43 container: the release from `tools/upgrade-base.sh` (checked against `SHA256SUMS` and its build provenance), data a server has, this build over it; the version went up by the package manager's own comparison, the package database names this build, the files on disk are this build's byte for byte (`dpkg --verify` and `diff` against the `.deb`, `rpm -V` and the digests of the `.rpm`), the data unchanged, removed again with the data kept. Without an older release it says so and checks a fresh install |
 | `test/cockpit-setup.sh`, `test/cockpit-session.py` | CI (job `cockpit`), a real Cockpit with systemd and Docker on a throw-away GitHub runner, Playwright with Chromium through Cockpit's login: this build installed with apt over the release before, the page reloaded and logged in again after the upgrade (the new version, `i18n.js` of this build); the page in Cockpit's menu; no JavaScript error and no failed request of the add-on's files or frame, and no other kind of error than Cockpit shows on its own (a login before the add-on is installed is the baseline; on Ubuntu 24.04 Cockpit 314 answers `*/po.js` and `*/po.manifest.js` with 404 on every page; the page's own request for Red Hat Mono, which that Cockpit does not ship, was caught this way; the page of the release before is checked only for loading, its errors are listed apart in the report); with administrative access (a sudo user) and without (a user without sudo, German browser: the hint, no actions); skopeo and the radar set up from the page (timer on, a first run), “Run radar now” (a new run); a throw-away compose project (a local registry, busybox 1.36.1 running, 1.37.0 pulled under the same tag): “Roll out image” with its plan, live output and result, the container on the new image, then the rollback from the history. Versions, steps and results in the job summary and the artifact `cockpit-session` (with screenshots) |

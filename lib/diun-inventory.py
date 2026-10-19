@@ -65,16 +65,12 @@ def docker(*args):
                           timeout=60, check=True).stdout
 
 
-def main():
-    lock = open(LOCK, "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return 75
-
+def records():
+    """The inventory, one dict per running container (see the top). Also
+    used by diunstatus for status.json, without the lock."""
     ids = docker("ps", "-q").split()
     if not ids:
-        return 0
+        return
     containers = json.loads(docker("inspect", *ids))
 
     # Where every local repo:tag points right now (one call for all).
@@ -108,7 +104,7 @@ def main():
         labels = c["Config"].get("Labels") or {}
         project = labels.get(L_PROJECT, "")
         service = labels.get(L_SERVICE, "")
-        print(json.dumps({
+        yield {
             "name": c["Name"].lstrip("/"),
             "image": repo,
             "tag": tag,
@@ -126,7 +122,17 @@ def main():
             "ci_job": is_ci_job(c),
             "created": img.get("Created") or "",
             "revision": revision_of(img),
-        }, ensure_ascii=False), flush=True)
+        }
+
+
+def main():
+    lock = open(LOCK, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 75
+    for r in records():
+        print(json.dumps(r, ensure_ascii=False), flush=True)
     return 0
 
 

@@ -40,6 +40,7 @@ LIB=${E2E_LIB:-/usr/lib/cockpit-image-updates}
 H=$LIB/diun-update.py
 INV=$LIB/diun-inventory.py
 VERSIONS=/var/lib/diun-radar/versions.json
+STATUS=/var/lib/diun-radar/status.json
 P=imgupd-test
 P2=imgupd-test-my
 P3=imgupd-test-reg
@@ -227,6 +228,11 @@ else:
 print("operations.jsonl:", len(keep), "other entries kept")
 PY
     fi
+    # Every update wrote status.json: write it again without the test project.
+    if [ -f "$STATUS" ]; then
+        python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import diunstatus; diunstatus.refresh()' "$LIB" \
+            && echo "status.json: written again without the test project"
+    fi
     rm -rf "${D:?}" "${D2:?}" "${D3:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz
     echo "Left over: $(docker ps -a --format '{{.Names}}' | grep -c imgupd) containers," \
          "$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/') tags," \
@@ -330,6 +336,22 @@ check "Registry digests of the new build in the history ($NDIG)" '[ "$NDIG" -ge 
 check "The pull of a tag only this host has failed, the newer image here was rolled out with a warning" \
     'grep -q "Warning: the pull failed" /tmp/e2e-1.log'
 
+echo "=== 3a. The status for the Status Board after the failed update ==="
+# The update wrote status.json anew; `status` reads it, also without root.
+check "status.json written after the update, readable by all (644), without the project's folder" \
+    '[ "$(stat -c %a "$STATUS")" = 644 ] && ! grep -q "$D" "$STATUS"'
+ST=$(python3 $H status --lang en)
+SF=$(jget "$ST" '(d["schema"], d["state"], [(i["state"], "imgupd-test-db" in i.get("detail", "")) for i in d["items"] if i["id"] == "failed"])')
+check "status as root: the failed update as danger: $SF" '[ "$SF" = "(1, '"'"'danger'"'"', [('"'"'danger'"'"', True)])" ]'
+if runuser -u nobody -- test -r "$H"; then
+    STN=$(runuser -u nobody -- python3 "$H" status --lang de); RC=$?
+    SN=$(jget "$STN" '(d["state"], [i["title"] for i in d["items"] if i["id"] == "failed"])')
+    check "status without root: exit 0, German, the failure from the file: $SN" \
+        '[ $RC = 0 ] && [ "$SN" = "('"'"'danger'"'"', ['"'"'Fehlgeschlagene Updates'"'"'])" ]'
+else
+    echo "SKIP: status without root ($H is not readable for nobody)"
+fi
+
 echo "=== 3b. Restore the dump into a fresh Postgres, as the README says ==="
 restore_pg "$DUMPS/$DUMP" imgupd-test-restore-pg > /tmp/e2e-restore-pg.log 2>&1; RC=$?
 sed 's/^/  | /' /tmp/e2e-restore-pg.log
@@ -353,6 +375,9 @@ python3 $H rollback "$OP1" > /tmp/e2e-3.log 2>&1; RC=$?
 check "Second rollback refused (3)" '[ $RC = 3 ]'
 python3 $H log "$OP1" > /tmp/e2e-3b.log 2>&1; RC=$?
 check "log: update and rollback output" '[ $RC = 0 ] && grep -q "Most likely cause" /tmp/e2e-3b.log && grep -q "^--- Rollback ---" /tmp/e2e-3b.log && grep -q "Rollback successful" /tmp/e2e-3b.log'
+FD=$(jget "$(python3 $H status --lang en)" '[i.get("detail", "") for i in d["items"] if i["id"] == "failed"][0]')
+check "status after the rollback: the update counts as failed no more ($FD)" \
+    'case "$FD" in *imgupd-test-db*) false ;; *) true ;; esac'
 
 echo "=== 5. Roll out again without dump – must work; cleanup of this project ==="
 # Three old dumps of the test database: the rules may delete them, never the

@@ -41,6 +41,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | **Change version** | A list of the versions the registry offers for the installed one: pin the running version, a version line such as `5`, an exact patch / minor / major version, or `latest`. The dialog shows every line of the compose file (or `.env`) before and after, then the same plan and flow as an update; the rollback puts the files back byte for byte. Database majors and Nextcloud jumps over more than one major are listed but locked. |
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
+| **Status Board** | `diun-update.py status --lang en\|de` gives the shared status of the Azentrius add-ons, which the Status Board on a Cockpit bastion shows as a tile per host: updates available, failed updates, an outdated radar, roll-outs pending and new versions, the same rows the overview marks. It works without administrative access on the host: the radar run and every update, rollback and cleanup write it to `/var/lib/diun-radar/status.json`, readable by all, with the names of containers only. |
 | **Use** | The shared Azentrius page frame (header, tabs, signature), light or dark following Cockpit's style, English and German following Cockpit's language (fallback English), loading indicator, rows as blocks on phones, no external resources (strict Cockpit CSP). |
 
 | Update dialog | Result with live output |
@@ -363,6 +364,7 @@ flowchart LR
         RAD["diun-versions.py<br/>timer every 6 h"]
     end
     VJ[("versions.json<br/>/var/lib/diun-radar")]
+    ST[("status.json<br/>/var/lib/diun-radar")]
     EV[("events.jsonl<br/>/var/lib/diun")]
     BK[("/var/backups/image-updates")]
     DK["Docker Engine + Compose"]
@@ -383,6 +385,8 @@ flowchart LR
     RAD --> DK
     RAD --> REG
     RAD --> VJ
+    RAD --> ST
+    UPD --> ST
     DI --> SP
     SP --> DK
     DI --> REG
@@ -393,11 +397,12 @@ flowchart LR
 |---|---|---|
 | `plugin/` | `/usr/share/cockpit/image-updates/` | user interface (vanilla JS, no build step), EN/DE |
 | `lib/diun-inventory.py` | `/usr/lib/cockpit-image-updates/` | running containers: tag, version (tag/variable), digest, compose mapping, “pulled, not rolled out” |
-| `lib/diun-versions.py` | `/usr/lib/cockpit-image-updates/` | version radar: installed version (label/digest), newer versions → `versions.json` |
-| `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run |
+| `lib/diun-versions.py` | `/usr/lib/cockpit-image-updates/` | version radar: installed version (label/digest), newer versions → `versions.json`, then `status.json` |
+| `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run, `status` for the Status Board |
 | `lib/diun-deps.sh` | `/usr/lib/cockpit-image-updates/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
 | `lib/diunlib.py` | `/usr/lib/cockpit-image-updates/` | shared functions (tag scheme, version variables, reach) |
 | `lib/diunproc.py` | `/usr/lib/cockpit-image-updates/` | docker commands and dumps with a time limit (process group stopped, never left behind), signals turned into a cleanup |
+| `lib/diunstatus.py` | `/usr/lib/cockpit-image-updates/` | the status for the Status Board: the overview's rules for the rows, failed updates, the radar's age; writes and reads `status.json` |
 | `systemd/diun-radar.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install radar` enables the timer; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
 | `systemd/diun-cleanup.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install cleanup` enables the timer; runs daily (04:40) |
 | Diun stack | `/opt/diun/`, data `/var/lib/diun/` | created by `diun-deps.sh install diun`: Diun 4.33.0 + `docker-socket-proxy` (read-only), the script notifier writes JSON lines |
@@ -409,12 +414,13 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 ## Security model
 
 - **Root code in one place only.** Everything Cockpit or systemd runs as root lives in `/usr/lib/cockpit-image-updates` (root-owned, from the package). `/var/lib/diun` is **writable from the Diun container**; nothing is ever run from there.
-- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run` and `retag … --expect <fingerprint>`).
+- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run` and `retag … --expect <fingerprint>`). The Status Board calls only `status --lang <xx>`.
   - Container names, operation IDs, dump paths, rollback tags, target tags and fingerprints are checked by regex. Path tricks (`../`) are refused. A target tag must also be one of the versions the radar offers.
 - **Your compose files.** Only a tag change writes to them, and only the lines its preview showed: it makes the plan again and stops if the result differs from what was shown (a fingerprint). Before writing it keeps byte-exact copies under `/var/backups/image-updates/compose/` (root only), writes atomically with the original owner and mode, and checks the result with `docker compose config`; a failed check puts the files back before any container changes. A rollback restores them, unless they were edited afterwards.
   - `delete-image` and the cleanup delete only `…:rollback-YYYYMMDD-HHMMSS` and never an image in use.
   - The cleanup rules come from `/etc/image-updates.conf` only if it belongs to root and nobody else can write it.
 - **Cockpit rights.** Reading runs with `superuser: "try"`, actions with `superuser: "require"`. Without administrative access in Cockpit there is a clear message instead of an error.
+- **Status without root.** `status` only reads files and is the one verb that runs without root. What it reads, `/var/lib/diun-radar/status.json` (0644, written by root), holds the names of containers, states and times; no compose paths, projects, addresses or user names.
 - **Diun without the Docker socket.** Only the `docker-socket-proxy` sees `/var/run/docker.sock` (read-only). It exposes a filtered, read-only API (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) and publishes no port.
 - **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords are read only inside the database container from its environment, never stored or logged.
 - **No network from the browser.** No CDNs and no external fonts (the fonts ship with the add-on); Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries.
@@ -556,6 +562,7 @@ sudo /usr/lib/cockpit-image-updates/diun-update.py retag <container> <tag> --dry
 sudo /usr/lib/cockpit-image-updates/diun-update.py retag <container> <tag> --expect <fingerprint>   # the tag change itself (rollback: rollback <op-id>)
 sudo /usr/lib/cockpit-image-updates/diun-update.py backups               # dumps, rollback images, history, cleanup preview
 sudo /usr/lib/cockpit-image-updates/diun-update.py cleanup --dry-run     # what the cleanup rules would delete
+/usr/lib/cockpit-image-updates/diun-update.py status --lang en           # the status for the Status Board (also without sudo)
 journalctl -u diun-cleanup.service -n 20                            # last daily cleanup
 sudo /usr/lib/cockpit-image-updates/diun-deps.sh check
 
@@ -637,6 +644,7 @@ Covered by the tests, among other things:
 - cache and registry outage
 - inventory
 - `diun-update.py` with fake Docker: database detection, plan reasons, exit codes, update, rollback, cleanup rules, radar
+- the status for the Status Board: the same rows as the overview (checked against the page), failed updates, the radar's age, English and German, without root
 - the page frame: header, tabs (mouse and keyboard), status labels with icons, buttons, signature
 - contrast of every colour pair in the light and the dark theme
 - the shared design files are identical to the pinned versions (SHA-256)

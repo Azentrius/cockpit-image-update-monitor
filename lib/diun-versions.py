@@ -57,9 +57,12 @@ Usage:
   diun-versions.py                    JSON lines on stdout
   diun-versions.py --table            human-readable table
   diun-versions.py --output FILE      write JSON document atomically
-                                      (used by diun-radar.service, every 6h)
+                                      (used by diun-radar.service, every 6h),
+                                      then status.json next to it (diunstatus:
+                                      the add-on's status for the Status Board)
 
-Read-only towards Docker and the registries; the only write is --output.
+Read-only towards Docker and the registries; the only writes are --output
+and its status.json.
 """
 
 import argparse
@@ -77,6 +80,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from diunlib import (PLAIN_RE, core, local_version, norm, nums_of,  # noqa: E402
                      qualify, reachable, scheme, split_ref, tag_digits)
+import diunstatus  # noqa: E402
 
 DB_RE = re.compile(r"(^|/)(postgres|postgis|pgvector|timescaledb|mariadb|mysql|mongo|"
                    r"redis|valkey|keydb|clickhouse-server|influxdb|couchdb|"
@@ -837,12 +841,19 @@ def main():
     recs.sort(key=lambda r: (ORDER.get(r["status"], 9), r["image"]))
 
     if args.output:
-        write_atomic(args.output, {"generated": iso(now), "images": recs})
+        doc = {"generated": iso(now), "images": recs}
+        write_atomic(args.output, doc)
         errors = sum(1 for r in recs if r["status"] == "error" or r.get("stale"))
         unlisted = sum(1 for r in recs if r["status"] == "unlisted")
         unknown = sum(1 for r in recs for x in (r.get("installed") or {}).values() if not x.get("version"))
         print(f"{len(recs)} images checked, {errors} with registry errors, {unlisted} not in a registry, "
               f"{unknown} without a known version -> {args.output}")
+        # The status for the Status Board; a problem there never fails the run.
+        status = os.path.join(os.path.dirname(os.path.abspath(args.output)), "status.json")
+        try:
+            print(f"status: {diunstatus.refresh(status, versions=doc)['summary']} -> {status}")
+        except Exception as e:
+            print(f"status not written: {e}", file=sys.stderr)
     elif args.table:
         table(recs)
     else:

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.20.0 – 2026-10-19
+
+The add-on tells the Azentrius Status Board how it stands: `diun-update.py status` gives the shared
+status of the Azentrius add-ons, also without administrative access on the host.
+
+**Upgrading:** nothing to do. The status appears with the next radar run; the package starts one after
+the install when the radar is set up.
+
+- **Status for the Status Board.** The new read-only verb `status --lang en|de` answers with the status
+  contract of the Azentrius add-ons (schema 1): updates available, failed updates, an outdated version
+  radar, roll-outs pending and new versions, each with the names of the containers, its state and when
+  it was checked, and a summary in English or German. `plugin/manifest.json` names the command in a
+  new section `azentrius`, where the Status Board finds it.
+- **Without root.** `status` reads `/var/lib/diun-radar/status.json` (0644, with the names of containers,
+  states and times only). The radar run writes it next to `versions.json`, and every update, tag change,
+  rollback and cleanup writes it again, silently. As root `status` also reads the history again; the
+  radar's age is judged when it is asked. Without the file the state is `none`, with the reason.
+- **The overview's rules.** It counts the rows the overview marks “Update available”, “Roll-out pending”
+  and “New version”, and a failed update until a later one of the same image succeeds or it is rolled
+  back. A new test checks with the data of a real host that the page shows the same rows.
+- **Tests.** `test/status_test.py` and `test/status-rows.js`; the install job asks the installed package
+  for its status as root and as `nobody`; the end-to-end test checks the file and the verb after a
+  failed update and after its rollback.
+
 ## 0.19.1 – 2026-10-18
 
 Azentrius moves to azentrius.com; the page and the helpers work as before.

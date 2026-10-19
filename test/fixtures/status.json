@@ -1,0 +1,102 @@
+{
+ "schema": 1,
+ "addon": "image-updates",
+ "label": "Image Update Monitor",
+ "version": "0.20.0",
+ "checked_at": "2026-10-12T02:50:00Z",
+ "state": "info",
+ "summary": "2 updates available, 3 roll-outs pending, 17 new versions",
+ "items": [
+  {
+   "id": "updates",
+   "state": "info",
+   "title": "Updates available",
+   "value": "2",
+   "detail": "ollama, prod-mcp-1",
+   "checked_at": "2026-10-12T02:50:00Z",
+   "stale_after": 86400
+  },
+  {
+   "id": "failed",
+   "state": "ok",
+   "title": "Failed updates",
+   "value": "0",
+   "checked_at": "2026-10-12T02:50:00Z",
+   "stale_after": 86400
+  },
+  {
+   "id": "radar",
+   "state": "ok",
+   "title": "Version radar",
+   "value": "< 1 h",
+   "checked_at": "2026-10-12T02:17:34Z",
+   "stale_after": 86400
+  },
+  {
+   "id": "rollout",
+   "state": "info",
+   "title": "Roll-out pending",
+   "value": "3",
+   "detail": "docuseal-db, glitchtip-postgres, plausible_db",
+   "checked_at": "2026-10-12T02:50:00Z",
+   "stale_after": 86400
+  },
+  {
+   "id": "new-versions",
+   "state": "info",
+   "title": "New versions",
+   "value": "17",
+   "detail": "actual-ai, actual_server, calcom-db, diun-socket-proxy, docuseal +12",
+   "checked_at": "2026-10-12T02:17:34Z",
+   "stale_after": 86400
+  }
+ ],
+ "facts": {
+  "checked_at": "2026-10-12T02:50:00Z",
+  "updates": {
+   "checked_at": "2026-10-12T02:50:00Z",
+   "names": [
+    "ollama",
+    "prod-mcp-1"
+   ]
+  },
+  "failed": {
+   "checked_at": "2026-10-12T02:50:00Z",
+   "ops": []
+  },
+  "radar": {
+   "found": true,
+   "generated": "2026-10-12T02:17:34Z"
+  },
+  "rollout": {
+   "checked_at": "2026-10-12T02:50:00Z",
+   "names": [
+    "docuseal-db",
+    "glitchtip-postgres",
+    "plausible_db"
+   ]
+  },
+  "new-versions": {
+   "checked_at": "2026-10-12T02:17:34Z",
+   "names": [
+    "actual-ai",
+    "actual_server",
+    "calcom-db",
+    "diun-socket-proxy",
+    "docuseal",
+    "formbricks-cube",
+    "formbricks-hub",
+    "formbricks-redis",
+    "glitchtip-redis",
+    "glitchtip-web",
+    "glitchtip-worker",
+    "hbbr",
+    "hbbs",
+    "nextcloud-family-app-1",
+    "nextcloud-family-cron-1",
+    "plausible",
+    "plausible_events_db"
+   ]
+  }
+ }
+}

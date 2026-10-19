@@ -189,7 +189,15 @@ jobs:
             python3 --version
             test -f /usr/share/cockpit/image-updates/manifest.json
             test -f /usr/lib/cockpit-image-updates/diunproc.py
+            test -f /usr/lib/cockpit-image-updates/diunstatus.py
             /usr/lib/cockpit-image-updates/diun-deps.sh check | python3 -c "import json, sys; json.load(sys.stdin)"
+            # The status for the Status Board, as root and without root (nobody): no status.json yet,
+            # so state none with the reason. -B: no __pycache__ left in the package folder.
+            for who in root nobody; do
+              python3 -c "import os, sys; sys.argv[1] == \"root\" or (os.setgroups([]), os.setgid(65534), os.setuid(65534)); os.execv(sys.executable, [sys.executable, \"-B\", \"/usr/lib/cockpit-image-updates/diun-update.py\", \"status\", \"--lang\", \"de\"])" "$who" |
+                python3 -c "import json, sys; d = json.load(sys.stdin); assert (d[\"schema\"], d[\"addon\"], d[\"state\"], d[\"items\"]) == (1, \"image-updates\", \"none\", []), d; print(sys.argv[1] + \": \" + d[\"summary\"])" "$who"
+            done
+            python3 -c "import json; m = json.load(open(\"/usr/share/cockpit/image-updates/manifest.json\")); assert m[\"azentrius\"][\"status\"] == [\"/usr/lib/cockpit-image-updates/diun-update.py\", \"status\"], m"
             # skopeo as the page installs it (apt-get, dnf or zypper, from the distribution)
             mkdir -p /run/lock
             /usr/lib/cockpit-image-updates/diun-deps.sh install skopeo > /tmp/skopeo.log 2>&1 || { cat /tmp/skopeo.log; exit 1; }

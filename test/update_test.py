@@ -2092,6 +2092,7 @@ def stream(cmd):
 U.copy_out = copy
 U.run, U.stream = saved(D.run), saved(stream)
 U.systemctl = lambda *a, timeout=60: subprocess.CompletedProcess(["systemctl", *a], 1, "", "")
+U.refresh_status = lambda: None      # status.json: test/status_test.py
 os.geteuid = lambda: 0
 sys.exit(U.entry(sys.argv[6:]))
 '''

@@ -29,6 +29,7 @@ run() {
 run "python: diunlib + version radar"   python3 radar_test.py
 run "python: inventory"                 python3 inv_test.py
 run "python: update/rollback/cleanup"   python3 update_test.py
+run "python: status for the Status Board" python3 status_test.py
 run "python: time limits, signals"      python3 proc_test.py
 run "python: upgrade base (CI)"        python3 upgrade_base_test.py
 run "shell:  diun-deps.sh check (JSON)" sh -c '../lib/diun-deps.sh check | python3 deps_check_test.py'
@@ -41,6 +42,7 @@ run "plugin: change version"            node version-change.js
 run "plugin: radar now, cleanup, history" node radar-cleanup.js
 run "plugin: version columns"           node version-cols.js
 run "plugin: Diun events per tag"      node diun-events.js
+run "plugin: status counts these rows"  node status-rows.js
 run "plugin: page frame, tabs, labels"  node page-frame.js
 run "design: contrast (light + dark)"   python3 contrast_test.py
 run "design: fonts ship with the add-on" python3 fonts_test.py
