@@ -22,6 +22,23 @@ of its status as the tooltip.
   session in CI checks the same in a real Cockpit after each login, after the radar runs, the roll-out
   and the rollback, and for a user without administrative access.
 
+## 0.20.1 – 2026-10-19
+
+Removing the package now removes the helpers' folder as well, also after the helpers ran as root.
+
+**Upgrading:** nothing to do. A folder `/usr/lib/cockpit-image-updates` that an earlier removal left
+behind holds only `__pycache__`; `sudo rm -r /usr/lib/cockpit-image-updates` removes it.
+
+- **Fix: `/usr/lib/cockpit-image-updates` stayed after `apt remove`, `dnf remove` or `zypper remove`.**
+  The helpers run as root (the page, the radar, the cleanup), and Python writes the compiled
+  `diunlib`, `diunproc` and `diunstatus` to `__pycache__` next to them. No package owns these files,
+  so the package manager left them and the folder in place. The package now removes only that
+  `__pycache__` before it is removed (`packaging/scripts/remove`, also `make uninstall`); data, dumps,
+  rollback images and the Diun stack stay as before.
+- **Tests.** The install job asks for the status as root without `-B`, as a server runs the helpers,
+  checks that `__pycache__` is there and that the folder is gone after the removal; the upgrade test
+  (`test/package-upgrade.sh`) does the same on Debian 13 and Fedora 43 after the upgrade.
+
 ## 0.20.0 – 2026-10-19
 
 The add-on tells the Azentrius Status Board how it stands: `diun-update.py status` gives the shared
