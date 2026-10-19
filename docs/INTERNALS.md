@@ -11,7 +11,7 @@ together.
 | `/usr/share/cockpit/image-updates/` | plugin (package `cockpit-image-updates`) | root, 644 |
 | `/usr/lib/cockpit-image-updates/` | helpers (`*.py`, `*.sh` 755; `diunlib.py`, `diunproc.py`, `diunstatus.py` 644) | root |
 | `/var/lib/diun-radar/versions.json` | result of the version radar | root, 644 (StateDirectory) |
-| `/var/lib/diun-radar/status.json` | the add-on's status for the Status Board (since 0.20.0, see [`status`](#status-diun-updatepy-since-0200)): names of containers, states and times only | root, 644 |
+| `/var/lib/diun-radar/status.json` | the add-on's status for the Status Board (since 0.20.0, see [`status`](#status-diun-updatepy-since-0200)) and for the icon in Cockpit's menu (since 0.21.0, see [Status in Cockpit's menu](#status-in-cockpits-menu-since-0210)): names of containers, states and times only | root, 644 |
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
 | `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log`, `compose/<project>/<stamp>/<n>_<file>` (the compose / `.env` files a tag change wrote, byte-exact as they were) | root, 700 / 600 |
@@ -466,6 +466,8 @@ written, with its `facts`):
   unreadable file is `none` as well. Exit 0 then too, and for `danger`; 64 for a wrong call.
 - Every text exists in English and in German (with “Sie”); the tests check that the English ones carry
   no German.
+- **Also in Cockpit's menu** (since 0.21.0): the page shows the same state and summary as the status
+  icon of its menu entry, from this file, see [Status in Cockpit's menu](#status-in-cockpits-menu-since-0210).
 
 ### Cleanup rules (`/etc/image-updates.conf`)
 
@@ -637,17 +639,21 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   `test/fonts_test.py` checks that every font the page uses ships with it.
 - **Frame:** header (`az-page-header`, the only `az-btn--primary` is Refresh), tabs (`az-tabs`,
   WAI-ARIA keyboard), `#dm-status` and `#dm-deps` under the tabs, the panels, the signature (version,
-  host from `/etc/hostname`). Both tabs are loaded together with every load; switching loads nothing.
+  host from `/etc/hostname`, both written when the page starts). Both tabs are loaded together with
+  every load; switching loads nothing.
 - **Status labels:** update / roll-out pending / new version `az-label--info` + `info-circle`, up to
   date `az-label--success` + `check-circle`, unknown `az-label` + `ban`. History results: successful
   success, failed danger, aborted warning, no change and rolled back neutral.
 - **Version:** `const VERSION` in `diun.js`; `index.html` loads `diun.js` and `diun.css` with
   `?v=<version>`. `tools/check-version.sh` keeps them and `CHANGELOG.md` in step.
 - **Manifest:** besides the menu entry, `azentrius.status` names the status command for the Status
-  Board (see [`status`](#status-diun-updatepy-since-0200)); Cockpit ignores the section.
+  Board (see [`status`](#status-diun-updatepy-since-0200)); Cockpit ignores the section. `"preload":
+  ["index"]` (since 0.21.0) loads the page hidden after the login, for the status icon in the menu
+  (see [Status in Cockpit's menu](#status-in-cockpits-menu-since-0210)).
 - **Language:** `../base1/po.js` sets `cockpit.language`. `de*` → German, otherwise English.
   - Texts live in `I18N.en` / `I18N.de` in `i18n.js` (since 0.19.0; `window.ImageUpdatesI18n`, loaded
-    before `diun.js`, which keeps only the code). Static texts in the HTML carry `data-i18n`.
+    before `menu-status.js` and `diun.js`, which keep only the code). Static texts in the HTML carry
+    `data-i18n`.
   - The menu entry is the product name, Image Update Monitor, and is not translated (`po.manifest.de.js` stays empty).
 - **Loading:** `safeLoad()` never loads twice; a request during a load is repeated once afterwards.
   - `cockpit.file().watch()` triggers a reload only on a **changed** tag.
@@ -724,6 +730,45 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   `diun-deps.sh check` (`install cleanup` to set it up), “Clean up now” runs `cleanup` through the
   dialog.
 
+### Status in Cockpit's menu (since 0.21.0)
+
+The menu entry “Image Update Monitor” carries the add-on's state as Cockpit's own status icon, for the
+host whose menu is shown: `danger` as `error` (red), `warning` as `warning` (yellow), `info` as `info`
+(blue); `ok` and `none` show none. The tooltip is the summary of
+[`status`](#status-diun-updatepy-since-0200) in the session language (“2 updates available, 3
+roll-outs pending, 17 new versions”).
+
+- **How Cockpit does it** (read in its code, tags 264, 316 and 360): a page sends
+  `cockpit.transport.control("notify", {page_status: {type, title}})`. The shell files it under the
+  host and page of the frame that sent it (from the frame's name `cockpit1:<host>/<page>`,
+  `register()` in `pkg/shell/base_index.js` up to 316, `pkg/shell/router.jsx` in 360), keeps it in
+  `sessionStorage["cockpit:page_status"]` and draws the icon at the menu entry whose path is that page:
+  `image-updates` for `menu.index`. `"preload": ["index"]` in `manifest.json` makes the shell load the
+  page right after the login, hidden, as Cockpit's own Software updates page does.
+- **Why the page itself:** a small preloaded component of its own (`"preload": ["status"]`,
+  `status.html`) would run as the page `image-updates/status`, and no menu entry reads that status.
+  Only the page behind the entry can set it. So `index.html` loads, but until the page is shown only
+  `menu-status.js` works.
+- **`menu-status.js`** watches `/var/lib/diun-radar/status.json` (`cockpit.file`, `superuser: "try"`;
+  the file is 644, so it works without administrative access too) and reads nothing else. It judges
+  the state as `status` does, from the file's `facts`: the items' counts, and the radar outdated after
+  24 hours as of now, checked again the moment it turns 24 hours old. Two differences: the radar's
+  time comes from `facts.radar` (the radar run writes it together with `versions.json`), not from
+  `versions.json`, and `failed` is not read again from the history (only root could). A missing or
+  unreadable file shows no icon. A status is sent only when it changed, the first one always. The
+  texts are the `menu.*` keys in `i18n.js`, worded as the summary in `diunstatus.py`;
+  `test/menu-status.js` compares both for the same facts.
+- **When the page starts:** `diun.js` (inventory, the watches of the Diun log and the radar file, the
+  helpers, the signature) waits for `ImageUpdatesMenuStatus.shown`, the first time `cockpit.hidden` is
+  false. That flag holds only once the shell's hint has arrived: Cockpit 264 to 316 sends a frame that
+  is not the current one `{hidden: true}` right after the reply to its `init` and the current one
+  nothing; 360 sends every frame `{hidden}` then. Messages from the shell arrive in order, so when the
+  first answer about `status.json` is back, a hint that was sent has arrived. Without any answer the
+  page decides after 3 seconds. Opened without the shell, it starts once the answer is back.
+- **Several hosts** (Cockpit's host switcher): the shell preloads the page on every connected host that
+  has the add-on, and each sets the icon in that host's menu. That runs the page's code from that host
+  once it is connected, as Cockpit's own preloaded Software updates page does.
+
 ## Tests
 
 | File | Checks |
@@ -732,6 +777,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
 | `test/status_test.py` | `diunstatus.py` and `diun-update.py status`: the page's rules for the rows (Diun's event of the tag, `docker.io/library/`, another tag, a digest reference, dismissed, the same build in Docker's and Diun's time, a date before 1980, the newest event, roll-out first, CI jobs, no digest, a newer patch, a database major, `by_tag`, an empty comparison, a line tag refined by the radar, the base of an image built here), failed updates from the history (rolled back, a failed rollback also as written up to 0.18.0, aborted, still running, the newest per image, `discarded`), the radar's age, state and summary in English and German with plurals, the contract's shape, no German in English, the fixture `status.json` of real host data, `status` without the file, with an unreadable one, from the file in German, the radar's age judged when asked, the history as root and the file without root, Docker not answering (the last file stays), `events.jsonl` as a link or a pipe and a large one, the arguments (exit 64, no root needed), the write after `rollback` and `cleanup` (silent) and none after `--dry-run`, a wrong call or without root, the radar run writing it and not failing for it |
 | `test/status-rows.js` | the page with the fixtures of a real host marks exactly the containers “Update available”, “Roll-out pending” and “New version” that `test/fixtures/status.json` names |
+| `test/menu-status.js` | the status icon in Cockpit's menu with `i18n.js`, `menu-status.js` and `diun.js`: preloaded and hidden, the icon from `status.json` (`superuser: "try"`) and nothing else read or run, shown, the page loads (once); opened directly; German; a changed file, the same again (not sent), a missing and an unreadable file; the radar turning outdated while the session stays open (the check at 24 hours); no answer at all (the page starts after 3 seconds); state and tooltip equal state and summary of `diunstatus.document()` for the same facts, in English and German (the fixture, failed updates with an outdated radar, singular forms, nothing to do, no Diun and no radar, an unreadable radar time, a time with an offset, odd values) |
 | `test/proc_test.py` | `diunproc` with real child processes: a silent hang, endless output, children that ignore SIGTERM (the group killed), a dump that hangs, the next command after a timeout; signals: no handler changed on import, `on_signals` restores the handlers before it, `held` defers a signal; a helper that holds a lock gets SIGTERM or SIGHUP while its command runs (silent and printing, `stream` and `copy`) and keeps the lock until the stop has reached the command (synchronised through FIFOs), children that ignore SIGTERM with SIGTERM and SIGHUP again during the cleanup (SIGKILL after the grace time, repeats only counted), the next operation afterwards, SIGKILL (the command runs on and keeps the lock until it ends) |
 | `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes), signals (SIGTERM during the dump: exit 5, partial dump and everything else taken back; SIGHUP during the pull: exit 5; SIGTERM during `compose up`: exit 4 with history, output, rollback and the cause `signal`; SIGHUP during a rollback's restart: failed, offered again; a signal before the rollback changed a container: exit 5; the same with the real helper (`entry`), a real dump process and a real `compose up` process: state before the signal, the command gone, the lock free afterwards, the rollback), time limits (a pull or dump over its limit stops before any change, `compose up` over its limit fails with its rollback, the limits from the settings file and their ranges) |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
@@ -752,7 +798,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 | `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres), `imgupd-test-my` (MariaDB, MySQL) and `imgupd-test-reg` (pulls against a local registry: nothing newer, registry down without and with a newer image here); since 0.19.0 every dump is restored into a fresh Postgres, MariaDB and MySQL container and compared object by object with the original (half a dump must be caught), the update lock is held by a separate process instead of a race, and CI runs it (job `e2e`, and before every release); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again); since 0.18.1 a rollback refused while the compose file names another image; since 0.20.0 `status.json` after the failed update (644, without the project folder), `status` as root and without root (`nobody`, German) with the failure, and without it after the rollback; at the end `status.json` is written again without the test project. `E2E_LIB=<folder>` runs helpers that are not installed yet. |
 | `test/upgrade_base_test.py` | `tools/upgrade-base.py`, the release the CI upgrade test starts from: a build newer than the newest release, a build of a version released already (the release before it), no older release with packages (exit 3), Semantic Versioning precedence instead of text order, drafts, pre-releases and releases without packages left out |
 | `test/package-upgrade.sh` | CI (job `upgrade`), in a throw-away Debian 13 or Fedora 43 container: the release from `tools/upgrade-base.sh` (checked against `SHA256SUMS` and its build provenance), data a server has, this build over it; the version went up by the package manager's own comparison, the package database names this build, the files on disk are this build's byte for byte (`dpkg --verify` and `diff` against the `.deb`, `rpm -V` and the digests of the `.rpm`), the data unchanged, removed again with the data kept. Without an older release it says so and checks a fresh install |
-| `test/cockpit-setup.sh`, `test/cockpit-session.py` | CI (job `cockpit`), a real Cockpit with systemd and Docker on a throw-away GitHub runner, Playwright with Chromium through Cockpit's login: this build installed with apt over the release before, the page reloaded and logged in again after the upgrade (the new version, `i18n.js` of this build); the page in Cockpit's menu; no JavaScript error and no failed request of the add-on's files or frame, and no other kind of error than Cockpit shows on its own (a login before the add-on is installed is the baseline; on Ubuntu 24.04 Cockpit 314 answers `*/po.js` and `*/po.manifest.js` with 404 on every page; the page's own request for Red Hat Mono, which that Cockpit does not ship, was caught this way; the page of the release before is checked only for loading, its errors are listed apart in the report); with administrative access (a sudo user) and without (a user without sudo, German browser: the hint, no actions); skopeo and the radar set up from the page (timer on, a first run), “Run radar now” (a new run); a throw-away compose project (a local registry, busybox 1.36.1 running, 1.37.0 pulled under the same tag): “Roll out image” with its plan, live output and result, the container on the new image, then the rollback from the history. Versions, steps and results in the job summary and the artifact `cockpit-session` (with screenshots) |
+| `test/cockpit-setup.sh`, `test/cockpit-session.py` | CI (job `cockpit`), a real Cockpit with systemd and Docker on a throw-away GitHub runner, Playwright with Chromium through Cockpit's login: this build installed with apt over the release before, the page reloaded and logged in again after the upgrade (the new version, `i18n.js` of this build); the page in Cockpit's menu; since 0.21.0 right after each login the page loaded hidden for the menu and not started, and the menu's status icon (the shell's `sessionStorage` and the icon) as `diun-update.py status` gives it, after the login, after the radar runs, the roll-out and the rollback, and in German for the user without sudo before the page is opened; no JavaScript error and no failed request of the add-on's files or frame, and no other kind of error than Cockpit shows on its own (a login before the add-on is installed is the baseline; on Ubuntu 24.04 Cockpit 314 answers `*/po.js` and `*/po.manifest.js` with 404 on every page; the page's own request for Red Hat Mono, which that Cockpit does not ship, was caught this way; the page of the release before is checked only for loading, its errors are listed apart in the report); with administrative access (a sudo user) and without (a user without sudo, German browser: the hint, no actions); skopeo and the radar set up from the page (timer on, a first run), “Run radar now” (a new run); a throw-away compose project (a local registry, busybox 1.36.1 running, 1.37.0 pulled under the same tag): “Roll out image” with its plan, live output and result, the container on the new image, then the rollback from the history. Versions, steps and results in the job summary and the artifact `cockpit-session` (with screenshots) |
 
 The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds
 `inventory3.jsonl` and `versions2.json` from `inventory2.jsonl`.

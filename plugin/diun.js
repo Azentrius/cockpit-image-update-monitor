@@ -40,7 +40,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.20.1";
+    const VERSION = "0.21.0";
     const LIB = "/usr/lib/cockpit-image-updates/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -1738,7 +1738,6 @@
     $("dm-cleanup-btn").addEventListener("click", startCleanup);
     tabButtons().forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab, false)));
     document.querySelector(".az-tabs").addEventListener("keydown", onTabKey);
-    renderSignature();
     $("dm-dialog-confirm").addEventListener("click", () => {
         if (!dlg.running && dlg.onConfirm) dlg.onConfirm();
     });
@@ -1747,9 +1746,19 @@
     });
     $("dm-dialog-cancel").addEventListener("click", () => dlg.close());
     $("dm-dialog").addEventListener("cancel", (e) => { if (dlg.running) e.preventDefault(); });
-    reloadOnChange(eventsFile);
-    reloadOnChange(versionsFile);   // new radar run -> table updates itself
-    safeLoad();
+
+    // Cockpit loads this page hidden right after the login, for the status
+    // icon in its menu (menu-status.js). Everything that runs or reads on the
+    // server starts only once the page is shown.
+    function start() {
+        renderSignature();
+        reloadOnChange(eventsFile);
+        reloadOnChange(versionsFile);   // new radar run -> table updates itself
+        safeLoad();
+    }
+    const menu = window.ImageUpdatesMenuStatus;
+    if (menu) menu.shown.then(start);
+    else start();
 
     cockpit.transport.wait(function () {});
 })();

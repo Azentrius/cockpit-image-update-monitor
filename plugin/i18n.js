@@ -2,8 +2,10 @@
 /* Image Update Monitor, a Cockpit add-on: the texts of the page in English
  * (I18N.en) and German (I18N.de, addressing the user with "Sie"). Every key
  * exists in both; the tests check that the English page contains no German.
- * diun.js reads them from window.ImageUpdatesI18n; index.html loads this file
- * first. Placeholders in braces ({name}) are filled in by diun.js. */
+ * diun.js reads them from window.ImageUpdatesI18n, menu-status.js the menu.*
+ * keys (the tooltip of the status icon in Cockpit's menu, worded as the
+ * summary of `diun-update.py status`); index.html loads this file first.
+ * Placeholders in braces ({name}) are filled in by the scripts. */
 window.ImageUpdatesI18n = {
     en: {
         "tab.updates": "Updates",
@@ -349,6 +351,11 @@ window.ImageUpdatesI18n = {
         "dialog.error": "The helper did not answer as expected. Check that the package cockpit-image-update-monitor is installed completely, then try again. Details: {msg}",
         "dialog.noAdmin": "Denied: this needs administrative access. Switch it on at the top of Cockpit.",
         "sig.source": "Source code",
+        "menu.failed": { one: "{n} failed update", other: "{n} failed updates" },
+        "menu.radar": "version radar outdated",
+        "menu.updates": { one: "{n} update available", other: "{n} updates available" },
+        "menu.rollout": { one: "{n} roll-out pending", other: "{n} roll-outs pending" },
+        "menu.newVersions": { one: "{n} new version", other: "{n} new versions" },
     },
     de: {
         "tab.updates": "Updates",
@@ -694,5 +701,10 @@ window.ImageUpdatesI18n = {
         "dialog.error": "Der Helfer hat nicht wie erwartet geantwortet. Prüfen Sie, ob das Paket cockpit-image-update-monitor vollständig installiert ist, und versuchen Sie es erneut. Details: {msg}",
         "dialog.noAdmin": "Abgelehnt: Dafür braucht diese Sitzung administrativen Zugriff. Schalten Sie ihn oben in Cockpit ein.",
         "sig.source": "Quellcode",
+        "menu.failed": { one: "{n} fehlgeschlagenes Update", other: "{n} fehlgeschlagene Updates" },
+        "menu.radar": "Versions-Radar veraltet",
+        "menu.updates": { one: "{n} Update verfügbar", other: "{n} Updates verfügbar" },
+        "menu.rollout": { one: "{n} Container auszurollen", other: "{n} Container auszurollen" },
+        "menu.newVersions": { one: "{n} neue Version", other: "{n} neue Versionen" },
     },
 };

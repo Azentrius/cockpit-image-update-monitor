@@ -16,7 +16,7 @@ if ! printf '%s\n' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; 
     echo "VERSION \"$v\" is not a version like 0.6.1" >&2
     exit 1
 fi
-for f in azentrius-theme.js azentrius.css icons.js i18n.js diun.js diun.css; do
+for f in azentrius-theme.js azentrius.css icons.js i18n.js menu-status.js diun.js diun.css; do
     if ! grep -q "\"$f?v=$v\"" plugin/index.html; then
         echo "plugin/index.html does not load $f?v=$v" >&2
         exit 1
