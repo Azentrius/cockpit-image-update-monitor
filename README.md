@@ -42,6 +42,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
 | **Status Board** | `diun-update.py status --lang en\|de` gives the shared status of the Azentrius add-ons, which the Status Board on a Cockpit bastion shows as a tile per host: updates available, failed updates, an outdated radar, roll-outs pending and new versions, the same rows the overview marks. It works without administrative access on the host: the radar run and every update, rollback and cleanup write it to `/var/lib/diun-radar/status.json`, readable by all, with the names of containers only. |
+| **Status in the menu** | Cockpit's menu shows the same state next to “Image Update Monitor”, with Cockpit's own icons (blue: something to do, yellow: the radar is outdated, red: an update failed) and the summary as the tooltip, e.g. “2 updates available, 3 roll-outs pending”. Nothing to do, no icon. For this Cockpit loads the page hidden after the login; until you open it, it only reads `status.json` and runs no helper. |
 | **Use** | The shared Azentrius page frame (header, tabs, signature), light or dark following Cockpit's style, English and German following Cockpit's language (fallback English), loading indicator, rows as blocks on phones, no external resources (strict Cockpit CSP). |
 
 | Update dialog | Result with live output |
@@ -379,6 +380,7 @@ flowchart LR
     P -->|"cockpit.spawn as root"| DEP
     P -->|"cockpit.file read"| VJ
     P -->|"cockpit.file read"| EV
+    P -->|"cockpit.file watch, menu icon"| ST
     INV --> DK
     UPD --> DK
     UPD --> BK
@@ -421,6 +423,7 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
   - The cleanup rules come from `/etc/image-updates.conf` only if it belongs to root and nobody else can write it.
 - **Cockpit rights.** Reading runs with `superuser: "try"`, actions with `superuser: "require"`. Without administrative access in Cockpit there is a clear message instead of an error.
 - **Status without root.** `status` only reads files and is the one verb that runs without root. What it reads, `/var/lib/diun-radar/status.json` (0644, written by root), holds the names of containers, states and times; no compose paths, projects, addresses or user names.
+- **After the login.** Cockpit loads the page hidden as soon as you log in, so that its menu entry can show the status (`preload`, as for Cockpit's own Software updates page). Until the page is opened it reads only `status.json` (`superuser: "try"`) and runs no helper; the inventory, the Diun log and the radar file load when you open it.
 - **Diun without the Docker socket.** Only the `docker-socket-proxy` sees `/var/run/docker.sock` (read-only). It exposes a filtered, read-only API (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) and publishes no port.
 - **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords are read only inside the database container from its environment, never stored or logged.
 - **No network from the browser.** No CDNs and no external fonts (the fonts ship with the add-on); Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries.
@@ -582,6 +585,7 @@ tail -n 5 /var/lib/diun/events.jsonl
 | Update failed, box “Most likely cause” | The line comes from the container's log (or its health check). Roll back, fix the cause (e.g. a setting a new major version needs), then update again. |
 | Update stops with “dump … failed” | Nothing was changed. Check the database logs; if need be, untick “Create database dump first” (a deliberate decision). |
 | Rollback image cannot be deleted | A container still uses the image; first update all containers on the old build. |
+| Icon next to “Image Update Monitor” in Cockpit's menu | The add-on's state, as `diun-update.py status --lang en` gives it; the tooltip says what. It follows `status.json`, which the radar run and every update, rollback and cleanup write; no icon while nothing needs doing or before the radar's first run. |
 
 **Exit codes of the helpers:**
 
@@ -602,7 +606,7 @@ tail -n 5 /var/lib/diun/events.jsonl
 ## Development
 
 ```
-plugin/            Cockpit package (manifest, index.html, diun.js, i18n.js, diun.css, menu translation) and
+plugin/            Cockpit package (manifest, index.html, diun.js, i18n.js, menu-status.js, diun.css, menu translation) and
                    the shared design files (azentrius.css, azentrius-theme.js, icons.js, fonts)
 lib/               root helpers (Python 3 / POSIX sh), installed to /usr/lib/cockpit-image-updates
 systemd/           units (radar, cleanup), installed to /usr/lib/systemd/system
@@ -645,6 +649,7 @@ Covered by the tests, among other things:
 - inventory
 - `diun-update.py` with fake Docker: database detection, plan reasons, exit codes, update, rollback, cleanup rules, radar
 - the status for the Status Board: the same rows as the overview (checked against the page), failed updates, the radar's age, English and German, without root
+- the status icon in Cockpit's menu: state and tooltip as `status` gives them (checked against the helper), nothing started while the page is hidden; in CI also in a real Cockpit session
 - the page frame: header, tabs (mouse and keyboard), status labels with icons, buttons, signature
 - contrast of every colour pair in the light and the dark theme
 - the shared design files are identical to the pinned versions (SHA-256)

@@ -50,6 +50,9 @@
 
     window.cockpit = {
         language: "en",
+        hidden: false,
+        addEventListener() {},
+        removeEventListener() {},
         locale(po) {
             if (po && po[""] && po[""].language) this.language = po[""].language;
         },
@@ -84,6 +87,6 @@
             }
             return fakeProcess("", FX.log);    // update / rollback / install: live log
         },
-        transport: { wait() {} },
+        transport: { wait() {}, control() {} },
     };
 })();

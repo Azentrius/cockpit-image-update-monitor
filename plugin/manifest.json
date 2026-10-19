@@ -14,6 +14,7 @@
             ]
         }
     },
+    "preload": ["index"],
     "azentrius": {
         "status": ["/usr/lib/cockpit-image-updates/diun-update.py", "status"]
     }

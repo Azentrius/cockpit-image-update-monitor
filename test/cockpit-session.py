@@ -10,18 +10,21 @@ containers). Playwright drives Chromium through Cockpit's own login and shell:
      opened as an administrator: its version;
   2. this build installed over it with apt, the page reloaded in the same
      session, then a new login: the new version and its texts (i18n.js);
-  3. the page found in Cockpit's menu and loaded; at the end, no JavaScript
-     error and no failed request of the add-on's files or frame in any
-     session with this build, and no error of another kind than the
-     baseline's (the release before is reported apart: its errors are its
-     own, this build may have fixed them);
+  3. the page loaded hidden after the login ("preload"), only its status icon
+     in the menu set, nothing else started; then found in Cockpit's menu and
+     loaded; at the end, no JavaScript error and no failed request of the
+     add-on's files or frame in any session with this build, and no error of
+     another kind than the baseline's (the release before is reported apart:
+     its errors are its own, this build may have fixed them);
   4. requirements from the page: skopeo installed, the radar set up
      (diun-radar.timer on, a first run), then "Run radar now" (a new run);
+     the menu's status icon as `diun-update.py status` says;
   5. the compose project of test/cockpit-setup.sh: "Roll out image", its
      plan, the live output, the result, the container on the new image; then
      the rollback from the history, the container on the old image again;
-  6. a user without administrative access (German browser): the hint, no
-     actions.
+     after each, the menu's status icon again;
+  6. a user without administrative access (German browser): the status icon
+     in German before the page is opened, then the hint, no actions.
 
 Environment: ADMIN_USER, ADMIN_PW (sudo group), PLAIN_USER, PLAIN_PW, NEW_DEB
 (this build), NEW_VERSION, OLD_DEB and OLD_VERSION (empty without an older
@@ -191,6 +194,43 @@ def close_dialog(page, frame):
     poll(page, lambda: not frame.locator("#dm-dialog").evaluate("d => d.hasAttribute('open')"), 30)
 
 
+MENU_TYPES = {"danger": "error", "warning": "warning", "info": "info"}   # Cockpit's page status types
+
+
+def shown_status(page):
+    """The status the page sent the shell for its menu entry (the shell keeps
+    every page's in the session storage); "unset" before the first."""
+    stored = json.loads(page.evaluate("() => sessionStorage.getItem('cockpit:page_status')") or "{}")
+    return stored.get("localhost", {}).get("image-updates", "unset")
+
+
+def check_menu(page, lang, what):
+    """The icon and its tooltip as `diun-update.py status` says: its state
+    (ok and none: no icon) and its summary."""
+    doc = json.loads(root("/usr/lib/cockpit-image-updates/diun-update.py", "status", "--lang", lang))
+    want = {"type": MENU_TYPES[doc["state"]], "title": doc["summary"]} if doc["state"] in MENU_TYPES else None
+    icon = page.locator('a[href$="/image-updates"] .nav-item-status')
+    poll(page, lambda: shown_status(page) == want and icon.count() == (1 if want else 0), 30)
+    got = shown_status(page)
+    return note(f"{what}: the status icon in the menu as `status --lang {lang}` says",
+                got == want and icon.count() == (1 if want else 0),
+                f"state {doc['state']}, sent {json.dumps(got, ensure_ascii=False)}, icons {icon.count()}")
+
+
+def check_preloaded(page, lang, what):
+    """Right after the login, on another page: the add-on's page loaded hidden,
+    its menu status sent, and nothing else of it started (diun.js writes the
+    version into the signature when it starts)."""
+    page.wait_for_selector(FRAME, state="attached")
+    poll(page, lambda: shown_status(page) != "unset", 60)
+    page.wait_for_timeout(2000)
+    sig = (page.frame_locator(FRAME).locator("#dm-sig-version").text_content() or "").strip()
+    note(f"{what}: the page loaded hidden for the menu, not started",
+         not page.locator(FRAME).is_visible() and shown_status(page) != "unset" and sig == "Image Update Monitor",
+         f"route {page.url.split('9090', 1)[-1]}, signature '{sig}'")
+    check_menu(page, lang, what)
+
+
 def radar_generated():
     try:
         return json.loads(root("cat", "/var/lib/diun-radar/versions.json")).get("generated")
@@ -263,6 +303,7 @@ def main():
 
         ctx, page = login(browser, E["ADMIN_USER"], E["ADMIN_PW"])
         note("new login: administrative access", admin_access(page, E["ADMIN_PW"]))
+        check_preloaded(page, "en", "new login")
         frame, label = open_page(page)
         note("new login: the page in the menu and loaded, this build's version",
              label == "Image Update Monitor" and version_of(frame) == E["NEW_VERSION"],
@@ -311,6 +352,7 @@ def main():
         runs = root("journalctl", "-u", "diun-radar.service", "-o", "cat", "--no-pager", check=False)
         note("journal: the radar runs finished", runs.count("Finished") >= 2 or runs.count("Deactivated successfully") >= 2,
              f"{runs.count('Finished')} finished")
+        check_menu(page, "en", "after the radar runs")
         shot(page, "radar")
 
         # 5. Roll out the pulled image, then roll it back from the history.
@@ -323,6 +365,7 @@ def main():
              f"{title} -> {text}; live output {live}; image {now[:19]}")
         shot(page, "rolled-out")
         close_dialog(page, frame)
+        check_menu(page, "en", "after the roll-out")
         frame.locator("#dm-tab-btn-backups").click()
         op_row = frame.locator("#dm-ops tr", has_text=APP).first
         op_row.wait_for()
@@ -332,10 +375,13 @@ def main():
              ok and text == "Rollback successful." and now == E["OLD_ID"], f"{title} -> {text}; image {now[:19]}")
         shot(page, "rolled-back")
         close_dialog(page, frame)
+        check_menu(page, "en", "after the rollback")
         ctx.close()
 
         # 6. Without administrative access (a user without sudo, German browser).
         ctx, page = login(browser, E["PLAIN_USER"], E["PLAIN_PW"], locale="de-DE")
+        check_preloaded(page, "de", "without administrative access, German")
+        shot(page, "menu-status")
         frame, label = open_page(page)
         poll(page, lambda: (frame.locator("#dm-deps-intro").text_content() or "").strip() in NEED_ADMIN, 60)
         hint = (frame.locator("#dm-deps-intro").text_content() or "").strip()

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.21.0 – 2026-10-19
+
+Cockpit's menu shows how the add-on stands: an icon next to “Image Update Monitor” with the summary
+of its status as the tooltip.
+
+**Upgrading:** nothing to do. The icon appears after the next login, once the radar has run.
+
+- **Status icon in the menu.** The same state as for the Status Board, with Cockpit's own icons: red
+  for a failed update, yellow for an outdated version radar, blue for updates available, roll-outs
+  pending or new versions; no icon when nothing needs doing. The tooltip is the summary in English or
+  German (“2 updates available, 3 roll-outs pending”). It follows `/var/lib/diun-radar/status.json`, so
+  it changes with every radar run, update, rollback and cleanup, and turns yellow when the radar has
+  not run for 24 hours. It works without administrative access.
+- **Loaded hidden after the login.** A page can set only its own menu entry's icon, so the manifest
+  asks Cockpit to load the page right after the login (`preload`, as Cockpit's own Software updates
+  page does). Until it is opened, the page reads only `status.json` and runs no helper; the new
+  `menu-status.js` sets the icon, and `diun.js` starts when the page is shown.
+- **Tests.** `test/menu-status.js` checks the icon, the tooltip in both languages against the
+  summary of `diun-update.py status`, and that nothing starts while the page is hidden; the Cockpit
+  session in CI checks the same in a real Cockpit after each login, after the radar runs, the roll-out
+  and the rollback, and for a user without administrative access.
+
 ## 0.20.0 – 2026-10-19
 
 The add-on tells the Azentrius Status Board how it stands: `diun-update.py status` gives the shared
