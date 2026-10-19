@@ -681,6 +681,13 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   the running image's digest is `tag_now.digest`, it carries `check-circle` and the status is “up to
   date” (`sameBuild`): the container runs what the tag points to, and that is newer than every
   release. Otherwise the text is muted and the status stays unknown.
+- **Newest build (no release tag at all):** with `tag_now` without `version`, no `after` and no
+  `newest` (the registry has no plain version tag, e.g. an own image on ghcr.io built from its main
+  branch), the newest column says “newest build from <date>” (the image's `created`; without the date
+  for a fixed date before 1980) with `check-circle` and the status is “up to date” (`sameBuild`) when
+  the running image's digest is `tag_now.digest`; otherwise “other build”, muted,
+  and the status stays unknown. With release tags in the registry outside Docker Hub nothing tells
+  whether the build is newer than the newest release, so the column keeps “newest: X”.
 - **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`), by the
   same rule as `target_version`: not when the installed version is known but not among the tags.
 - **Development builds:** without an installed version, a row whose image names a `revision` shows
@@ -787,7 +794,7 @@ roll-outs pending, 17 new versions”).
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, no update for the same build under a new digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English; the states while the dry-run and the run work are checked at fixed points (the stub's answers wait for a gate) |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
-| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the revision of a development build, the bases of an image built here, a line tag refined by the radar, and kept with its patch when the registry failed |
+| `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the newest build of a registry without release tags, the revision of a development build, the bases of an image built here, a line tag refined by the radar, and kept with its patch when the registry failed |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |
 | `test/fonts_test.py` | every font family the stylesheets name (custom properties resolved, in the order `index.html` loads them) that has an `@font-face` has its file in `plugin/`: no request for a font outside the add-on; Red Hat Mono is the code font, from `RedHatMono.woff2`; counter-check that a font from Cockpit's files and a missing file are caught |
 | `test/contrast_test.py` | WCAG contrast of every colour pair the page uses, light and dark (text 4.5:1, borders and icons 3:1) |

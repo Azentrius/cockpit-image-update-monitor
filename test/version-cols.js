@@ -260,6 +260,51 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     // (ICU versions abbreviate September as "Sep" or "Sept")
     assert(/^latest points to no release tag but to a build Docker Hub got on 13 Oct 2026, after the newest release 5\.1\.0 \(21 Sept? 2026\)\./.test(tip), tip);
 
+    // A registry without any release tag and without push dates (an own image
+    // on ghcr.io built from main, Sharewerk 2026-10-19): the container runs the
+    // build latest points to, so it is up to date, not unknown, with the date
+    // the image was built (smtp-relay: 2026-10-01; the page's own time zone).
+    const builtDe = new Date("2026-10-01T00:00:00Z").toLocaleDateString("de-DE", { dateStyle: "medium" });
+    const builtEn = new Date("2026-10-01T00:00:00Z").toLocaleDateString("en-GB", { dateStyle: "medium" });
+    const keep = { newest: pf.newest, tag_now: JSON.parse(JSON.stringify(pf.tag_now)) };
+    delete pf.newest;
+    delete pf.tag_now.after;
+    delete pf.tag_now.pushed;
+    const g = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    c = cells(row(g, "smtp-relay"));
+    console.log("smtp-relay, no release tag at all:", c.slice(2, 6).map((x) => x.textContent.trim()).join(" | "));
+    assert.deepStrictEqual(c.slice(2, 6).map((x) => x.textContent.trim()), ["latest", "?", "neuester Build vom " + builtDe, "Aktuell"]);
+    assert.strictEqual(iconOf(c[4]), "check-circle");
+    tip = c[4].querySelector(".dm-uptodate").title;
+    assert.strictEqual(tip, "Die Registry hat für dieses Image keinen Release-Tag; latest zeigt auf einen Build ohne Versionsnummer." +
+                            "\nDer Container läuft auf diesem Build: Mit diesem Tag gibt es nichts Neueres.");
+    const ge = boot("en", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    assert.deepStrictEqual(cells(row(ge, "smtp-relay")).slice(4, 6).map((x) => x.textContent.trim()), ["newest build from " + builtEn, "Up to date"]);
+    // a reproducible build (created 1970) shows no date
+    const inv1970 = inventory.split("\n").map((l) => l.includes('"name": "smtp-relay"')
+        ? l.replace('"created": "2026-10-01T00:00:00Z"', '"created": "1970-01-01T00:00:00Z"') : l).join("\n");
+    assert.notStrictEqual(inv1970, inventory);
+    const g70 = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev }, inv1970);
+    await flush();
+    assert.deepStrictEqual(cells(row(g70, "smtp-relay")).slice(4, 6).map((x) => x.textContent.trim()), ["neuester Build", "Aktuell"]);
+    // latest moved on: another build, muted, and the status stays unknown
+    pf.tag_now.digest = "sha256:" + "9".repeat(64);
+    const go = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    c = cells(row(go, "smtp-relay"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["anderer Build", "Unbekannt"]);
+    assert(c[4].querySelector(".dm-muted").title.endsWith("\nDer Container läuft auf einem anderen Build von latest."));
+    // with release tags in the registry nothing tells whether latest is newer: "neueste: X", unknown
+    pf.tag_now.digest = keep.tag_now.digest;
+    pf.newest = "5.1.0";
+    const gr = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    assert.deepStrictEqual(cells(row(gr, "smtp-relay")).slice(4, 6).map((x) => x.textContent.trim()), ["neueste: 5.1.0", "Unbekannt"]);
+    pf.newest = keep.newest;
+    pf.tag_now = keep.tag_now;
+
     // An image built on the server (a test host, 2026-10-18: caddy-caddy is
     // xcaddy on caddy:2-builder, copied onto caddy:2): no registry shows it,
     // the radar checks the bases of its Dockerfile instead.
