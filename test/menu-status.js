@@ -18,8 +18,7 @@ const { JSDOM } = require("jsdom");
 
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
-const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8")
-    .replace(/<script[^>]*><\/script>/g, "");
+const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
 // The page as index.html loads it: the texts, the menu's status, the code.
 const js = ["i18n.js", "menu-status.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const STATUS = "/var/lib/diun-radar/status.json";
@@ -44,6 +43,7 @@ const plain = (o) => JSON.parse(JSON.stringify(o));     // objects of the jsdom 
 function boot({ language = "en" } = {}) {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
     const w = dom.window;
+    w.document.querySelectorAll("script").forEach((s) => s.remove());   // the page's own tags never run
     const clock = { now: NOW };
     w.Date.now = () => clock.now;
     // Timers of a second and more wait for the test to run them; shorter ones run.
