@@ -175,7 +175,15 @@ jobs:
                    dpkg-query -W cockpit-bridge python3 ;;
               rpm) dnf install -y -q /dist/*.rpm
                    rpm -q cockpit-bridge python3 ;;
-              zypper) zypper --non-interactive --quiet install --allow-unsigned-rpm /dist/*.rpm
+              zypper) # The openSUSE mirrors refuse a file now and then (HTTP 403), and zypper then
+                      # skips the whole repository. Refresh up to three times, then install from
+                      # the refreshed metadata without refreshing again.
+                      for try in 1 2 3; do
+                        zypper --non-interactive --quiet refresh && break
+                        [ "$try" -lt 3 ] || exit 1
+                        echo "zypper refresh failed (try $try of 3), trying again in 15 s"; sleep 15
+                      done
+                      zypper --non-interactive --quiet --no-refresh install --allow-unsigned-rpm /dist/*.rpm
                       rpm -q cockpit-bridge; rpm -q --whatprovides python3 ;;
             esac
             python3 --version
