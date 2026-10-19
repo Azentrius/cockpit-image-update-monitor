@@ -40,7 +40,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.21.0";
+    const VERSION = "0.21.1";
     const LIB = "/usr/lib/cockpit-image-updates/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -459,6 +459,20 @@
                  news: false, compared: true, sameBuild: true };
     }
 
+    // A tag like latest in a registry without any release tag: an own image
+    // built from its main branch (ghcr.io/azentrius/sharewerk, 2026-10-19).
+    // Up to date (check-circle) when the container runs the build the tag
+    // points to now. Only Docker Hub tells when a tag was pushed, so with
+    // release tags in the registry this stays "newest: X" and unknown.
+    function newestBuildCell(ctn, rec, muted) {
+        const same = !!ctn.digest && ctn.digest === rec.tag_now.digest;
+        const tip = [t("ver.newestBuildTip", { cfg: ctn.tag }),
+                     t(same ? "ver.buildAfterRuns" : "ver.buildAfterOther", { cfg: ctn.tag })].join("\n");
+        if (!same) return { ...muted(t("ver.otherBuild"), tip), compared: false };
+        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(t("ver.newestBuild"))}</span></span>`,
+                 news: false, compared: true, sameBuild: true };
+    }
+
     function versionCell(ctn, rec, inst, radarOk, pick) {
         const muted = (text, title) => ({
             html: `<span class="dm-muted"${title ? ` title="${esc(title)}"` : ""}>${esc(text)}</span>`,
@@ -475,6 +489,8 @@
             if (rec.status === "error") return muted(t("ver.registryError"), detail("ver.registryErrorTip"));
             const after = buildAfter(rec);
             if (after) return buildAfterCell(ctn, rec, after, muted);
+            const tn = rec.tag_now;
+            if (!rec.newest && tn && tn.digest && !tn.version) return newestBuildCell(ctn, rec, muted);
             if (rec.newest) return muted(t("ver.newestOnly", { v: rec.newest }), t("ver.newestOnlyTip"));
             return muted("—", t("ver.notCovered"));
         }
