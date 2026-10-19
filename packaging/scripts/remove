@@ -5,3 +5,8 @@
 if [ -d /run/systemd/system ]; then
     systemctl disable --now diun-radar.timer diun-cleanup.timer > /dev/null 2>&1 || true
 fi
+# The helpers run as root (the page, the radar, the cleanup), and Python leaves the compiled
+# diunlib, diunproc and diunstatus in __pycache__ next to them. No package owns these files; without
+# them the package manager can remove the folder.
+helpers=/usr/lib/cockpit-image-updates
+rm -rf "${helpers:?}/__pycache__"
