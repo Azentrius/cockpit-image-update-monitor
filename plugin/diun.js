@@ -464,12 +464,18 @@
     // Up to date (check-circle) when the container runs the build the tag
     // points to now. Only Docker Hub tells when a tag was pushed, so with
     // release tags in the registry this stays "newest: X" and unknown.
+    // The build date stays in sight: the newest build of an abandoned image
+    // (ronmi/forgejo-mcp, latest from 2025-10-28) is up to date but old.
+    // A fixed date (1970, reproducible builds) is left out.
     function newestBuildCell(ctn, rec, muted) {
         const same = !!ctn.digest && ctn.digest === rec.tag_now.digest;
         const tip = [t("ver.newestBuildTip", { cfg: ctn.tag }),
                      t(same ? "ver.buildAfterRuns" : "ver.buildAfterOther", { cfg: ctn.tag })].join("\n");
         if (!same) return { ...muted(t("ver.otherBuild"), tip), compared: false };
-        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(t("ver.newestBuild"))}</span></span>`,
+        const built = builtAt(ctn.created);
+        const text = built !== null && built > Date.UTC(1980, 0, 1) / 1000
+            ? t("ver.newestBuildOn", { date: fmtDay(ctn.created) }) : t("ver.newestBuild");
+        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(text)}</span></span>`,
                  news: false, compared: true, sameBuild: true };
     }
 

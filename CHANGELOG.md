@@ -12,13 +12,16 @@ ghcr.io) is up to date when the container runs the build the tag points to, inst
   to date only when a version tag had the same digest or, on Docker Hub, when the build was pushed
   after the newest release. An image whose registry has no release tag at all (Sharewerk on ghcr.io,
   built from its main branch) therefore stayed “Unknown” with an empty newest column, and the
-  tooltip wrongly said the radar had not covered it yet. Now the newest column says “newest build”
-  with a check mark and the status is “Up to date” when the container runs the build the tag points
-  to, and “other build” (status unknown) when it runs another one. With release tags in the registry
+  tooltip wrongly said the radar had not covered it yet. Now the newest column says “newest build
+  from <date>” with a check mark and the status is “Up to date” when the container runs the build the
+  tag points to, and “other build” (status unknown) when it runs another one. The date is when the
+  build was made: an abandoned image (`ronmi/forgejo-mcp`, whose `latest` is from 28 Oct 2025) is the
+  newest build there is, but its age stays in sight. With release tags in the registry
   the column keeps “newest: X”: outside Docker Hub nothing tells whether the build is newer than the
   newest release.
-- **Tests.** `test/version-cols.js` checks both cases in German and English, and that a registry with
-  release tags keeps “newest: X” and the unknown status.
+- **Tests.** `test/version-cols.js` checks both cases in German and English, the date, no date for a
+  reproducible build (1970), and that a registry with release tags keeps “newest: X” and the unknown
+  status.
 
 ## 0.21.0 – 2026-10-19
 

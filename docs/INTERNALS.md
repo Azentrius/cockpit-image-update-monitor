@@ -683,8 +683,9 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   release. Otherwise the text is muted and the status stays unknown.
 - **Newest build (no release tag at all):** with `tag_now` without `version`, no `after` and no
   `newest` (the registry has no plain version tag, e.g. an own image on ghcr.io built from its main
-  branch), the newest column says “newest build” with `check-circle` and the status is “up to date”
-  (`sameBuild`) when the running image's digest is `tag_now.digest`; otherwise “other build”, muted,
+  branch), the newest column says “newest build from <date>” (the image's `created`; without the date
+  for a fixed date before 1980) with `check-circle` and the status is “up to date” (`sameBuild`) when
+  the running image's digest is `tag_now.digest`; otherwise “other build”, muted,
   and the status stays unknown. With release tags in the registry outside Docker Hub nothing tells
   whether the build is newer than the newest release, so the column keeps “newest: X”.
 - **Configured column:** `tag_now.version` follows the tag (“latest = 6.0.2”, `.dm-tagnow`), by the
