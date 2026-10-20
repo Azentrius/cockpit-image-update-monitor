@@ -660,5 +660,84 @@ sw_back = RS.keep_last_good([RS.analyse(SW, RS.digest_cache([sw_down]), now, RS.
 check("no release tag, registry back: not stale any more, no error",
       (sw_back["tag_now"]["digest"], "stale" in sw_back, "error" in sw_back), ("sha256:now-latest", False, False))
 
+# A run that reaches no registry at all (build-host, 2026-10-20: the resolver
+# answered "server misbehaving" for every name) is the server's problem, not
+# the registries': the radar tries once more after a pause, and if no registry
+# answers then either, versions.json says so. "unlisted" is an answer (access
+# denied), so it counts as reached. Registries outside Docker Hub only: no Hub API.
+RN = load("radar_retry", "diun-versions.py")
+RN.run = lambda cmd, binary=False: (_ for _ in ()).throw(RuntimeError("no commands here: " + " ".join(cmd)))
+RN.tag_digest = lambda repo, tag: "sha256:now-" + tag
+RN.match_digest = lambda *a, **k: None
+DNS = "lookup ghcr.io on 127.0.0.53:53: server misbehaving"
+NR_TAGS = {"ghcr.io/acme/app": ["1.2", "1.2.1", "1.3.0"], "quay.io/acme/web": ["latest", "2.0.0"]}
+NR_GROUPS = {("ghcr.io/acme/app", "1.2"): {"containers": ["app"], "images": {"ia": img()}},
+             ("quay.io/acme/web", "latest"): {"containers": ["web"], "images": {"iw": img()}}}
+net = {"down": set(), "after_pause": set()}
+pauses = []
+
+
+def nr_tags(repo):
+    if repo in net["down"]:
+        raise RuntimeError(DNS)
+    return NR_TAGS[repo]
+
+
+def nr_pause(seconds):
+    pauses.append(seconds)
+    net["down"] = set(net["after_pause"])
+
+
+def nr_run(down, after_pause, groups=NR_GROUPS):
+    net["down"], net["after_pause"] = set(down), set(after_pause)
+    pauses.clear()
+    recs, at, no_reg = RN.check_all(groups, {}, {}, now=now, sleep=nr_pause, clock=lambda: now)
+    return sorted(r["status"] for r in recs), no_reg, list(pauses)
+
+
+RN.list_tags = nr_tags
+ALL = set(NR_TAGS)
+healthy = nr_run(set(), set())
+check("radar: every registry answers: no pause, no mark, no error", (healthy[1], healthy[2], "error" in healthy[0]),
+      (None, [], False))
+check("radar: every registry fails, the second try works: one pause, the results of a good run, no mark",
+      nr_run(ALL, set()), (healthy[0], None, [RN.RETRY_PAUSE]))
+check("radar: every registry fails twice: marked with the error and the number of images",
+      nr_run(ALL, ALL), (["error", "error"], {"error": DNS, "images": 2}, [RN.RETRY_PAUSE]))
+partial = nr_run({"ghcr.io/acme/app"}, set())
+check("radar: one registry fails: no pause, no mark (that registry's entry is kept stale as before)",
+      (partial[0].count("error"), partial[1], partial[2]), (1, None, []))
+check("radar: no images: nothing to try again", nr_run(ALL, ALL, groups={}), ([], None, []))
+DENIED_ALL = "requested access to the resource is denied"
+RN.list_tags = lambda repo: (_ for _ in ()).throw(RN.subprocess.CalledProcessError(1, ["skopeo"], "", DENIED_ALL))
+pauses.clear()
+recs, _, no_reg = RN.check_all(NR_GROUPS, {}, {}, now=now, sleep=nr_pause, clock=lambda: now)
+check("radar: every registry answers 'denied' (unlisted): that is an answer, no pause, no mark",
+      (sorted(r["status"] for r in recs), no_reg, pauses), (["unlisted", "unlisted"], None, []))
+# main() writes the mark into versions.json, next to the entries kept from the run before.
+RN.list_tags = nr_tags
+net["down"], net["after_pause"] = set(), set()
+NR_OUT = os.path.join(tempfile.mkdtemp(prefix="radar-nr-"), "versions.json")
+good_app = RN.analyse((("ghcr.io/acme/app", "1.2"), NR_GROUPS[("ghcr.io/acme/app", "1.2")]), {}, now)
+net["down"], net["after_pause"] = set(ALL), set(ALL)
+with open(NR_OUT, "w") as f:
+    json.dump({"generated": "2026-10-11T00:00:00Z", "images": [dict(good_app, checked="2026-10-11T00:00:00Z")]}, f)
+saved_nr = (RN.collect, RN.RETRY_PAUSE, RN.diunstatus.refresh, sys.argv)
+RN.collect, RN.RETRY_PAUSE = (lambda: NR_GROUPS), 0
+RN.diunstatus.refresh = lambda path, versions=None: {"summary": "not written in this test"}
+sys.argv = ["diun-versions.py", "--output", NR_OUT]
+out = io.StringIO()
+real_stdout, sys.stdout = sys.stdout, out
+try:
+    rc = RN.main()
+finally:
+    sys.stdout = real_stdout
+    RN.collect, RN.RETRY_PAUSE, RN.diunstatus.refresh, sys.argv = saved_nr
+written = json.load(open(NR_OUT))
+kept = [r for r in written["images"] if r["image"] == "ghcr.io/acme/app"][0]
+check("radar: main writes no_registry, keeps the last good entry stale, and says so",
+      (rc, written.get("no_registry"), kept["stale"], kept["status"], "no registry reached" in out.getvalue()),
+      (0, {"error": DNS, "images": 2}, True, good_app["status"], True))
+
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

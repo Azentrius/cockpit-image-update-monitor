@@ -30,14 +30,21 @@ fi
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
     for timer in diun-radar.timer diun-cleanup.timer; do
-        # A timer that was on keeps running, now from the unit of the package.
+        # A timer that was on stays on, now from the unit of the package (daemon-reload reads it).
+        # It is started only when it does not run: (re)starting a timer whose OnBootSec= lies in
+        # the past starts its service at once, in the middle of this apt run.
         if [ -L "/etc/systemd/system/timers.target.wants/$timer" ]; then
             systemctl reenable "$timer" > /dev/null 2>&1 || true
-            systemctl restart "$timer" || true
+            systemctl is-active --quiet "$timer" || systemctl start "$timer" || true
         fi
     done
-    # A new version may change the format of the radar's data: refresh it.
-    if systemctl is-enabled --quiet diun-radar.timer 2> /dev/null; then
-        systemctl start --no-block diun-radar.service || true
+    # A new version may change the format of the radar's data: refresh it, two minutes from now.
+    # The same apt run can restart systemd-resolved or the network, and a run in that moment
+    # reaches no registry (build-host, 2026-10-20). Without systemd-run: at once, as before.
+    if systemctl is-enabled --quiet diun-radar.timer 2> /dev/null \
+        && ! systemctl is-active --quiet diun-radar-after-install.timer; then
+        systemd-run --quiet --unit=diun-radar-after-install --on-active=120 --timer-property=AccuracySec=10s \
+            "$(command -v systemctl)" start --no-block diun-radar.service 2> /dev/null \
+            || systemctl start --no-block diun-radar.service || true
     fi
 fi

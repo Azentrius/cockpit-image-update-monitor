@@ -362,8 +362,13 @@ def failed_ops(ops, alive=None):
 
 # ----------------------------------------------------------------- facts ----
 def radar_facts(versions):
+    """found, generated and, when its last run reached no registry (versions.json
+    "no_registry"), "reached": false. The error stays out: it can name addresses."""
     gen = versions.get("generated") if isinstance(versions, dict) else None
-    return {"found": isinstance(versions, dict), "generated": gen if isinstance(gen, str) else None}
+    out = {"found": isinstance(versions, dict), "generated": gen if isinstance(gen, str) else None}
+    if isinstance(versions, dict) and isinstance(versions.get("no_registry"), dict):
+        out["reached"] = False
+    return out
 
 
 def facts_of(containers, events_text, dismissed, versions, ops, now, alive=None):
@@ -450,9 +455,12 @@ def failed_item(facts, lang):
                 names_text([str(o.get("name")) + note.get(o.get("how"), "") + still(o) for o in ops]))
 
 
+UNREACHED = {"de": "Versions-Radar erreichte keine Registry", "en": "Version radar reached no registry"}
+
+
 def radar_item(facts, lang, now):
-    """ok, warning after 24 hours without a run (judged now), none without
-    versions.json."""
+    """ok, warning after 24 hours without a run (judged now) or when the last
+    run reached no registry, none without versions.json."""
     r = part(facts, "radar")
     outdated = tr(lang, "Versions-Radar veraltet", "Version radar outdated")
     if not r.get("found"):
@@ -471,6 +479,13 @@ def radar_item(facts, lang, now):
                     age_text(lang, age),
                     tr(lang, "Seit mehr als 24 Stunden kein Lauf: Prüfen Sie diun-radar.timer.",
                        "No run for more than 24 hours: check diun-radar.timer."))
+    if r.get("reached") is False:
+        return item("radar", "warning", tr(lang, UNREACHED["de"], UNREACHED["en"]),
+                    iso(datetime.fromtimestamp(gen, timezone.utc)), age_text(lang, age),
+                    tr(lang, "Beim letzten Lauf antwortete keine Registry, auch nicht beim zweiten Versuch. Meist "
+                             "liegt das an DNS oder Netz des Servers; angezeigt ist der Stand des letzten guten Laufs.",
+                       "No registry answered the last run, nor its second try. Mostly that is DNS or the "
+                       "server's network; shown is the data of the last good run."))
     return item("radar", "ok", tr(lang, "Versions-Radar", "Version radar"),
                 iso(datetime.fromtimestamp(gen, timezone.utc)), age_text(lang, age))
 
@@ -502,6 +517,8 @@ def finding(it, lang):
         return count(lang, n, "{n} fehlgeschlagenes Update", "{n} fehlgeschlagene Updates",
                      "{n} failed update", "{n} failed updates")
     if it["id"] == "radar":
+        if it["title"] in UNREACHED.values():
+            return tr(lang, UNREACHED["de"], UNREACHED["en"][:1].lower() + UNREACHED["en"][1:])
         return tr(lang, "Versions-Radar veraltet", "version radar outdated")
     if it["id"] == "updates":
         return count(lang, n, "{n} Update verfügbar", "{n} Updates verfügbar",
