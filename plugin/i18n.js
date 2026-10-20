@@ -2,7 +2,7 @@
 /* Image Update Monitor, a Cockpit add-on: the texts of the page in English
  * (I18N.en) and German (I18N.de, addressing the user with "Sie"). Every key
  * exists in both; the tests check that the English page contains no German.
- * diun.js reads them from window.ImageUpdatesI18n, menu-status.js the menu.*
+ * common.js reads them from window.ImageUpdatesI18n, menu-status.js the menu.*
  * keys (the tooltip of the status icon in Cockpit's menu, worded as the
  * summary of `diun-update.py status`); index.html loads this file first.
  * Placeholders in braces ({name}) are filled in by the scripts. */

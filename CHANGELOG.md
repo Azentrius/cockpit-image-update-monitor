@@ -68,6 +68,13 @@ after the install, when the radar is set up).
 - **Tests without a tag filter.** Five jsdom tests took the `<script>` tags out of `index.html` with a
   regular expression, which CodeQL reports as an incomplete tag filter (`js/bad-tag-filter`). They
   now remove the script elements from the parsed page, as the other tests do.
+- **The page's code in eight scripts** (technical debt in the roadmap). `plugin/diun.js`, about 2,000
+  lines, is split into `common.js`, `dialog.js`, `notes.js`, `update.js`, `retag.js`, `overview.js`,
+  `backups.js` and `diun.js`: classic scripts that share `window.ImageUpdatesPage`, loaded by
+  `index.html` in that order (no ES modules: jsdom, which runs the tests of the page, runs none). The
+  code moved as it was; only the calls between the scripts changed, and the counter that drops an
+  answer arriving after another dialog opened is `ticket()` in `dialog.js`. The jsdom tests take the
+  scripts from `index.html` (`test/page-scripts.js`), and `tools/check-version.sh` checks their `?v=`.
 
 ## 0.22.0 – 2026-10-20
 

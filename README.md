@@ -371,7 +371,7 @@ docker exec <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"
 ```mermaid
 flowchart LR
     subgraph B["Browser"]
-        P["Cockpit plugin<br/>plugin/diun.js"]
+        P["Cockpit plugin<br/>plugin/*.js"]
     end
     subgraph H["Server - root helpers in /usr/lib/cockpit-image-updates"]
         INV["diun-inventory.py<br/>on every load"]
@@ -628,7 +628,8 @@ tail -n 5 /var/lib/diun/events.jsonl
 ## Development
 
 ```
-plugin/            Cockpit package (manifest, index.html, diun.js, i18n.js, menu-status.js, diun.css, menu translation) and
+plugin/            Cockpit package (manifest, index.html, the page's scripts from common.js to diun.js, i18n.js,
+                   menu-status.js, diun.css, menu translation) and
                    the shared design files (azentrius.css, azentrius-theme.js, icons.js, fonts)
 lib/               root helpers (Python 3 / POSIX sh), installed to /usr/lib/cockpit-image-updates
 systemd/           units (radar, cleanup), installed to /usr/lib/systemd/system

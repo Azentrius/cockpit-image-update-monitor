@@ -52,7 +52,7 @@ html { background: var(--bg-page); }
 /* ---------- table cells ---------- */
 
 .az-cell-actions .dm-cell { display: inline-flex; align-items: center; gap: var(--space-xs); }
-/* The place of an icon button a row does not have, so the buttons line up (iconSlot in diun.js). */
+/* The place of an icon button a row does not have, so the buttons line up (iconSlot in common.js). */
 .dm-slot { visibility: hidden; }
 .dm-ver { font-family: var(--az-font-code); font-size: 13px; }
 .dm-cfg, .dm-muted, .dm-digest, .dm-tagnow { color: var(--text-subtle); }
