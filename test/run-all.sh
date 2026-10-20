@@ -41,6 +41,7 @@ run "plugin: language + requirements"   node i18n-deps.js
 run "plugin: update, rollback, backups" node update-backups.js
 run "plugin: change version"            node version-change.js
 run "plugin: release notes in dialogs"  node release-notes.js
+run "plugin: a page missing a script"   node partial-load.js
 run "plugin: radar now, cleanup, history" node radar-cleanup.js
 run "plugin: version columns"           node version-cols.js
 run "plugin: Diun events per tag"      node diun-events.js

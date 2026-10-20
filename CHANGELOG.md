@@ -75,6 +75,12 @@ after the install, when the radar is set up).
   code moved as it was; only the calls between the scripts changed, and the counter that drops an
   answer arriving after another dialog opened is `ticket()` in `dialog.js`. The jsdom tests take the
   scripts from `index.html` (`test/page-scripts.js`), and `tools/check-version.sh` checks their `?v=`.
+  Cockpit's bridge serves a file new in an update only after it read the packages again, which the
+  shell asks for while it loads the page: after an update and a reload of the browser a script can be
+  missing (seen in CI with Cockpit 314). The page then asks the bridge to read the packages again
+  (`cockpit.Packages.Reload`) and loads once more; if a part is still missing, it says to log out and
+  in again. Tests: `test/partial-load.js` (new); the Cockpit job accepts a 404 for a file new in this
+  build in the reload right after the upgrade only when the page then shows the new version.
 
 ## 0.22.0 – 2026-10-20
 

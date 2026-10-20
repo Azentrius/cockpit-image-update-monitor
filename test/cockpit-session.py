@@ -53,7 +53,7 @@ os.makedirs(OUT, exist_ok=True)
 report = {"environment": {}, "steps": [], "errors": [], "addon_files": []}
 failed = False
 errors = []          # [kind, text, url, user, phase]
-PHASE = {"now": "baseline"}  # baseline, release before, this build
+PHASE = {"now": "baseline"}  # baseline, release before, upgrade (the reload right after it), this build
 OURS = "/image-updates/"  # the add-on's files and frame (the shell's route has no slash after it)
 responses = []       # [url, status] of the add-on's own files
 shots = 0
@@ -96,6 +96,25 @@ def watch(page, who):
 
 
 BASELINE = set()
+STALE = []           # errors of the reload after the upgrade that are Cockpit's old list of files
+
+
+def new_files(old_deb):
+    """The page's files this build brings that the release before did not have."""
+    page_dir = "/usr/share/cockpit/image-updates/"
+    before = {line.split()[-1].split(page_dir, 1)[1] for line in root("dpkg-deb", "-c", old_deb).splitlines()
+              if page_dir in line}
+    return set(os.listdir(page_dir)) - before
+
+
+def missed_new_file(e, fresh):
+    """The new file an error says Cockpit did not deliver (404, the failed request, the
+    console's "Failed to load resource"), or ""."""
+    if not (e[0] in ("http 404", "requestfailed") or (e[0] == "console" and "Failed to load resource" in e[1])):
+        return ""
+    url = e[2] or e[1].split(" ")[0]
+    name = url.split("/image-updates/", 1)[-1].split("?")[0] if "/image-updates/" in url else ""
+    return name if name in fresh else ""
 
 
 def kind(e):
@@ -313,13 +332,23 @@ def main():
             note("this build installed over it (apt)",
                  root("dpkg-query", "-W", "-f", "${Version}", "cockpit-image-update-monitor").startswith(E["NEW_VERSION"]),
                  root("dpkg-query", "-W", "-f", "${Version}", "cockpit-image-update-monitor"))
-            PHASE["now"] = "this build"
+            # Cockpit's bridge keeps the list of the package's files it read first in this session;
+            # files new in this build answer 404 until it reads the packages again. The shell asks
+            # for that when it starts, while it loads the page: the page may miss them, asks the
+            # bridge itself (cockpit.Packages.Reload) and loads once more (2026-10-20, this race).
+            # Those 404s are Cockpit's; anything else stays an error.
+            PHASE["now"] = "upgrade"
             page.reload()
             frame = page.frame_locator(FRAME)
             frame.locator("#dm-sig-version").wait_for()
             poll(page, lambda: version_of(frame) == E["NEW_VERSION"], 60)
+            fresh = new_files(old)
+            STALE.extend(x for x in errors if x[4] == "upgrade" and missed_new_file(x, fresh))
+            PHASE["now"] = "this build"
             note("after the upgrade: reloaded in the same session, the new version", version_of(frame) == E["NEW_VERSION"],
-                 version_of(frame))
+                 version_of(frame) + ("; Cockpit answered 404 for " +
+                                      ", ".join(sorted({missed_new_file(x, fresh) for x in STALE})) +
+                                      " until the page asked it to read the packages again" if STALE else ""))
             ctx.close()
         else:
             PHASE["now"] = "this build"
@@ -459,7 +488,7 @@ except Exception as e:      # a step that could not even run counts as failed
     except Exception:
         pass
 
-build = [x for x in errors if x[4] == "this build"]
+build = [x for x in errors if x[4] in ("upgrade", "this build") and x not in STALE]
 before = [x for x in errors if x[4] == "release before" and kind(x) not in BASELINE]
 ours = [x for x in build if OURS in x[1] + x[2]]
 note("no JavaScript error and no failed request of the add-on's files or frame", not ours,

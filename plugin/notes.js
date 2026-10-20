@@ -5,6 +5,7 @@
 (function () {
     "use strict";
     const P = window.ImageUpdatesPage;
+    if (!P) return;     // common.js did not load: diun.js asks Cockpit for it again
     const { RELEASES_PATH, FILE_OPTS, t, $, esc, rich, fmtDay, fmtDate, label } = P;
 
     const releasesFile = cockpit.file(RELEASES_PATH, { ...FILE_OPTS, syntax: JSON });

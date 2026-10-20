@@ -6,6 +6,7 @@
 (function () {
     "use strict";
     const P = window.ImageUpdatesPage;
+    if (!P) return;     // common.js did not load: diun.js asks Cockpit for it again
     const { DEPS_CMD, t, icon, $, esc, rich, spawnHelper, isNoAdmin, label } = P;
 
     // --- Action dialog (one for everything) --------------------------------

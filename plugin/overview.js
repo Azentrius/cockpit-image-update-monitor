@@ -5,6 +5,7 @@
 (function () {
     "use strict";
     const P = window.ImageUpdatesPage;
+    if (!P) return;     // common.js did not load: diun.js asks Cockpit for it again
     const { t, icon, $, tagSplit, repoKey, verKey, evKey, shortDigest, esc, fmtDay, fmtDate, ago,
             ciJobText, label, textButton, iconButton, iconSlot, LEVELS } = P;
 

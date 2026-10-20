@@ -708,6 +708,15 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   is read through small functions (`isDismissed`, `rendered`, `backupsState`, `deps`). No ES modules:
   the jsdom tests evaluate the scripts as the browser runs them (`test/page-scripts.js` takes their
   list from `index.html`), and jsdom runs no modules.
+- **All parts loaded?** (since 0.23.0) Cockpit's bridge keeps the list of a package's files it read
+  first in a session; a file an update brings new answers 404 until the bridge reads the packages
+  again. The shell asks for that when it starts (`ReloadHint`) but loads the page at the same time,
+  so after an update and a reload of the browser a script can be missing (Cockpit 314 in CI). `diun.js`
+  checks a name of every script in the namespace (`PARTS`); with one missing it calls
+  `cockpit.Packages.Reload` on the internal bus and loads the page again, once per version and browser
+  session (`sessionStorage`); if a part is still missing then, `#dm-status` says so (texts from
+  `i18n.js`, as `common.js` may be the one missing). The other scripts return at once without
+  `common.js`, so none throws.
 - **Shared design files:** `azentrius.css` (tokens for light and dark, page frame, buttons, cards,
   tables, labels, dialogs), `azentrius-theme.js` (sets `pf-v6-theme-dark` on `<html>` from Cockpit's
   style, `shell:style`), `icons.js` (`window.AzIcons`), the fonts and `OFL.txt`. They are copies of
@@ -919,6 +928,7 @@ roll-outs pending, 17 new versions”).
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English; the states while the dry-run and the run work are checked at fixed points (the stub's answers wait for a gate) |
 | `test/release-notes.js` | release notes in the update dialog and the preview of a version change: the range (installed, target], newest first, closed; the warning words in the summary and per release; the text as text (links, images, HTML, comments, `<script>`, angle brackets that are no HTML, nested and split markup); empty and cut texts, links only to GitHub; the slot's place; English without German, the singular; a note for every missing piece (no source, not fetched, no file, no releases, limit, error, nothing in range, the installed version unknown, nothing after it, a broken file); without a target all since the installed version; kept releases under a limit; nothing for the same version; another choice in the preview |
 | `test/page-scripts.js` | not a test: the page's scripts for the jsdom tests, in the order `index.html` loads them (from `i18n.js` on, `menu-status.js` when asked for) |
+| `test/partial-load.js` | a page that did not get all its scripts (each script run on its own, as in the browser): everything there (the page starts, the mark of an earlier reload gone), scripts new in a version missing (`cockpit.Packages.Reload` on the internal bus, one more load, nothing thrown, nothing run on the server), a bridge without `Reload`, still missing after that (the message in English and German, no loop), without `common.js` |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the newest build of a registry without release tags, both build cells with stale data (marked, the error in the tooltip, no claim of a fresh check, gone after a good run), the revision of a development build, the bases of an image built here, a line tag refined by the radar, and kept with its patch when the registry failed |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |

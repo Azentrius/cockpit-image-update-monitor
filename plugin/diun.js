@@ -51,15 +51,59 @@
 
 (function () {
     "use strict";
-    const P = window.ImageUpdatesPage;
-    const { EVENTS_PATH, DISMISSED_PATH, VERSIONS_PATH, INVENTORY_CMD, DEPS_CMD, UPDATE_CMD, FILE_OPTS,
-            LANG, t, icon, $, tagSplit, esc, rich, spawnHelper, isNoAdmin, label, alertInner,
-            textButton, dlg, openInstallDialog } = P;
-
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
     const VERSION = "0.23.0";
+
+    // --- All parts loaded? -------------------------------------------------
+    // Each script of the page, by a name it gives the namespace. Cockpit's
+    // bridge keeps the list of a package's files it read first in the session;
+    // a file that an update of the add-on brings new answers 404 until the
+    // bridge reads the packages again. The shell asks for that when it starts
+    // (ReloadHint), but loads this page at the same time, so after an update
+    // and a reload of the browser the page can miss a script (Cockpit 314, CI,
+    // 2026-10-20). Then the page asks the bridge to read the packages again
+    // and loads itself once more; if a part is still missing, it says so.
+    const PARTS = { "common.js": "t", "dialog.js": "confirmAndRun", "notes.js": "showNotes",
+                    "update.js": "startUpdate", "retag.js": "startRetag", "overview.js": "render",
+                    "backups.js": "loadBackups" };
+    const RELOADED = "image-updates:reloaded:" + VERSION;
+    const P = window.ImageUpdatesPage;
+    const missing = Object.keys(PARTS).filter((f) => !P || typeof P[PARTS[f]] !== "function");
+    if (missing.length) {
+        reloadParts(missing);
+        return;
+    }
+    try { window.sessionStorage.removeItem(RELOADED); } catch (_) { /* no storage */ }
+    const { EVENTS_PATH, DISMISSED_PATH, VERSIONS_PATH, INVENTORY_CMD, DEPS_CMD, UPDATE_CMD, FILE_OPTS,
+            LANG, t, icon, $, tagSplit, esc, rich, spawnHelper, isNoAdmin, label, alertInner,
+            textButton, dlg, openInstallDialog } = P;
+
+    function reloadParts(files) {
+        let again = false;
+        try {
+            again = window.sessionStorage.getItem(RELOADED) === "1";
+            window.sessionStorage.setItem(RELOADED, "1");
+        } catch (_) { /* no storage: one more load at most per load of the page */ }
+        if (!again) {
+            Promise.resolve()
+                .then(() => cockpit.dbus(null, { bus: "internal" }).call("/packages", "cockpit.Packages", "Reload", []))
+                .catch(() => null)
+                .then(() => window.location.reload());
+            return;
+        }
+        // Still missing after that: say so, in the texts of i18n.js (common.js may be the one missing).
+        const texts = window.ImageUpdatesI18n || {};
+        const lang = /^de([-_]|$)/i.test(String(cockpit.language || "")) ? "de" : "en";
+        const say = (key) => ((texts[lang] || {})[key] || (texts.en || {})[key] || key).replace("{files}", files.join(", "));
+        const status = document.getElementById("dm-status");
+        status.textContent = say("status.partsTitle") + " " + say("status.parts");
+        status.className = "az-alert az-alert--danger dm-status";
+        status.setAttribute("role", "alert");
+        status.hidden = false;
+        document.getElementById("dm-loading").hidden = true;
+    }
 
     function applyStaticTexts() {
         document.documentElement.lang = LANG;

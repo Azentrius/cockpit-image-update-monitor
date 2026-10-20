@@ -5,6 +5,7 @@
 (function () {
     "use strict";
     const P = window.ImageUpdatesPage;
+    if (!P) return;     // common.js did not load: diun.js asks Cockpit for it again
     const { UPDATE_CMD, t, $, tagSplit, esc, rich, human, fmtDate, ciJobText, spawnHelper, isNoAdmin,
             label, alertBox, errorText, LEVEL_NAMES, dlg, confirmAndRun, reasonText, ticket } = P;
 
