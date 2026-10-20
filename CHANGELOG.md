@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.21.2 – 2026-10-20
+
+A failed update stays failed until a later run of the same services settles it, and the newest
+build of `latest` says when its data is older because the registry did not answer.
+
+**Upgrading:** nothing to do. The next radar run or update writes `status.json` with the new rule.
+
+- **Fix: a success of another service hid a failure.** The status for the Status Board and the menu
+  icon took the newest run of each repository in a compose project: when `db16` (`postgres:16`) failed
+  and then `db17` (`postgres:17`) in the same project was updated, the failure was gone although
+  `db16` was still affected. A run now stands for what the update grouped: its services in its
+  compose project and compose files, and the containers it names. A later run settles only those, in
+  the same files; a retry or a tag change of the same services still settles a failure. A run partly
+  settled stays, named by a container still affected and with the services still affected (“shop-db-1
+  (still affected: db)”). History entries without services (written by old versions) stand for the
+  containers they name and settle no services, so their failure stays until a later run of those
+  containers or a rollback.
+- **Fix: “newest build” over stale data.** When the radar could not reach the registry it keeps the
+  digest `latest` had in the run before and marks the entry stale, but “newest build”, “other build”
+  and “build after vX” left the mark out and said there was nothing newer. They now carry “(older
+  data)” like every stale entry, with the registry's error and the time of the last good run in its
+  tooltip, and say only what that run found. The mark's tooltip on the other columns names the error
+  and the time as well.
+- **Tests.** `test/status_test.py`: services and tags of one project, the same image in separate
+  compose files and in another directory, a retry and a tag change, overlapping groups, rollbacks and
+  aborted runs next to an unrelated success, old entries, and the state, summary and detail they give.
+  `test/radar_test.py`: an image without release tags through `keep_last_good` (good, registry down,
+  back). `test/version-cols.js`: both build cells with stale data in German and English, another build,
+  and the mark gone after a good run.
+
 ## 0.21.1 – 2026-10-20
 
 An own image that the registry has no release tag for (`latest` built from the main branch, e.g. on

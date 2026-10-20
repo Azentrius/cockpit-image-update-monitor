@@ -635,5 +635,30 @@ check("radar: a compose service that is not built here has no bases",
       "base" in R.analyse((("caddy-caddy", "latest"), {"containers": ["caddy"], "labels": COMPOSE_LABELS,
                                                         "images": {"idc": old_caddy}}), {}, now), False)
 
+# A registry without any release tag (an own image built from its main branch):
+# what latest points to is known by its digest only. A registry error keeps that
+# digest from the run before, marked stale with the error; the next good run
+# clears the mark.
+SW = (("ghcr.io/azentrius/sharewerk", "latest"),
+      {"containers": ["sharewerk"], "images": {"ids": img(digests=["ghcr.io/azentrius/sharewerk@sha256:now-latest"])}})
+RS = load("radar_stale", "diun-versions.py")
+RS.run = lambda cmd, binary=False: (_ for _ in ()).throw(RuntimeError("no commands here: " + " ".join(cmd)))
+RS.list_tags = lambda repo: ["latest", "20261026"]
+RS.tag_digest = lambda repo, tag: "sha256:now-" + tag
+RS.match_digest = lambda *a, **k: None
+sw_good = RS.analyse(SW, {}, now)
+check("no release tag: tag_now with the digest only, no newest, not stale",
+      (sw_good["tag_now"], sw_good.get("newest"), sw_good["status"], "stale" in sw_good),
+      ({"digest": "sha256:now-latest", "version": None, "tag": None}, None, "unknown", False))
+RS.list_tags = lambda repo: (_ for _ in ()).throw(RuntimeError("registry down"))
+sw_down = RS.keep_last_good([RS.analyse(SW, RS.digest_cache([sw_good]), now, RS.tag_now_cache([sw_good]))], [sw_good])[0]
+check("no release tag, registry down: the digest kept, marked stale with the error",
+      (sw_down["tag_now"]["digest"], sw_down.get("newest"), sw_down["stale"], sw_down["error"]),
+      ("sha256:now-latest", None, True, "registry down"))
+RS.list_tags = lambda repo: ["latest", "20261026"]
+sw_back = RS.keep_last_good([RS.analyse(SW, RS.digest_cache([sw_down]), now, RS.tag_now_cache([sw_down]))], [sw_down])[0]
+check("no release tag, registry back: not stale any more, no error",
+      (sw_back["tag_now"]["digest"], "stale" in sw_back, "error" in sw_back), ("sha256:now-latest", False, False))
+
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

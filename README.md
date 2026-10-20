@@ -137,7 +137,7 @@ v2.1.4             -> "v"  3 ""
 - **Patch / minor / major** follow from the first differing number block. With two-block schemes such as Postgres `16.14` the second block is called “minor”.
 - **Reach**: how many number blocks does the configured tag fix? `latest` = 0 → everything reachable. `16-alpine` = 1 → patch and minor reachable. `3.12-slim` = 2 → patch only. `v2.1.4` = 3 → nothing.
 - **Database images** (postgres, mariadb, mysql, redis, valkey, clickhouse, mongo …) are marked. Their majors appear as grey info.
-- If a registry fails, the last good result stays and is marked “(older data)”.
+- If a registry fails, the last good result stays and is marked “(older data)”; its tooltip names the error and when the result was found. That holds for “newest build” and “build after vX” too: they then say what the last good run found, not that nothing is newer.
 - **Floating tags** (`latest`, `stable`, `16-alpine`, `5` …): the radar looks up the digest the tag has in the registry right now (Docker Hub API or the manifest, no pull) and the version tag with the same digest. The overview shows it next to the tag, and the update dialog says what the update brings.
 - **Line tags** (`v1.6`, `10.0`, `24.12-alpine`): a tag with numbers under which the registry has longer versions names only its line. The installed version then comes from the digest (`v1.6` → 1.6.74), and the tag shows what it points to now, as a floating tag does. Only when no release shares the digest the tag's number stands for it.
 - **When:** every 6 hours (`diun-radar.timer`), in the background after every successful update or

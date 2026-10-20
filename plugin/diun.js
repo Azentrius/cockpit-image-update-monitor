@@ -40,7 +40,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.21.1";
+    const VERSION = "0.21.2";
     const LIB = "/usr/lib/cockpit-image-updates/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -446,6 +446,31 @@
         const a = tn && !tn.version && tn.after;
         return a && a.tag && a.tag === rec.newest ? a : null;
     }
+    // Data a radar run that could not reach the registry kept from the run
+    // before (keep_last_good: stale, error, checked): "(older data)", its
+    // tooltip the error and when the data was found.
+    function staleNote(rec) {
+        if (!rec || !rec.stale) return "";
+        const when = rec.checked && !isNaN(new Date(rec.checked)) ? fmtDate(new Date(rec.checked)) : null;
+        const tip = t("ver.staleTip", { error: String(rec.error || "?").replace(/[.\s]+$/, "") }) +
+                    (when ? " " + t("ver.staleSince", { date: when }) : "");
+        return ` <span class="dm-muted dm-stale" title="${esc(tip)}">${esc(t("ver.stale"))}</span>`;
+    }
+    // What the build cells say about the build the container runs: with stale
+    // data only what the last good run found, no claim that nothing is newer.
+    function runsLine(ctn, rec, same) {
+        return t(!same ? "ver.buildAfterOther" : rec.stale ? "ver.sameBuildStale" : "ver.buildAfterRuns", { cfg: ctn.tag });
+    }
+    function buildCell(text, tip, same, rec, muted) {
+        const stale = staleNote(rec);
+        if (!same) {
+            const m = muted(text, tip);
+            return { ...m, html: m.html + stale, compared: false };
+        }
+        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(text)}</span></span>${stale}`,
+                 news: false, compared: true, sameBuild: true };
+    }
+
     // "build after v4.5.3": up to date (check-circle) when the container runs
     // the build the tag points to now; the version number stays unknown.
     function buildAfterCell(ctn, rec, after, muted) {
@@ -453,10 +478,8 @@
         const text = t("ver.buildAfter", { tag: after.tag });
         const tip = [t("ver.buildAfterTip", { cfg: ctn.tag, tag: after.tag, pushed: fmtDay(rec.tag_now.pushed),
                                               released: fmtDay(after.pushed) }),
-                     t(same ? "ver.buildAfterRuns" : "ver.buildAfterOther", { cfg: ctn.tag })].join("\n");
-        if (!same) return { ...muted(text, tip), compared: false };
-        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(text)}</span></span>`,
-                 news: false, compared: true, sameBuild: true };
+                     runsLine(ctn, rec, same)].join("\n");
+        return buildCell(text, tip, same, rec, muted);
     }
 
     // A tag like latest in a registry without any release tag: an own image
@@ -469,14 +492,12 @@
     // A fixed date (1970, reproducible builds) is left out.
     function newestBuildCell(ctn, rec, muted) {
         const same = !!ctn.digest && ctn.digest === rec.tag_now.digest;
-        const tip = [t("ver.newestBuildTip", { cfg: ctn.tag }),
-                     t(same ? "ver.buildAfterRuns" : "ver.buildAfterOther", { cfg: ctn.tag })].join("\n");
-        if (!same) return { ...muted(t("ver.otherBuild"), tip), compared: false };
+        const tip = [t("ver.newestBuildTip", { cfg: ctn.tag }), runsLine(ctn, rec, same)].join("\n");
         const built = builtAt(ctn.created);
-        const text = built !== null && built > Date.UTC(1980, 0, 1) / 1000
-            ? t("ver.newestBuildOn", { date: fmtDay(ctn.created) }) : t("ver.newestBuild");
-        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(text)}</span></span>`,
-                 news: false, compared: true, sameBuild: true };
+        const text = !same ? t("ver.otherBuild")
+            : built !== null && built > Date.UTC(1980, 0, 1) / 1000
+                ? t("ver.newestBuildOn", { date: fmtDay(ctn.created) }) : t("ver.newestBuild");
+        return buildCell(text, tip, same, rec, muted);
     }
 
     function versionCell(ctn, rec, inst, radarOk, pick) {
@@ -500,8 +521,7 @@
             if (rec.newest) return muted(t("ver.newestOnly", { v: rec.newest }), t("ver.newestOnlyTip"));
             return muted("—", t("ver.notCovered"));
         }
-        const stale = rec.stale
-            ? ` <span class="dm-muted" title="${esc(rec.error || "")}">${esc(t("ver.stale"))}</span>` : "";
+        const stale = staleNote(rec);
         const reach = Array.isArray(rec.reach) ? rec.reach : [];
         const levels = [];
         let news = false;
