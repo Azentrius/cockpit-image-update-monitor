@@ -180,7 +180,7 @@
             `<td data-label="${L("col.image")}"><span class="dm-cell"><span class="az-mono">${esc(o.image || "")}</span>` +
               (o.kind === "retag" ? `<span class="dm-row-note">${esc(t("op.retag", { from: o.from_tag, to: o.to_tag }))}</span>` : "") +
               (o.kind === "dbmajor" ? `<span class="dm-row-note">${esc(t("op.dbmajor", { from: o.from_major, to: o.to_major }))}</span>` +
-                  (o.kept ? `<span class="dm-row-note">${rich(t("op.kept", { major: o.kept.major, where: o.kept.where,
+                  (o.kept ? `<span class="dm-row-note">${esc(t("op.kept", { major: o.kept.major, where: o.kept.where,
                                                                              size: o.kept.bytes == null ? "?" : human(o.kept.bytes) }))}</span>` : "")
                   : "") +
             `</span></td>` +
@@ -190,11 +190,23 @@
             `<td class="az-cell-actions"><span class="dm-cell">` +
               (o.can_rollback ? textButton("history", t("rb.button"), `data-op="${i}"`) + iconSlot(logButton(o, i))
                               : logButton(o, i)) +
+              (o.kept && o.kept.can_release ? iconButton("trash", t("btn.release"), `data-release="${i}"`) : "") +
             `</span></td></tr>`).join("");
         $("dm-ops-empty").hidden = b.ops.length > 0;
         $("dm-ops-table").hidden = b.ops.length === 0;
         ops.querySelectorAll("button[data-op]").forEach((btn) => {
             btn.addEventListener("click", () => P.startRollback(b.ops[Number(btn.dataset.op)]));
+        });
+        // The data a database major keeps: released for good (delete-olddata).
+        ops.querySelectorAll("button[data-release]").forEach((btn) => {
+            const o = b.ops[Number(btn.dataset.release)];
+            btn.addEventListener("click", () => confirmAndRun({
+                title: t("rel.title"),
+                desc: t("rel.desc", { major: o.kept.major, where: o.kept.where,
+                                      size: o.kept.bytes == null ? "?" : human(o.kept.bytes) }),
+                confirm: { label: t("rel.confirm"), danger: true, argv: () => [UPDATE_CMD, "delete-olddata", o.id] },
+                onDone: (r) => { if (r.ok) { dlg.result(t("rel.ok"), true); return true; } return false; },
+            }));
         });
         ops.querySelectorAll("button[data-log]").forEach((btn) => {
             btn.addEventListener("click", () => showLog(b.ops[Number(btn.dataset.log)]));

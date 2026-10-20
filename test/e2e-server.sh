@@ -879,6 +879,8 @@ check "dbmajor again, then delete-olddata: PostgreSQL 17 with the data, the old 
     '[ $RC = 0 ] && [ $RC2 = 0 ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 17 ] && [ "$(DATA)" = "$DATA0" ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_pgdata-pg16-")" ]'
 python3 $H delete-olddata "$OPM2" > /tmp/e2e-m6.log 2>&1; RC=$?
 check "delete-olddata twice: exit 2, nothing kept any more" '[ $RC = 2 ]'
+CR=$(jget "$(python3 $H backups)" '[(o["can_rollback"], "kept" in o) for o in d["ops"] if o["id"] == "'"$OPM2"'"]')
+check "backups after the release: no rollback offered any more, nothing kept" '[ "$CR" = "[(False, False)]" ]'
 
 echo
 if [ "$FAIL" = 0 ]; then echo "E2E: ALL CHECKS PASSED"; else echo "E2E: FAILURES"; fi

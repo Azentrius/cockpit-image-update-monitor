@@ -731,8 +731,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Docker with Compose 2.8 or newer only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated. See [Supported systems](#supported-systems).
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “not in a registry”, like images built on the server.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
-- **Database majors** are manual in the page (dump, new instance, restore). PostgreSQL majors can be
-  run with the helper since 0.23.0 (`diun-update.py dbmajor`, stage 5); the page's assistant follows.
+- **Database majors:** PostgreSQL majors by dump and restore since 0.23.0 (stage 5): in *Change version*,
+  for databases whose data lies in a named volume or a bind mount. PostgreSQL 18 needs `PGDATA` in the
+  compose file; MariaDB/MySQL majors and pgvector's `pg17` tags stay manual.
 - **Release notes** come only from releases on GitHub, for images whose repository is known (list, label, ghcr.io). Projects that publish them elsewhere (postgres, GitLab) get a note instead. Without a login GitHub allows 60 requests per hour per address; the radar shares that with anything else on the server.
 - **Tag changes** the add-on cannot make safely (YAML anchors, `include:`, a variable used elsewhere or built from several) stay manual; the dialog names the reason.
 - **Floating tags:** what the tag points to is resolved through the registry only when a version tag has the same digest. Builds without a version tag (e.g. from the main branch) have no version number; then the plan warns that the size of the jump is unknown. The overview calls such a build up to date when the container runs it and the registry has no release tags, or (on Docker Hub) when it was pushed after the newest release.
@@ -753,7 +754,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | **done** (0.11.0) |
 | 3 | Release notes / changelog links per version, hints on breaking changes | **done** (0.23.0) |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
-| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | **in progress** (0.23.0: PostgreSQL by dump and restore in the helper, with rollback; the page's assistant follows) |
+| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | **in progress** (0.23.0: PostgreSQL by dump and restore, with rollback and release of the old data) |
 | 6 | Distribution: packages and Cockpit's Applications page, private registries, Podman, several hosts | **in progress** (0.12.0: packages, Applications page) |
 
 ---
