@@ -239,6 +239,20 @@ what failed, what was rolled back.
 
 ## Stage 5 – Guided database majors
 
+In progress. Since 0.23.0 the helper does a PostgreSQL major by dump and restore (`diun-update.py
+dbmajor`, see [docs/INTERNALS.md](docs/INTERNALS.md#dbmajor-database-major-stage-5-since-0230)), with
+its rollback and the release of the kept data; the end-to-end test runs 16 → 17 with test data, the
+rollback and the release. Open: the assistant in the page, MariaDB/MySQL, path B. Where it differs
+from the plan below:
+- No new volume and no change of the volume line: the old data is moved aside (into a volume of its
+  own next to a named volume, into a sibling directory of a bind mount), by renames on the same
+  filesystem, and the new major starts on the emptied place. The compose file changes in its tag line
+  only (stage 2). The old data stays until released; a rollback moves it back.
+- The services that wait for the database are stopped from the dump on, so that nothing is written
+  that the dump lacks; the extensions in use are checked in the new image before anything changes.
+- From 18 on the image keeps its data in `/var/lib/postgresql/18/docker`: without `PGDATA` in the
+  compose file (or the volume at `/var/lib/postgresql`) the plan refuses and says what to change.
+
 **Goal:** Postgres 16 → 18 (and MariaDB majors) guided instead of by hand.
 
 **Path A, dump/restore:**

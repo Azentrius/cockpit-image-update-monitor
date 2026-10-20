@@ -437,7 +437,7 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 ## Security model
 
 - **Root code in one place only.** Everything Cockpit or systemd runs as root lives in `/usr/lib/cockpit-image-updates` (root-owned, from the package). `/var/lib/diun` is **writable from the Diun container**; nothing is ever run from there.
-- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run` and `retag … --expect <fingerprint>`). The Status Board calls only `status --lang <xx>`.
+- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run` and `retag … --expect <fingerprint>`; for stage 5 `dbmajor … --dry-run`, `dbmajor … --expect <fingerprint>` and `delete-olddata <op-id>`). The Status Board calls only `status --lang <xx>`.
   - Container names, operation IDs, dump paths, rollback tags, target tags and fingerprints are checked by regex. Path tricks (`../`) are refused. A target tag must also be one of the versions the radar offers.
 - **Your compose files.** Only a tag change writes to them, and only the lines its preview showed: it makes the plan again and stops if the result differs from what was shown (a fingerprint). Before writing it keeps byte-exact copies under `/var/backups/image-updates/compose/` (root only), writes atomically with the original owner and mode, and checks the result with `docker compose config`; a failed check puts the files back before any container changes. A rollback restores them, unless they were edited afterwards.
   - `delete-image` and the cleanup delete only `…:rollback-YYYYMMDD-HHMMSS` and never an image in use.
@@ -731,7 +731,8 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Docker with Compose 2.8 or newer only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated. See [Supported systems](#supported-systems).
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “not in a registry”, like images built on the server.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
-- **Database majors** are manual (dump, new instance, restore), see stage 5.
+- **Database majors** are manual in the page (dump, new instance, restore). PostgreSQL majors can be
+  run with the helper since 0.23.0 (`diun-update.py dbmajor`, stage 5); the page's assistant follows.
 - **Release notes** come only from releases on GitHub, for images whose repository is known (list, label, ghcr.io). Projects that publish them elsewhere (postgres, GitLab) get a note instead. Without a login GitHub allows 60 requests per hour per address; the radar shares that with anything else on the server.
 - **Tag changes** the add-on cannot make safely (YAML anchors, `include:`, a variable used elsewhere or built from several) stay manual; the dialog names the reason.
 - **Floating tags:** what the tag points to is resolved through the registry only when a version tag has the same digest. Builds without a version tag (e.g. from the main branch) have no version number; then the plan warns that the size of the jump is unknown. The overview calls such a build up to date when the container runs it and the registry has no release tags, or (on Docker Hub) when it was pushed after the newest release.
@@ -752,7 +753,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | **done** (0.11.0) |
 | 3 | Release notes / changelog links per version, hints on breaking changes | **done** (0.23.0) |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
-| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | idea |
+| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | **in progress** (0.23.0: PostgreSQL by dump and restore in the helper, with rollback; the page's assistant follows) |
 | 6 | Distribution: packages and Cockpit's Applications page, private registries, Podman, several hosts | **in progress** (0.12.0: packages, Applications page) |
 
 ---

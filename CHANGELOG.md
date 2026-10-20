@@ -82,6 +82,21 @@ after the install, when the radar is set up).
   in again. Tests: `test/partial-load.js` (new); the Cockpit job accepts a 404 for a file new in this
   build in the reload right after the upgrade (with the browser's lines about it, and the requests
   that loading again breaks off) only when the page then shows the new version.
+- **Database majors in the helper** (stage 5, PostgreSQL). `diun-update.py dbmajor <container> <tag>
+  --dry-run` plans the major (the tag change of stage 2 to the new major from the radar's choices, where
+  the data lies and where the new major will keep it, the services that wait for the database, the
+  extensions in use, the space) or names why not; `--expect <fingerprint>` runs it by dump and
+  restore: the new image and its extensions checked, a rollback tag, the waiting services stopped, a
+  dump and every table counted, the tag line written, the database stopped and its data moved aside
+  (into a volume of its own, or a sibling directory, by renames: no second copy), the new major started
+  on the emptied place, the dump restored, the counts compared, the waiting services started. The old
+  data stays until `delete-olddata` releases it; `rollback` moves it back and keeps the new major's.
+  PostgreSQL 18 needs `PGDATA` in the compose file (or the volume at `/var/lib/postgresql`); the plan
+  says so. The page's assistant follows; the history already names a major and the data it keeps, and
+  its rollback says what happens to the data. Tests: `test/major_test.py` (new: the plan and every refusal,
+  counts, restore errors, moving data aside and back, the release) and section 17 of
+  `test/e2e-server.sh` (16 to 17 with test data in two databases, an extension and a role; the data
+  and checksums the same after the major, after its rollback and after a second major; the releases).
 
 ## 0.22.0 – 2026-10-20
 

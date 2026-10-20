@@ -46,6 +46,9 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `radar` | action, no dialog | text; waits for the radar run (`systemctl start diun-radar.service`) |
 | | `retag <container> <tag> --dry-run` | read (since 0.11.0; the preview in “Change version”) | one JSON object: the `plan` plus `retag`, see below |
 | | `retag <container> <tag> --expect <fingerprint> [--no-dump]` | action (since 0.11.0) | text + `@@RESULT {…}` |
+| | `dbmajor <container> <tag> --dry-run` | read (since 0.23.0; stage 5, PostgreSQL) | one JSON object: the `retag` plan plus `major`, see below |
+| | `dbmajor <container> <tag> --expect <fingerprint>` | action (since 0.23.0) | text + `@@RESULT {…}` |
+| | `delete-olddata <op-id>` | action (since 0.23.0) | text: releases the data a database major kept |
 | | `status --lang en\|de` | read (since 0.20.0; the Status Board, also **without root**) | one JSON object, schema 1, see [`status`](#status-diun-updatepy-since-0200) |
 | `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – (`--output` also writes `status.json` and, since 0.23.0, `releases.json` next to the file) |
 
@@ -384,6 +387,72 @@ is (since 0.18.1: an earlier attempt put it back, or the run ended before writin
 go back, the old tag points to the rollback image again and the services are recreated. The copies
 stay with the history entry.
 
+### `dbmajor` (database major, stage 5, since 0.23.0)
+
+A PostgreSQL major (16 → 17) by dump and restore, with the tag change of stage 2 for the tag line.
+
+`dbmajor <container> <tag> --dry-run` is `retag … --dry-run` (which refuses a database major,
+`db-major`) for the database's new major tag from the radar's `choices`, plus `major`:
+
+```json
+"major": {"possible": true, "reason": null, "detail": null, "from_major": 16, "to_major": 17,
+          "data": {"type": "volume", "name": "glitchtip_pgdata", "driver": "local",
+                   "source": "/var/lib/docker/volumes/glitchtip_pgdata/_data",
+                   "destination": "/var/lib/postgresql/data"},
+          "pgdata": "/var/lib/postgresql/data", "stop": ["web", "worker"], "extensions": ["pgcrypto"],
+          "data_bytes": 162529280, "data_free": 84654432256, "fingerprint": "…64 hex…"}
+```
+
+- `data`: the mount that holds the container's `PGDATA` (its environment, else
+  `/var/lib/postgresql/data`; the longest destination that contains it). `pgdata`: where the new
+  major will keep its data: the compose file's `PGDATA` for the service, else
+  `/var/lib/postgresql/data`, from 18 on `/var/lib/postgresql/18/docker` (the image's default since
+  18). It must lie in `data`, or the new major's data would not be in the volume.
+- `stop`: the running services that wait for the database (`dependents`); they are stopped from the
+  dump on, so that nothing is written that the dump lacks. `extensions`: those in use in any database
+  (`pg_extension`, without `plpgsql`); the run checks that the new image ships them.
+- `data_bytes`: the clusters' size (`pg_database_size`); `data_free`: free space where the data lies
+  (the new cluster needs about as much again, as the old data stays).
+- `fingerprint`: of the tag change's fingerprint, `data`, `pgdata` and `stop`.
+- `reason` when not possible: the tag change's own (`not-offered`, `anchors`, …), or
+  `major-not-postgres` (the container is no PostgreSQL server), `major-several` (more than one
+  container or service on the image: one database per run), `major-stopped`, `major-not-newer` (the
+  target is no newer major, or unknown, e.g. a tag like `latest`), `major-no-volume` (`PGDATA` in no
+  volume or bind mount), `major-volume-driver` (not the `local` driver), `major-anonymous-volume`,
+  `major-bind-mountpoint` (a bind mount that is a mount point of its own: the data cannot move to a
+  sibling by renaming), `major-pgdata` (`detail`: the new major's data directory and the mount; for 18
+  add `PGDATA: /var/lib/postgresql/data` to the service's environment, or mount the volume at
+  `/var/lib/postgresql`), `major-unreadable` (the extensions could not be read), `major-space`.
+  pgvector images (`pg17`) have no version tags the radar can compare: no choices, `no-choices`.
+
+`dbmajor <container> <tag> --expect <fingerprint>` plans again (exit 5 when anything differs), then:
+
+1. pulls the new image (a failed pull goes on when it is on the server) and checks that it has the
+   extensions (`ls "$(pg_config --sharedir)/extension"`, `docker run --network none`);
+2. tags the running image as `<repo>:rollback-<stamp>`;
+3. stops `stop` (`docker compose stop`);
+4. dumps the database (`pg_dumpall`, as an update does) and counts every table of every database
+   exactly (`count(*)`, `"database|schema.table|rows"`);
+5. writes the tag line (stage 2: a byte-exact copy, `docker compose config`); the run is in the
+   history from here on.
+   Until here anything that ends the run takes back what it did and starts `stop` again (exit 5).
+6. stops the database and moves its data aside, by renames on the same filesystem: a named volume's
+   into a new volume `<volume>-pg<old>-<stamp>` (label `image-updates.op`), a bind mount's into a
+   sibling directory `<path>.pg<old>-<stamp>` (owner and mode as the original). An entry that does
+   not move takes back the others: the data is never split.
+7. starts the new major on the empty directory (`up -d --no-deps --pull never`) and waits until it
+   accepts connections over TCP (`pg_isready -h 127.0.0.1`, at most 300 s): while the image sets up
+   a new cluster, its server listens on the socket only.
+8. drops the database the image created on its first start (`POSTGRES_DB`, empty) and restores the
+   dump with `psql` (`ON_ERROR_STOP=0`); any `ERROR:` line but the existing role of `POSTGRES_USER`
+   fails the run (`reason.source: "restore"`). Then it counts again: any difference fails it
+   (`reason.source: "counts"`, the first difference as `line`). `vacuumdb --analyze-only` renews the
+   statistics (a failure there is a note).
+9. starts `stop` again and waits for them (`wait_healthy`).
+
+From step 6 on a failure is a failed run (exit 4) with its rollback; `stop` stays stopped until it is
+rolled back. `@@RESULT` adds `image`, `backup` and `old_data` (where the old data is kept).
+
 ### `rollback <op-id>`
 
 Takes the update lock. Before anything changes (otherwise exit 2 / 3 / 5, nothing touched):
@@ -612,6 +681,11 @@ rollback marks the operation with `rolled_back`, `rollback_ts`, `rollback_status
   unhealthy makes the update fail (exit 4) with its own `reason`.
 - `new_digests` (since 0.9.0): the registry digests of the new image (`RepoDigests`, `sha256:…`), the
   values Diun reports as `digest`. `[]` for images built or tagged locally.
+- **Database major** (since 0.23.0): `kind: "dbmajor"`, the fields of a tag change plus `from_major`,
+  `to_major`, `data` (the mount), `stopped` (the services stopped), `old_data` (where the old data is
+  kept: `{"type": "volume", "name", "path"}` or `{"type": "bind", "path"}`). A rollback adds
+  `new_data` (the new major's data, kept) and sets `old_data` to `null` once the data is back;
+  `delete-olddata` adds `data_released`.
 - **Tag change** (since 0.11.0): `kind: "retag"`, `image` is the old reference, plus `to_image`,
   `from_tag`, `to_tag`, `changes` (`file`, `line`, `old`, `new`), `backup` (the folder) and
   `backup_files` (`path`, `backup`, `sha256` before, `new_sha256` after). `backups` leaves
@@ -631,7 +705,10 @@ rollback marks the operation with `rolled_back`, `rollback_ts`, `rollback_status
   `--- Tried again ---` line.
 
 `backups` returns the last 30 operations, with `can_rollback`, `active`, `log` and `rollback_log`
-(whether output is kept) added and without paths, image IDs and `pid`. `rollback_gone: true` (since
+(whether output is kept) added and without paths, image IDs and `pid`. A database major (since
+0.23.0) has `kept` while the data it keeps is there: `{"where", "bytes", "major", "can_release"}`
+(the old major's after a run not rolled back, the new major's after a rollback; releasing is possible
+after a good run or a rollback, `delete-olddata`). `rollback_gone: true` (since
 0.22.0) marks a run that could be rolled back but whose rollback image no longer exists (deleted by
 the cleanup, with *Delete* or outside the add-on, e.g. `docker image prune -a`); the history then says
 “Rollback copy gone” with the image in the tooltip instead of only leaving the rollback button out.
@@ -912,6 +989,7 @@ roll-outs pending, 17 new versions”).
 | File | Checks |
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, line tags (release by digest, the tag's number on a miss, exact tags untouched, a registry outage keeping the release per image ID), a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
+| `test/major_test.py` | the database major's plan and every reason it refuses (Docker and compose stood in for), where a new major keeps its data (18 with and without `PGDATA`, a volume at `/var/lib/postgresql`), counts compared, the error lines of a restore, data moved aside and back, also breaking off in the middle, which kept places may be deleted, the refusals of `delete-olddata` |
 | `test/notes_test.py` | `diunnotes.py` with a fake GitHub (a request to the real one fails it): the source (known, also against a label, the labels in their forms, the second image of a tag, ghcr.io, other hosts, names GitHub would not take), versions of interest per record and per source, releases of an answer (drafts, pre-releases, tags without a version, cut text, links, kinds of tags), which of them (by version not by date, the image's kind of tag, newer than installed, `KEEP` and `more`), when a source is asked again (`RECHECK`, `TTL`, a newer or older version, `missing`, errors), GitHub's limit (403 none left, 403 `Retry-After`, 429: no further request, the last answer kept), a server error, no network, `RESERVE`, `MAX_REQUESTS`; the radar run writing `source` and `releases.json` (644), GitHub down (the last releases kept), a broken module or label not failing the run |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
 | `test/status_test.py` | `diunstatus.py` and `diun-update.py status`: the page's rules for the rows (Diun's event of the tag, `docker.io/library/`, another tag, a digest reference, dismissed, the same build in Docker's and Diun's time, a date before 1980, the newest event, roll-out first, CI jobs, no digest, a newer patch, a database major, `by_tag`, an empty comparison, a line tag refined by the radar, the base of an image built here), failed updates from the history (rolled back, a failed rollback also as written up to 0.18.0, aborted, still running, `discarded`; which later run settles which: another service and tag of the same project, the same image in other compose files or another directory, a retry and a tag change of the same services, overlapping groups, rollbacks and aborted runs next to an unrelated success, entries without services; the resulting state, summary and detail), the radar's age, state and summary in English and German with plurals, the contract's shape, no German in English, the fixture `status.json` of real host data, `status` without the file, with an unreadable one, from the file in German, the radar's age judged when asked, the history as root and the file without root, Docker not answering (the last file stays), `events.jsonl` as a link or a pipe and a large one, the arguments (exit 64, no root needed), the write after `rollback` and `cleanup` (silent) and none after `--dry-run`, a wrong call or without root, the radar run writing it and not failing for it; the `link` of every item in every state and language, and a link the Status Board would not take caught by the shape check |
@@ -938,7 +1016,7 @@ roll-outs pending, 17 new versions”).
 | `test/harness.js` | prints the whole table (smoke test, also for looking at it) |
 | `tools/check-version.sh` | version in `diun.js` = `?v=` in `index.html` = section in `CHANGELOG.md` |
 | `tools/check-units.sh` | `systemd-analyze verify` for the units (CI lint step, next to shellcheck and ruff) |
-| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres), `imgupd-test-my` (MariaDB, MySQL) and `imgupd-test-reg` (pulls against a local registry: nothing newer, registry down without and with a newer image here); since 0.19.0 every dump is restored into a fresh Postgres, MariaDB and MySQL container and compared object by object with the original (half a dump must be caught), the update lock is held by a separate process instead of a race, and CI runs it (job `e2e`, and before every release); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again); since 0.18.1 a rollback refused while the compose file names another image; since 0.20.0 `status.json` after the failed update (644, without the project folder), `status` as root and without root (`nobody`, German) with the failure, and without it after the rollback; at the end `status.json` is written again without the test project. `E2E_LIB=<folder>` runs helpers that are not installed yet. |
+| `test/e2e-server.sh` | real Docker host, throw-away projects `imgupd-test` (Postgres), `imgupd-test-my` (MariaDB, MySQL) and `imgupd-test-reg` (pulls against a local registry: nothing newer, registry down without and with a newer image here); since 0.19.0 every dump is restored into a fresh Postgres, MariaDB and MySQL container and compared object by object with the original (half a dump must be caught), the update lock is held by a separate process instead of a race, and CI runs it (job `e2e`, and before every release); since 0.11.0 also the tag change in the compose file, through `.env` and in an override file with their rollbacks, and the refusals for a shared variable and an anchor (the test puts a radar record for its local image into `versions.json` and removes it again); since 0.18.1 a rollback refused while the compose file names another image; since 0.20.0 `status.json` after the failed update (644, without the project folder), `status` as root and without root (`nobody`, German) with the failure, and without it after the rollback; at the end `status.json` is written again without the test project. `E2E_LIB=<folder>` runs helpers that are not installed yet. Since 0.23.0 a database major (section 17, project `imgupd-test-major`): PostgreSQL 16 to 17 with test data in two databases, an extension and a role, the plan, another fingerprint refused, the data, checksums and role the same after the major, the old data kept in a volume of its own, the waiting app running again, the history and `backups`; the rollback (16 with the old data, the file byte-identical, the new major's data kept), the release after the rollback and after a second major. |
 | `test/upgrade_base_test.py` | `tools/upgrade-base.py`, the release the CI upgrade test starts from: a build newer than the newest release, a build of a version released already (the release before it), no older release with packages (exit 3), Semantic Versioning precedence instead of text order, drafts, pre-releases and releases without packages left out |
 | `test/package-upgrade.sh` | CI (job `upgrade`), in a throw-away Debian 13 or Fedora 43 container: the release from `tools/upgrade-base.sh` (checked against `SHA256SUMS` and its build provenance), data a server has, this build over it; the version went up by the package manager's own comparison, the package database names this build, the files on disk are this build's byte for byte (`dpkg --verify` and `diff` against the `.deb`, `rpm -V` and the digests of the `.rpm`), the data unchanged, removed again with the data kept. Without an older release it says so and checks a fresh install |
 | `test/cockpit-setup.sh`, `test/cockpit-session.py` | CI (job `cockpit`), a real Cockpit with systemd and Docker on a throw-away GitHub runner, Playwright with Chromium through Cockpit's login: this build installed with apt over the release before, the page reloaded and logged in again after the upgrade (the new version, `i18n.js` of this build); the page in Cockpit's menu; since 0.21.0 right after each login the page loaded hidden for the menu and not started, and the menu's status icon (the shell's `sessionStorage` and the icon) as `diun-update.py status` gives it, after the login, after the radar runs, the roll-out and the rollback, and in German for the user without sudo before the page is opened; no JavaScript error and no failed request of the add-on's files or frame, and no other kind of error than Cockpit shows on its own (a login before the add-on is installed is the baseline; on Ubuntu 24.04 Cockpit 314 answers `*/po.js` and `*/po.manifest.js` with 404 on every page; the page's own request for Red Hat Mono, which that Cockpit does not ship, was caught this way; the page of the release before is checked only for loading, its errors are listed apart in the report); with administrative access (a sudo user) and without (a user without sudo, German browser: the hint, no actions); skopeo and the radar set up from the page (timer on, a first run), “Run radar now” (a new run); a throw-away compose project (a local registry, busybox 1.36.1 running, 1.37.0 pulled under the same tag): “Roll out image” with its plan, live output and result, the container on the new image, then the rollback from the history; since 0.23.0 the Status Board's links, `cockpit.jump` from the loaded page to its places (the tab, the address, no reload) and back to the history after a tab chosen on the page. Versions, steps and results in the job summary and the artifact `cockpit-session` (with screenshots) |

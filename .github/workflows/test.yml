@@ -132,7 +132,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/src" -w /src/test python:3.8-slim sh -ec '
             python3 --version
-            for t in radar_test.py notes_test.py inv_test.py update_test.py proc_test.py; do python3 "$t" > "/tmp/$t.log" || { cat "/tmp/$t.log"; exit 1; }; echo "PASS $t"; done'
+            for t in radar_test.py notes_test.py inv_test.py update_test.py major_test.py proc_test.py; do python3 "$t" > "/tmp/$t.log" || { cat "/tmp/$t.log"; exit 1; }; echo "PASS $t"; done'
 
   # The packages on more distributions than the test job: install (the package manager
   # resolves the dependencies from the distribution, the versions it took are printed), the
