@@ -68,6 +68,20 @@ after the install, when the radar is set up).
 - **Tests without a tag filter.** Five jsdom tests took the `<script>` tags out of `index.html` with a
   regular expression, which CodeQL reports as an incomplete tag filter (`js/bad-tag-filter`). They
   now remove the script elements from the parsed page, as the other tests do.
+- **The page's code in eight scripts** (technical debt in the roadmap). `plugin/diun.js`, about 2,000
+  lines, is split into `common.js`, `dialog.js`, `notes.js`, `update.js`, `retag.js`, `overview.js`,
+  `backups.js` and `diun.js`: classic scripts that share `window.ImageUpdatesPage`, loaded by
+  `index.html` in that order (no ES modules: jsdom, which runs the tests of the page, runs none). The
+  code moved as it was; only the calls between the scripts changed, and the counter that drops an
+  answer arriving after another dialog opened is `ticket()` in `dialog.js`. The jsdom tests take the
+  scripts from `index.html` (`test/page-scripts.js`), and `tools/check-version.sh` checks their `?v=`.
+  Cockpit's bridge serves a file new in an update only after it read the packages again, which the
+  shell asks for while it loads the page: after an update and a reload of the browser a script can be
+  missing (seen in CI with Cockpit 314). The page then asks the bridge to read the packages again
+  (`cockpit.Packages.Reload`) and loads once more; if a part is still missing, it says to log out and
+  in again. Tests: `test/partial-load.js` (new); the Cockpit job accepts a 404 for a file new in this
+  build in the reload right after the upgrade (with the browser's lines about it, and the requests
+  that loading again breaks off) only when the page then shows the new version.
 
 ## 0.22.0 – 2026-10-20
 

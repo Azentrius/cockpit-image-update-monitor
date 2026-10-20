@@ -2,7 +2,7 @@
 /* Image Update Monitor, a Cockpit add-on: the texts of the page in English
  * (I18N.en) and German (I18N.de, addressing the user with "Sie"). Every key
  * exists in both; the tests check that the English page contains no German.
- * diun.js reads them from window.ImageUpdatesI18n, menu-status.js the menu.*
+ * common.js reads them from window.ImageUpdatesI18n, menu-status.js the menu.*
  * keys (the tooltip of the status icon in Cockpit's menu, worded as the
  * summary of `diun-update.py status`); index.html loads this file first.
  * Placeholders in braces ({name}) are filled in by the scripts. */
@@ -21,6 +21,8 @@ window.ImageUpdatesI18n = {
         "upd.stepNow": "Update now: dump, rollback copy, download and restart",
         "upd.stepPull": "Only download now and roll it out later, e.g. in a maintenance window; nothing that runs changes",
         "upd.pulledOk": "Image downloaded{v}. The containers keep running unchanged; roll it out with “Roll out image”, for example in a maintenance window.",
+        "status.partsTitle": "The page did not load completely.",
+        "status.parts": "Cockpit did not deliver {files} of this version of the add-on, not even after reading its packages again. Log out of Cockpit and in again.",
         "notes.title": { one: "Release notes {from} → {to}: 1 release", other: "Release notes {from} → {to}: {n} releases" },
         "notes.titleAfter": { one: "Release notes after {from}: 1 release", other: "Release notes after {from}: {n} releases" },
         "notes.flags": "mentions {words}",
@@ -407,6 +409,8 @@ window.ImageUpdatesI18n = {
         "upd.stepNow": "Jetzt aktualisieren: Dump, Rollback-Kopie, herunterladen und neu starten",
         "upd.stepPull": "Nur herunterladen und später ausrollen, z. B. im Wartungsfenster; nichts Laufendes ändert sich",
         "upd.pulledOk": "Image heruntergeladen{v}. Die Container laufen unverändert weiter; ausrollen mit „Image ausrollen“, zum Beispiel im Wartungsfenster.",
+        "status.partsTitle": "Die Seite wurde nicht vollständig geladen.",
+        "status.parts": "Cockpit hat {files} dieser Version des Add-ons auch nach erneutem Einlesen der Pakete nicht ausgeliefert. Melden Sie sich bei Cockpit ab und wieder an.",
         "notes.title": { one: "Release Notes {from} → {to}: 1 Release", other: "Release Notes {from} → {to}: {n} Releases" },
         "notes.titleAfter": { one: "Release Notes nach {from}: 1 Release", other: "Release Notes nach {from}: {n} Releases" },
         "notes.flags": "erwähnt {words}",

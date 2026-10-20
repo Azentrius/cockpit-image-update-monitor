@@ -21,7 +21,8 @@ const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
 const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
 // The page as index.html loads it: the texts, the menu's status, the code.
-const js = ["i18n.js", "menu-status.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
+// The page's scripts as index.html loads them, menu-status.js too (test/page-scripts.js).
+const js = require("./page-scripts").pageScripts({ menu: true });
 const STATUS = "/var/lib/diun-radar/status.json";
 const statusText = fs.readFileSync(path.join(FIX, "status.json"), "utf8");
 const status = JSON.parse(statusText);

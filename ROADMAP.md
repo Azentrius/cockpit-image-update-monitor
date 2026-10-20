@@ -280,7 +280,7 @@ Packages and Cockpit's Applications page are done in 0.12.0 (see [CHANGELOG](CHA
 
 | Topic | Proposal |
 |---|---|
-| `plugin/diun.js` has ~1,550 lines in one file | split into ES modules (`<script type="module">` works under Cockpit's CSP without a build step): `i18n.js`, `dialog.js`, `updates.js`, `backups.js` |
+| ✅ `plugin/diun.js` had ~2,000 lines in one file | done in 0.23.0: `common.js`, `dialog.js`, `notes.js`, `update.js`, `retag.js`, `overview.js`, `backups.js` and `diun.js` (texts in `i18n.js` since 0.19.0). Classic scripts sharing `window.ImageUpdatesPage`, not ES modules: the jsdom tests run the page's scripts as the browser does, and jsdom runs no modules |
 | Documentation of the JSON formats | update `docs/INTERNALS.md` and the fixtures in `test/fixtures/` with every format change |
 
 ---

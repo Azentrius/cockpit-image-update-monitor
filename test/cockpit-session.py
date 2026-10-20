@@ -53,7 +53,7 @@ os.makedirs(OUT, exist_ok=True)
 report = {"environment": {}, "steps": [], "errors": [], "addon_files": []}
 failed = False
 errors = []          # [kind, text, url, user, phase]
-PHASE = {"now": "baseline"}  # baseline, release before, this build
+PHASE = {"now": "baseline"}  # baseline, release before, upgrade (the reload right after it), this build
 OURS = "/image-updates/"  # the add-on's files and frame (the shell's route has no slash after it)
 responses = []       # [url, status] of the add-on's own files
 shots = 0
@@ -96,6 +96,39 @@ def watch(page, who):
 
 
 BASELINE = set()
+STALE = []           # errors of the reload after the upgrade that are Cockpit's old list of files
+
+
+def new_files(old_deb):
+    """The page's files this build brings that the release before did not have."""
+    page_dir = "/usr/share/cockpit/image-updates/"
+    before = {line.split()[-1].split(page_dir, 1)[1] for line in root("dpkg-deb", "-c", old_deb).splitlines()
+              if page_dir in line}
+    return set(os.listdir(page_dir)) - before
+
+
+REFUSED_RE = re.compile(r"Refused to execute script from '([^']+)'")
+
+
+def missed_new_file(e, fresh):
+    """The new file an error says Cockpit did not deliver, or "": its 404, the failed
+    request, and the console's "Failed to load resource" and "Refused to execute script
+    from '…'" (Cockpit's 404 is an HTML page, which the browser does not run)."""
+    refused = REFUSED_RE.search(e[1]) if e[0] == "console" else None
+    if refused:
+        url = refused.group(1)
+    elif e[0] in ("http 404", "requestfailed") or (e[0] == "console" and "Failed to load resource" in e[1]):
+        url = e[2] or e[1].split(" ")[0]
+    else:
+        return ""
+    name = url.split("/image-updates/", 1)[-1].split("?")[0] if "/image-updates/" in url else ""
+    return name if name in fresh else ""
+
+
+def broken_off(e):
+    """A request of the add-on's files the browser broke off (net::ERR_ABORTED): the page
+    loading itself again, or the session closed, while it still loaded fonts or styles."""
+    return e[0] == "requestfailed" and "ERR_ABORTED" in e[1] and OURS in e[2]
 
 
 def kind(e):
@@ -313,14 +346,24 @@ def main():
             note("this build installed over it (apt)",
                  root("dpkg-query", "-W", "-f", "${Version}", "cockpit-image-update-monitor").startswith(E["NEW_VERSION"]),
                  root("dpkg-query", "-W", "-f", "${Version}", "cockpit-image-update-monitor"))
-            PHASE["now"] = "this build"
+            # Cockpit's bridge keeps the list of the package's files it read first in this session;
+            # files new in this build answer 404 until it reads the packages again. The shell asks
+            # for that when it starts, while it loads the page: the page may miss them, asks the
+            # bridge itself (cockpit.Packages.Reload) and loads once more (2026-10-20, this race).
+            # Those 404s are Cockpit's; anything else stays an error.
+            PHASE["now"] = "upgrade"
             page.reload()
             frame = page.frame_locator(FRAME)
             frame.locator("#dm-sig-version").wait_for()
             poll(page, lambda: version_of(frame) == E["NEW_VERSION"], 60)
+            fresh = new_files(old)
+            missed = sorted({missed_new_file(x, fresh) for x in errors if x[4] == "upgrade"} - {""})
             note("after the upgrade: reloaded in the same session, the new version", version_of(frame) == E["NEW_VERSION"],
-                 version_of(frame))
-            ctx.close()
+                 version_of(frame) + ("; Cockpit answered 404 for " + ", ".join(missed) +
+                                      " until the page asked it to read the packages again" if missed else ""))
+            ctx.close()     # still the upgrade: what closing breaks off belongs to it
+            STALE.extend(x for x in errors if x[4] == "upgrade" and (missed_new_file(x, fresh) or broken_off(x)))
+            PHASE["now"] = "this build"
         else:
             PHASE["now"] = "this build"
             root("apt-get", "install", "-y", "-q", new)
@@ -386,14 +429,27 @@ def main():
         # After an install the package starts the radar two minutes later, by a timer: the same apt
         # run can restart the resolver or the network (build-host, 2026-10-20). It no longer
         # restarts the running radar timer either, which started the radar at once (OnBootSec=).
+        # The radar timer starts runs of its own, too: 5 minutes after the boot (OnBootSec=; this
+        # runner booted minutes ago, and once that run began in the very second of the check) and
+        # on its calendar. Wait until neither is due and no run is going, so that a run right
+        # after configure can only come from configure.
+        def radar_quiet():
+            up = float(root("cat", "/proc/uptime").split()[0])
+            nxt = root("systemctl", "show", "-P", "NextElapseUSecRealtime", "diun-radar.timer", check=False)
+            due = root("date", "-d", nxt, "+%s", check=False) if nxt and nxt != "n/a" else ""
+            idle = root("systemctl", "is-active", "diun-radar.service", check=False) not in ("activating", "active")
+            return idle and up > 5 * 60 + 20 and (not due.isdigit() or int(due) - time.time() > 120)
+        quiet = poll(page, radar_quiet, 420)
+        uptime = root("cat", "/proc/uptime").split()[0]
         root("/var/lib/dpkg/info/cockpit-image-update-monitor.postinst", "configure", check=False)
         later = root("systemctl", "is-active", "diun-radar-after-install.timer", check=False)
         busy = root("systemctl", "is-active", "diun-radar.service", check=False)
         timer = root("systemctl", "is-active", "diun-radar.timer", check=False)
         root("systemctl", "stop", "diun-radar-after-install.timer", check=False)
         note("after an install: the radar starts two minutes later by a timer, not at once, its timer runs on",
-             later == "active" and busy not in ("activating", "active") and timer == "active",
-             f"after-install timer {later}, radar {busy}, radar timer {timer}")
+             quiet and later == "active" and busy not in ("activating", "active") and timer == "active",
+             f"after-install timer {later}, radar {busy}, radar timer {timer}; "
+             f"no timer run due or going before ({quiet}), up {uptime} s")
         check_menu(page, "en", "after the radar runs")
         shot(page, "radar")
 
@@ -446,7 +502,7 @@ except Exception as e:      # a step that could not even run counts as failed
     except Exception:
         pass
 
-build = [x for x in errors if x[4] == "this build"]
+build = [x for x in errors if x[4] in ("upgrade", "this build") and x not in STALE]
 before = [x for x in errors if x[4] == "release before" and kind(x) not in BASELINE]
 ours = [x for x in build if OURS in x[1] + x[2]]
 note("no JavaScript error and no failed request of the add-on's files or frame", not ours,
