@@ -202,11 +202,12 @@ check("failed and not rolled back, its rollback failed (also as written up to 0.
                           {"name": "gone", "how": "failed"}, {"name": "old", "how": "rollback"}])
 check("a run that still runs is no failure",
       [o["name"] for o in S.failed_ops(ops, alive=lambda pid: pid == 4242)], ["app", "gone", "old"])
-later = dict(ops, **{"20261011-010000-app2": {"id": "20261011-010000-app2", "kind": "update", "container": "app2",
-                                              "project": "p", "image": "docker.io/acme/app:1", "status": "ok"},
+later = dict(ops, **{"20261011-010000-app": {"id": "20261011-010000-app", "kind": "update", "container": "app",
+                                             "containers": ["app"], "project": "p", "image": "docker.io/acme/app:1",
+                                             "status": "ok"},
                      "20261011-010000-cut": {"id": "20261011-010000-cut", "kind": "update", "container": "cut",
                                              "project": "s", "image": "acme/cut:1", "status": "running", "pid": 1}})
-check("the newest update of each image decides: a later success, a run in progress",
+check("a later run of the same containers decides: a success, a run in progress",
       [o["name"] for o in S.failed_ops(later, alive=lambda pid: pid == 1)], ["gone", "old"])
 folded = os.path.join(TMP, "ops.jsonl")
 with open(folded, "w", encoding="utf-8") as f:
@@ -215,6 +216,106 @@ with open(folded, "w", encoding="utf-8") as f:
             json.dumps(OPS[4]) + "\n" + json.dumps({"id": OPS[4]["id"], "status": "discarded"}) + "\n")
 check("the history folded by id, lines taken back left out", S.failed_ops(S.load_ops(folded)), [])
 check("no history: nothing failed", S.failed_ops(S.load_ops(os.path.join(TMP, "none.jsonl"))), [])
+
+
+# A later run settles only the services it ran for, in the same compose files
+# (make_plan: the containers of the project on the same image and started from
+# the same files). Before, the newest run of each repository in a project
+# decided, and a success of another service hid a failure that still stood.
+def run_of(id_, status="ok", kind="update", project="stack", workdir="/opt/stack", files=("/opt/stack/compose.yml",),
+           services=("db16",), containers=None, image="postgres:16", **kw):
+    o = {"id": id_, "kind": kind, "status": status, "project": project, "workdir": workdir, "files": list(files),
+         "services": list(services), "image": image,
+         "containers": list(containers) if containers is not None else [f"{project}-{s}-1" for s in services]}
+    o["container"] = kw.pop("container", o["containers"][0])
+    o.update(kw)
+    return o
+
+
+def open_failures(*runs, alive=lambda pid: False):
+    return S.failed_ops({o["id"]: o for o in runs}, alive=alive)
+
+
+db16_failed = run_of("20261012-010000-db16", "failed")
+db17_ok = run_of("20261012-020000-db17", services=["db17"], image="postgres:17")
+check("same project, another tag and service: the success of db17 leaves the failure of db16",
+      open_failures(db16_failed, db17_ok), [{"name": "stack-db16-1", "how": "failed"}])
+check("the order does not matter: a failure of db16 after a success of db17",
+      open_failures(run_of("20261012-010000-db17", services=["db17"], image="postgres:17"),
+                    run_of("20261012-020000-db16", "failed")), [{"name": "stack-db16-1", "how": "failed"}])
+runner_failed = run_of("20261012-010000-runner", "failed", project="ci", workdir="/opt/ci",
+                       files=["/opt/ci/docker-compose.yml"], services=["runner", "runner-2"], image="acme/runner:1")
+emu_ok = run_of("20261012-020000-emu", project="ci", workdir="/opt/ci", files=["/opt/ci/docker-compose.emu.yml"],
+                services=["runner-emu"], image="acme/runner:1")
+check("the same image in separate compose files: the run of the other file hides nothing",
+      open_failures(runner_failed, emu_ok), [{"name": "ci-runner-1", "how": "failed"}])
+web_a = run_of("20261012-010000-web-a", "failed", project="app", workdir="/opt/a", files=["/opt/a/compose.yml"],
+               services=["web"], containers=["web-a"], image="acme/web:1")
+web_b = run_of("20261012-020000-web-b", project="app", workdir="/opt/b", files=["/opt/b/compose.yml"],
+               services=["web"], containers=["web-b"], image="acme/web:1")
+check("the same project name, service and image in another directory: independent",
+      open_failures(web_a, web_b), [{"name": "web-a", "how": "failed"}])
+check("a successful retry of the same services settles the failure",
+      open_failures(db16_failed, run_of("20261012-020000-db16")), [])
+check("a successful tag change of the same services settles the failure of the old tag",
+      open_failures(db16_failed, run_of("20261012-020000-db16", kind="retag", to_image="postgres:17",
+                                        from_tag="16", to_tag="17")), [])
+check("a failed retry is the failure that counts, once",
+      open_failures(db16_failed, run_of("20261012-020000-db16", "failed", container="stack-db16-1")),
+      [{"name": "stack-db16-1", "how": "failed"}])
+both_failed = run_of("20261012-010000-both", "failed", project="shop", workdir="/opt/shop",
+                     files=["/opt/shop/compose.yml"], services=["db", "web"],
+                     containers=["shop-db-1", "shop-web-1"], container="shop-web-1", image="acme/shop:1")
+web_ok = run_of("20261012-020000-web", project="shop", workdir="/opt/shop", files=["/opt/shop/compose.yml"],
+                services=["web"], containers=["shop-web-1"], image="acme/shop:2")
+check("overlapping groups: web settled later, db still affected, named by a container still affected",
+      open_failures(both_failed, web_ok), [{"name": "shop-db-1", "how": "failed", "services": ["db"]}])
+check("overlapping groups: both settled by a later run of db and web",
+      open_failures(both_failed, web_ok, run_of("20261012-030000-db", project="shop", workdir="/opt/shop",
+                                                files=["/opt/shop/compose.yml"], services=["db"],
+                                                containers=["shop-db-1"], image="acme/shop:1")), [])
+same = dict(project="ops", workdir="/opt/ops", files=["/opt/ops/compose.yml"], image="acme/ops:1")
+rolled = run_of("20261012-010000-a", "failed", services=["a"], rolled_back=True, rollback_status="ok", **same)
+rb_failed = run_of("20261012-010001-b", services=["b"], rolled_back=True, rollback_status="failed", **same)
+cut = run_of("20261012-010002-c", "running", services=["c"], pid=4242, **same)
+other_ok = run_of("20261012-020000-d", services=["d"], **same)
+check("a rollback that worked, a failed rollback, an aborted run: an unrelated later success hides none of them",
+      open_failures(rolled, rb_failed, cut, other_ok),
+      [{"name": "ops-b-1", "how": "rollback"}, {"name": "ops-c-1", "how": "aborted"}])
+check("the run of c still runs: no failure",
+      [o["name"] for o in open_failures(rolled, rb_failed, cut, other_ok, alive=lambda pid: pid == 4242)], ["ops-b-1"])
+check("a later success of b's services settles its failed rollback",
+      open_failures(rb_failed, run_of("20261012-020000-b", services=["b"], **same)), [])
+check("a later failed run of a supersedes the rollback that worked: its failure counts",
+      open_failures(rolled, run_of("20261012-020000-a", "failed", services=["a"], **same)),
+      [{"name": "ops-a-1", "how": "failed"}])
+# Entries written without services, containers or files (older versions):
+# their scope is the container names they name, in any compose files of the
+# project; a later run settles them only for those containers.
+legacy = {"id": "20261001-010000-x", "kind": "update", "container": "x", "project": "p", "image": "acme/x:1",
+          "status": "failed"}
+check("an old entry without services: another container of the same image hides nothing",
+      open_failures(legacy, {"id": "20261002-010000-y", "kind": "update", "container": "y", "project": "p",
+                             "image": "acme/x:1", "status": "ok"}), [{"name": "x", "how": "failed"}])
+check("an old entry without services: a later run naming its container settles it",
+      open_failures(legacy, run_of("20261012-010000-x", project="p", workdir="/opt/p", services=["x"],
+                                   containers=["x"], image="acme/x:1")), [])
+check("an old entry settles a newer one's containers only, never its services",
+      open_failures(run_of("20261001-010000-z", "failed", project="p", services=["z"], containers=["p-z-1"]),
+                    {"id": "20261002-010000-x", "kind": "update", "container": "x", "project": "p",
+                     "image": "postgres:16", "status": "ok"}), [{"name": "p-z-1", "how": "failed"}])
+# The Status Board and the menu icon read state and summary from status.json.
+board = facts()
+board["failed"]["ops"] = open_failures(db16_failed, db17_ok)
+en, de = (S.document(board, lang, NOW, VERSION) for lang in ("en", "de"))
+check("status: the failure of db16 is danger, in the summary and the detail",
+      (en["state"], en["summary"], by_id(en)["failed"].get("detail"), de["summary"]),
+      ("danger", "1 failed update", "stack-db16-1", "1 fehlgeschlagenes Update"))
+board["failed"]["ops"] = open_failures(both_failed, web_ok)
+en, de = (S.document(board, lang, NOW, VERSION) for lang in ("en", "de"))
+check("status: the services still affected after an overlapping run",
+      (en["state"], en["summary"], by_id(en)["failed"].get("detail"), by_id(de)["failed"].get("detail")),
+      ("danger", "1 failed update", "shop-db-1 (still affected: db)", "shop-db-1 (noch betroffen: db)"))
 
 # ------------------------------------------------------- the radar
 doc = S.document(facts(found=False), "en", NOW, VERSION)

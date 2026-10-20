@@ -305,6 +305,76 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     pf.newest = keep.newest;
     pf.tag_now = keep.tag_now;
 
+    // The registry failed in the last run: keep_last_good kept tag_now and the
+    // rest of the record from the run before and marked it stale, with the
+    // error and the time of the last good check. The page shows the last known
+    // build, marked as older data with the error, and claims no fresh check.
+    const keepChecked = pf.checked;
+    const keepNow = JSON.parse(JSON.stringify(pf.tag_now));      // a copy: the steps below change pf.tag_now
+    assert(!("stale" in pf) && !("error" in pf), "the fixture record starts fresh");
+    const staleRec = (r) => Object.assign(r, { stale: true, error: "registry down: connection refused",
+                                               checked: "2026-10-11T08:00:00Z" });
+    const staleMark = (td) => td.querySelector(".dm-stale");
+    const lastGood = new Date("2026-10-11T08:00:00Z").toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
+    delete pf.newest;
+    delete pf.tag_now.after;
+    delete pf.tag_now.pushed;
+    staleRec(pf);
+    const sd = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    c = cells(row(sd, "smtp-relay"));
+    console.log("smtp-relay, no release tag, registry down:", c.slice(4, 6).map((x) => x.textContent.trim()).join(" | "));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()),
+                           ["neuester Build vom " + builtDe + " (Stand älter)", "Aktuell"]);
+    tip = c[4].querySelector(".dm-uptodate").title;
+    assert(!tip.includes("nichts Neueres"), "no claim of a fresh check: " + tip);
+    assert(tip.includes("Bei der letzten erfolgreichen Abfrage lief der Container auf diesem Build"), tip);
+    assert.strictEqual(staleMark(c[4]).title, "Beim letzten Lauf erreichte der Radar die Registry nicht: " +
+                       "registry down: connection refused. Angezeigt ist der Stand vom " + lastGood + ".");
+    const se = boot("en", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    c = cells(row(se, "smtp-relay"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()),
+                           ["newest build from " + builtEn + " (older data)", "Up to date"]);
+    assert(!c[4].querySelector(".dm-uptodate").title.includes("nothing newer"), "no claim of a fresh check (en)");
+    assert(staleMark(c[4]).title.startsWith("The radar's last run could not reach the registry: registry down: connection refused."));
+    // stale and another build: muted, marked, unknown
+    pf.tag_now.digest = "sha256:" + "9".repeat(64);
+    const so = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    c = cells(row(so, "smtp-relay"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["anderer Build (Stand älter)", "Unbekannt"]);
+    assert(staleMark(c[4]), "marked stale");
+    // the next good run: the mark is gone
+    pf.tag_now.digest = keepNow.digest;
+    delete pf.stale;
+    delete pf.error;
+    const sb = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    c = cells(row(sb, "smtp-relay"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["neuester Build vom " + builtDe, "Aktuell"]);
+    assert.strictEqual(staleMark(c[4]), null, "no stale mark after a good run");
+    // the build after a release (Docker Hub), registry down: marked the same way
+    pf.newest = keep.newest;
+    pf.tag_now = JSON.parse(JSON.stringify(keepNow));
+    staleRec(pf);
+    const sa = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    c = cells(row(sa, "smtp-relay"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Build nach 5.1.0 (Stand älter)", "Aktuell"]);
+    tip = c[4].querySelector(".dm-uptodate").title;
+    assert(!tip.includes("nichts Neueres") && tip.includes("Bei der letzten erfolgreichen Abfrage"), tip);
+    assert(staleMark(c[4]).title.includes("registry down: connection refused"));
+    pf.tag_now.digest = "sha256:" + "9".repeat(64);
+    const sao = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev });
+    await flush();
+    c = cells(row(sao, "smtp-relay"));
+    assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Build nach 5.1.0 (Stand älter)", "Unbekannt"]);
+    delete pf.stale;
+    delete pf.error;
+    if (keepChecked === undefined) delete pf.checked; else pf.checked = keepChecked;
+    pf.tag_now = keepNow;
+
     // An image built on the server (a test host, 2026-10-18: caddy-caddy is
     // xcaddy on caddy:2-builder, copied onto caddy:2): no registry shows it,
     // the radar checks the bases of its Dockerfile instead.

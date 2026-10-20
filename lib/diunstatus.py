@@ -284,20 +284,63 @@ def page_rows(containers, by_tag, dismissed, versions):
     return {k: sorted(v) for k, v in rows.items()}
 
 
+def run_scope(o):
+    """What a run of the history ran for, as make_plan grouped it: the
+    services of one compose project started from the same files (working
+    directory and compose files), and the containers it names.
+    Returns (scope, ctx, settles): the units the run stands for until a later
+    run settles them, its compose files (None when not recorded), and the
+    units it settles for earlier runs. A unit is (project, "service", name) or
+    (project, "container", name). Entries without services (older versions)
+    stand for the container names they name; without files they match the
+    project's runs in any files. Conservative: an entry settles no service it
+    does not name, so a failure of unknown scope stays until a later run of
+    the same containers or a rollback."""
+    project = o.get("project") or o.get("container") or ""
+    files = o.get("files")
+    ctx = (o.get("workdir") or "", tuple(str(f) for f in files)) if isinstance(files, list) and files else None
+    services = sorted({s for s in o.get("services") or [] if isinstance(s, str) and s})
+    names = {c for c in o.get("containers") or [] if isinstance(c, str) and c}
+    if isinstance(o.get("container"), str) and o["container"]:
+        names.add(o["container"])
+    svc = [(project, "service", s) for s in services]
+    ctr = [(project, "container", n) for n in sorted(names)]
+    return (svc or ctr), ctx, svc + ctr
+
+
+def settled(done, unit, ctx):
+    """A later run settled this unit: a container by its name, a service in
+    the same compose files (or where the files are not known)."""
+    if unit[1] == "container":
+        return unit in done
+    return any(c is None or ctx is None or c == ctx for c in done.get(unit, ()))
+
+
 def failed_ops(ops, alive=None):
-    """The newest update or tag change of each image (per compose project)
-    that needs a look: failed and not rolled back, its rollback failed, or
-    ended without its last line (aborted) while no process runs it.
-    [{"name": container, "how": "failed" | "rollback" | "aborted"}]."""
+    """The runs (updates and tag changes) that need a look: failed and not
+    rolled back, their rollback failed, or ended without their last line
+    (aborted) while no process runs them. A later run settles an earlier one
+    only for the services it ran for (run_scope): the success of another
+    service of the same project, another tag of the same image or the same
+    image in other compose files hides nothing; a later run of the same
+    services, also a tag change, settles it. A run partly settled names a
+    container still affected and the services still affected.
+    [{"name": container, "how": "failed" | "rollback" | "aborted"[, "services": [...]]}]."""
     alive = alive or helper_alive
-    seen, out = set(), []
+    done, out = {}, []
     for o in sorted(ops.values(), key=lambda o: str(o.get("id") or ""), reverse=True):
         if o.get("kind") not in ("update", "retag") or not isinstance(o.get("image"), str):
             continue
-        key = (o.get("project") or o.get("container") or "", repo_key(o["image"]))
-        if key in seen:
+        scope, ctx, settles = run_scope(o)
+        still = [u for u in scope if not settled(done, u, ctx)]
+        names = sorted(u[2] for u in settles if u[1] == "container" and not settled(done, u, ctx))
+        for u in settles:
+            if u[1] == "container":
+                done[u] = True
+            else:
+                done.setdefault(u, []).append(ctx)
+        if not still:
             continue
-        seen.add(key)
         if o.get("rollback_status") == "failed":
             how = "rollback"
         elif o.get("rolled_back"):
@@ -309,7 +352,11 @@ def failed_ops(ops, alive=None):
         else:
             how = None
         if how:
-            out.append({"name": str(o.get("container") or "?"), "how": how})
+            own = str(o.get("container") or "?")
+            entry = {"name": own if own in names or not names else names[0], "how": how}
+            if len(still) < len(scope) and still[0][1] == "service":
+                entry["services"] = [u[2] for u in still]
+            out.append(entry)
     return sorted(out, key=lambda x: x["name"])
 
 
@@ -394,9 +441,13 @@ def failed_item(facts, lang):
     ops = [o for o in f.get("ops") or [] if isinstance(o, dict)]
     note = {"rollback": tr(lang, " (Rollback fehlgeschlagen)", " (rollback failed)"),
             "aborted": tr(lang, " (abgebrochen)", " (aborted)")}
+
+    def still(o):
+        svc = [str(s) for s in o.get("services") or [] if s]
+        return tr(lang, f" (noch betroffen: {', '.join(svc)})", f" (still affected: {', '.join(svc)})") if svc else ""
     return item("failed", "danger" if ops else "ok", tr(lang, "Fehlgeschlagene Updates", "Failed updates"),
                 f.get("checked_at") or facts.get("checked_at"), str(len(ops)),
-                names_text([str(o.get("name")) + note.get(o.get("how"), "") for o in ops]))
+                names_text([str(o.get("name")) + note.get(o.get("how"), "") + still(o) for o in ops]))
 
 
 def radar_item(facts, lang, now):
