@@ -2044,10 +2044,13 @@ def cmd_backups():
         # "running": a run that ended without its last line (killed, power
         # cut) unless its process still runs. A failed rollback may be tried again.
         o["active"] = o.get("status") == "running" and helper_alive(o.get("pid"))
-        o["can_rollback"] = (o.get("kind") in ("update", "retag") and o.get("status") in ("ok", "failed", "running")
-                             and not o["active"]
-                             and not (o.get("rolled_back") and o.get("rollback_status") != "failed")
-                             and norm_ref(o.get("rollback") or "") in rb_refs)
+        could = (o.get("kind") in ("update", "retag") and o.get("status") in ("ok", "failed", "running")
+                 and not o["active"] and not (o.get("rolled_back") and o.get("rollback_status") != "failed"))
+        o["can_rollback"] = could and norm_ref(o.get("rollback") or "") in rb_refs
+        if could and o.get("rollback") and not o["can_rollback"]:
+            # The rollback copy is gone: deleted by the cleanup, in the backups tab or outside the
+            # add-on (docker image prune -a). The page says so instead of only leaving the button out.
+            o["rollback_gone"] = True
         for k, iid in (("from_version", o.get("old_id")), ("to_version", o.get("new_id"))):
             if refines(known.get(iid), o.get(k)):
                 o[k] = known[iid]

@@ -567,7 +567,10 @@ rollback marks the operation with `rolled_back`, `rollback_ts`, `rollback_status
   `--- Tried again ---` line.
 
 `backups` returns the last 30 operations, with `can_rollback`, `active`, `log` and `rollback_log`
-(whether output is kept) added and without paths, image IDs and `pid`.
+(whether output is kept) added and without paths, image IDs and `pid`. `rollback_gone: true` (since
+0.22.0) marks a run that could be rolled back but whose rollback image no longer exists (deleted by
+the cleanup, with *Delete* or outside the add-on, e.g. `docker image prune -a`); the history then says
+“Rollback copy gone” with the image in the tooltip instead of only leaving the rollback button out.
 On top come `dumps[]` (`path`, `project`, `container`, `size`, `mtime`), `images[]` (`ref`, `id`,
 `size`, `created`, `in_use`), `dump_bytes`, `free_bytes`, `dir` and `cleanup`. An image's `size` is in
 bytes (`docker image inspect`, `null` if Docker does not say) and `created` is ISO 8601

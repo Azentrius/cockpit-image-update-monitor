@@ -391,6 +391,42 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     assert(!d.getElementById("dm-meta").textContent.includes("Registry"), "a good run: no word about registries");
     assert.strictEqual(d.getElementById("dm-meta").title, "", "a good run: no tooltip");
 
+    // Nothing newer for over a year (ronmi/forgejo-mcp: latest built 2025-10-28): the newest
+    // there is, but old; the project may be abandoned. A hint, the status stays up to date.
+    // Not for a build less than a year old, and not where something newer is known (also a
+    // database major the update does not bring).
+    const aged = (names, created) => inventory.split("\n").map((l) => names.some((n) => l.includes(`"name": "${n}"`))
+        ? l.replace(/"created": "[^"]*"/, `"created": "${created}"`) : l).join("\n");
+    const oldBuilt = new Date("2025-09-01T00:00:00Z").toLocaleDateString("de-DE", { dateStyle: "medium" });
+    const ao = boot("de", FILES, aged(["smtp-relay", "calcom", "formbricks-db"], "2025-09-01T00:00:00Z"));
+    await flush();
+    for (const name of ["smtp-relay", "calcom"]) {
+        c = cells(row(ao, name));
+        const hint = c[4].querySelector(".dm-age");
+        console.log(name + ", built 2025-09-01:", c[4].textContent.trim(), "|", c[5].textContent.trim());
+        assert(hint && hint.textContent === "seit über einem Jahr nichts Neues", name + ": " + c[4].textContent);
+        assert(hint.title.includes(oldBuilt) && hint.title.includes("verwaist"), hint.title);
+        assert.strictEqual(c[5].textContent.trim(), "Aktuell");
+    }
+    assert.strictEqual(cells(row(ao, "formbricks-db"))[4].querySelector(".dm-age"), null, "a database major is known: no hint");
+    assert.strictEqual(cells(row(d, "smtp-relay"))[4].querySelector(".dm-age"), null, "built 2026-10-01: no hint");
+    const aoe = boot("en", FILES, aged(["calcom"], "2025-09-01T00:00:00Z"));
+    await flush();
+    assert.strictEqual(cells(row(aoe, "calcom"))[4].querySelector(".dm-age").textContent, "nothing new for over a year");
+    // the newest build of a registry without release tags, built over a year ago
+    const keepNow3 = JSON.parse(JSON.stringify(pf.tag_now));
+    const keepNewest3 = pf.newest;
+    delete pf.newest;
+    delete pf.tag_now.after;
+    delete pf.tag_now.pushed;
+    const anb = boot("de", { ...FILES, "/var/lib/diun-radar/versions.json": dev }, aged(["smtp-relay"], "2025-09-01T00:00:00Z"));
+    await flush();
+    c = cells(row(anb, "smtp-relay"));
+    assert(c[4].textContent.startsWith("neuester Build vom " + oldBuilt), c[4].textContent);
+    assert(c[4].querySelector(".dm-age"), "the newest build, over a year old: the hint");
+    pf.newest = keepNewest3;
+    pf.tag_now = keepNow3;
+
     // An image built on the server (a test host, 2026-10-18: caddy-caddy is
     // xcaddy on caddy:2-builder, copied onto caddy:2): no registry shows it,
     // the radar checks the bases of its Dockerfile instead.

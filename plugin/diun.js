@@ -456,18 +456,31 @@
                     (when ? " " + t("ver.staleSince", { date: when }) : "");
         return ` <span class="dm-muted dm-stale" title="${esc(tip)}">${esc(t("ver.stale"))}</span>`;
     }
+    // Nothing newer for over a year (ronmi/forgejo-mcp: latest built
+    // 2025-10-28): the newest there is, but old, and the project may be
+    // abandoned. A hint below the cell; the status stays up to date. A fixed
+    // date (1970, reproducible builds) proves nothing.
+    const ABANDONED_DAYS = 365;
+    function ageNote(ctn) {
+        const built = builtAt(ctn && ctn.created);
+        if (built === null || built <= Date.UTC(1980, 0, 1) / 1000) return "";
+        if (Date.now() / 1000 - built < ABANDONED_DAYS * 86400) return "";
+        return `<span class="dm-row-note dm-age" title="${esc(t("ver.oldTip", { date: fmtDay(ctn.created) }))}">${esc(t("ver.old"))}</span>`;
+    }
+
     // What the build cells say about the build the container runs: with stale
     // data only what the last good run found, no claim that nothing is newer.
     function runsLine(ctn, rec, same) {
         return t(!same ? "ver.buildAfterOther" : rec.stale ? "ver.sameBuildStale" : "ver.buildAfterRuns", { cfg: ctn.tag });
     }
-    function buildCell(text, tip, same, rec, muted) {
+    function buildCell(ctn, text, tip, same, rec, muted) {
         const stale = staleNote(rec);
         if (!same) {
             const m = muted(text, tip);
             return { ...m, html: m.html + stale, compared: false };
         }
-        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(text)}</span></span>${stale}`,
+        return { html: `<span class="dm-uptodate" title="${esc(tip)}">${icon("check-circle")}<span>${esc(text)}</span></span>${stale}` +
+                       ageNote(ctn),
                  news: false, compared: true, sameBuild: true };
     }
 
@@ -479,7 +492,7 @@
         const tip = [t("ver.buildAfterTip", { cfg: ctn.tag, tag: after.tag, pushed: fmtDay(rec.tag_now.pushed),
                                               released: fmtDay(after.pushed) }),
                      runsLine(ctn, rec, same)].join("\n");
-        return buildCell(text, tip, same, rec, muted);
+        return buildCell(ctn, text, tip, same, rec, muted);
     }
 
     // A tag like latest in a registry without any release tag: an own image
@@ -497,7 +510,7 @@
         const text = !same ? t("ver.otherBuild")
             : built !== null && built > Date.UTC(1980, 0, 1) / 1000
                 ? t("ver.newestBuildOn", { date: fmtDay(ctn.created) }) : t("ver.newestBuild");
-        return buildCell(text, tip, same, rec, muted);
+        return buildCell(ctn, text, tip, same, rec, muted);
     }
 
     function versionCell(ctn, rec, inst, radarOk, pick) {
@@ -545,7 +558,8 @@
         });
         if (!levels.length) {
             return { html: `<span class="dm-uptodate" title="${esc(t("ver.upToDateTip"))}">${icon("check-circle")}` +
-                           `${inst.v ? `<span class="dm-ver">${esc(inst.v)}</span>` : ""}</span>${stale}`, news: false, compared: true };
+                           `${inst.v ? `<span class="dm-ver">${esc(inst.v)}</span>` : ""}</span>${stale}${ageNote(ctn)}`,
+                     news: false, compared: true };
         }
         return { html: `<span class="dm-levels">${levels.join("")}</span>${stale}`, news, compared: true };
     }
@@ -1418,6 +1432,14 @@
             });
     }
 
+    // The rollback copy of a run that could be rolled back is gone (backups:
+    // rollback_gone): deleted by the cleanup, in this tab or outside the add-on.
+    function rollbackGone(o) {
+        return o.rollback_gone
+            ? `<span class="dm-row-note dm-rb-gone" title="${esc(t("rb.goneTip", { ref: o.rollback || "?" }))}">${esc(t("rb.gone"))}</span>`
+            : "";
+    }
+
     // A failed rollback may be tried again; up to 0.18.0 it was marked
     // rolled_back as well. "running" without a process that still runs
     // (active) is an update that ended without its last line.
@@ -1564,7 +1586,7 @@
               (o.kind === "retag" ? `<span class="dm-row-note">${esc(t("op.retag", { from: o.from_tag, to: o.to_tag }))}</span>` : "") +
             `</span></td>` +
             `<td data-label="${L("col.version")}"><span class="dm-cell">${opVersions(o)}</span></td>` +
-            `<td data-label="${L("col.result")}"><span class="dm-cell">${opResult(o)}${opReason(o)}</span></td>` +
+            `<td data-label="${L("col.result")}"><span class="dm-cell">${opResult(o)}${opReason(o)}${rollbackGone(o)}</span></td>` +
             `<td data-label="${L("col.dumps")}"><span class="dm-cell">${(o.dumps || []).length}</span></td>` +
             `<td class="az-cell-actions"><span class="dm-cell">` +
               (o.can_rollback ? textButton("history", t("rb.button"), `data-op="${i}"`) + iconSlot(logButton(o, i))
