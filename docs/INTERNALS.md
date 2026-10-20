@@ -34,6 +34,7 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `install skopeo` / `install diun` / `install radar` / `install cleanup` / `start diun` | action | text, two languages |
 | `diun-update.py` | `plan <container>` | read | one JSON object |
 | | `update <container> [--no-dump]` | action | text + last line `@@RESULT {…}` |
+| | `pull <container>` | action | text + `@@RESULT {…}` (since 0.23.0, step one of an update in two steps) |
 | | `rollback <op-id>` | action | text + `@@RESULT {…}` |
 | | `backups` | read | one JSON object |
 | | `log <op-id>` | read | text: the kept output of the update, then `--- Rollback ---` and that of its rollback; exit 2 if none |
@@ -357,7 +358,16 @@ since 0.18.1 every container of the services (one-off `compose run` containers a
 rollback image's ID: one that runs another image fails the rollback (exit 4, `reason.source`
 `"image"`).
 
-### `@@RESULT` (last line of `update` / `rollback` / `cleanup`)
+### `pull` (update in two steps, step one)
+
+`pull <container>` takes the update lock and the plan (`make_plan`, so the same services and the same
+refusals as `update`, exit 2), then runs `docker compose pull <services>` with `DOCKER_TIMEOUT` and
+changes nothing that runs: no dump, no rollback copy, no history entry, no container recreated. The
+row then shows “Roll-out pending”, and `update` later rolls the image out (its plan says `pulled`).
+A failed pull, a time limit or a signal is exit 5 (“nothing changed”); no newer image is `nochange`.
+`status.json` is written again afterwards, so the Status Board counts the roll-out pending.
+
+### `@@RESULT` (last line of `update` / `pull` / `rollback` / `cleanup`)
 
 ```
 update:   @@RESULT {"op": "20261012-015025-imgupd-test-db", "status": "ok|nochange|failed",
@@ -367,6 +377,8 @@ update:   @@RESULT {"op": "20261012-015025-imgupd-test-db", "status": "ok|nochan
 retag:    as update, status "ok|failed", plus "image": "repo:<new tag>" and
           "backup": "/var/backups/image-updates/compose/<project>/<stamp>"
 rollback: @@RESULT {"op": "…", "status": "ok|failed"}            (on failed also "reason")
+pull:     @@RESULT {"status": "pulled|nochange", "image": "repo:tag",
+                    "from_version": "16.14", "to_version": "16.15"}   (no "op": nothing recorded)
 cleanup:  @@RESULT {"status": "ok|nochange", "dumps": ["project/…sql.gz"],
                     "images": ["repo:rollback-…"], "bytes": 3145728, "failed": ["…"]}
 ```

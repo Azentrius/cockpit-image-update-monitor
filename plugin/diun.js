@@ -1206,20 +1206,29 @@
                     return;
                 }
                 const desc = t(kind === "pulled" || plan.pulled ? "upd.descPulled" : "upd.desc", { image: plan.image });
-                const label = t(kind === "pulled" ? "btn.rollout" : "btn.update");
                 const failed = rowFailed.get(name) || null;
+                // Update in two steps: only fetch the image now and roll it out
+                // later. Not for an image that is here already: that is the roll-out.
+                const twoSteps = kind !== "pulled" && !plan.pulled;
+                const pullOnly = () => { const r = $("dm-dialog-body").querySelector('input[name="dm-step"]:checked'); return !!r && r.value === "pull"; };
+                const label = () => t(kind === "pulled" ? "btn.rollout" : pullOnly() ? "btn.pullOnly" : "btn.update");
                 confirmAndRun({
-                    title, desc, body: planBody(plan, failed),
+                    title, desc, body: planBody(plan, failed) + (twoSteps ? stepChoice() : ""),
                     confirm: {
-                        label,
+                        label: label(),
                         disabled: !!plan.jump_unknown || !!failed || plan.jump === "major" || (plan.ci_jobs || []).length > 0,
-                        argv: () => [UPDATE_CMD, "update", name].concat(dumpArgs()),
+                        argv: () => pullOnly() ? [UPDATE_CMD, "pull", name] : [UPDATE_CMD, "update", name].concat(dumpArgs()),
                     },
                     onDone: (o) => updateOutcome(o, name),
                 });
                 const gates = [...$("dm-dialog-body").querySelectorAll(".dm-gate")];
-                gates.forEach((g) => g.addEventListener("change", () =>
-                    dlg.btn("dm-dialog-confirm", label, { visible: true, disabled: !gates.every((x) => x.checked) })));
+                const relabel = () => dlg.btn("dm-dialog-confirm", label(), { visible: true, disabled: !gates.every((x) => x.checked) });
+                gates.forEach((g) => g.addEventListener("change", relabel));
+                $("dm-dialog-body").querySelectorAll('input[name="dm-step"]').forEach((r) => r.addEventListener("change", () => {
+                    const dump = $("dm-dump-check");
+                    if (dump) dump.disabled = pullOnly();
+                    relabel();
+                }));
             })
             .catch((ex) => {
                 if (stale()) return;
@@ -1228,9 +1237,21 @@
             });
     }
 
+    // The choice of an update in two steps, below the plan and its warnings.
+    function stepChoice() {
+        return `<fieldset class="dm-steps"><legend>${esc(t("upd.stepTitle"))}</legend>` +
+            `<label class="dm-radio"><input type="radio" name="dm-step" value="now" checked> ${esc(t("upd.stepNow"))}</label>` +
+            `<label class="dm-radio"><input type="radio" name="dm-step" value="pull"> ${esc(t("upd.stepPull"))}</label>` +
+            `</fieldset>`;
+    }
+
     function updateOutcome(o, name) {
         const r = o.result || {};
         if (o.ok && r.status === "nochange") { dlg.result(t("upd.nochange"), true); return true; }
+        if (o.ok && r.status === "pulled") {
+            dlg.result(t("upd.pulledOk", { v: r.to_version ? ` (${r.to_version})` : "" }), true);
+            return true;
+        }
         if (o.ok) {
             const vers = r.from_version && r.to_version && r.from_version !== r.to_version;
             dlg.result(t(vers ? "upd.okVersions" : "upd.ok",

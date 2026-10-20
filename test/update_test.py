@@ -858,6 +858,61 @@ check("pull timeout -> exit 5, nothing left, the daemon may still finish the dow
       (rc, D.tags == tags_before, dumps_of("glitchtip"), ops() == ops_before,
        "The pull did not end within 1800 s and was stopped (DOCKER_TIMEOUT" in out, "Docker may still finish" in out),
       (5, True, dumps_before, True, True, True))
+
+# Update in two steps, step one (pull): fetch the image of the plan's services and
+# change nothing that runs: no dump, no rollback copy, no history entry, nothing
+# recreated. The row then shows "Roll-out pending"; the update rolls it out later.
+saved_pull = (dict(D.tags), dict(D.images))
+
+
+def result_or_none(out):
+    lines = [ln for ln in out.splitlines() if ln.startswith("@@RESULT ")]
+    return json.loads(lines[-1][9:]) if lines else {}
+
+
+D.pull_to = ("postgres:16-alpine", "sha256:v40")
+D.images["sha256:v40"] = {"Id": "sha256:v40", "Config": {"Env": ["PG_VERSION=16.40"]}}
+D.streamed.clear()
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
+with as_uid(0):
+    rc, out = quiet(U.main, ["pull", "glitchtip-postgres"])
+release_lock()
+res = result_or_none(out)
+check("pull only: exit 0, status pulled, the version that came",
+      (rc, res.get("status"), res.get("to_version")), (0, "pulled", "16.40"))
+check("pull only: the plan's services pulled, nothing recreated, no dump, no history, no rollback copy",
+      ([c[c.index("pull") + 1:] for c in D.streamed if "pull" in c], [c for c in D.streamed if "up" in c],
+       dumps_of("glitchtip"), ops() == ops_before, sorted(k for k in D.tags if ":rollback-" in k and k not in tags_before)),
+      ([["migrate", "postgres"]], [], dumps_before, True, []))
+check("pull only: the tag on the new image, the containers still on the old one (roll-out pending)",
+      (D.tags[U.norm_ref("postgres:16-alpine")], U.make_plan("glitchtip-postgres")[0]["pulled"]), ("sha256:v40", True))
+D.tags.clear()
+D.tags.update(saved_pull[0])
+D.pull_to = None
+with as_uid(0):
+    rc, out = quiet(U.main, ["pull", "glitchtip-postgres"])
+release_lock()
+check("pull only, nothing newer: exit 0, nochange, said so",
+      (rc, result_or_none(out).get("status"), "No newer image available – nothing changed." in out), (0, "nochange", True))
+for label, setup, want in (
+        ("the pull fails", ("pull_rc", 1), "The pull failed – nothing changed."),
+        ("a time limit", ("pull_raises", U.Timeout(["docker", "compose", "pull"], 1800, [])), "did not end within 1800 s"),
+        ("a signal", ("pull_raises", U.Interrupted(signal.SIGHUP)), "Stopped by SIGHUP before any container changed")):
+    setattr(D, *setup)
+    tags_before, ops_before = dict(D.tags), ops()
+    with as_uid(0):
+        rc, out = quiet(U.main, ["pull", "glitchtip-postgres"])
+    release_lock()
+    setattr(D, setup[0], 0 if setup[0] == "pull_rc" else None)
+    check(f"pull only, {label}: exit 5, said so, nothing changed",
+          (rc, want in out, D.tags == tags_before, ops() == ops_before), (5, True, True, True))
+with as_uid(0):
+    rc, out = quiet(U.main, ["pull", "glitchtip-postgres", "--now"])
+check("pull only: no other arguments", rc, 64)
+D.tags.clear()
+D.tags.update(saved_pull[0])
+D.images.clear()
+D.images.update(saved_pull[1])
 D.pull_to = ("postgres:16-alpine", "sha256:v30")
 D.images["sha256:v30"] = {"Id": "sha256:v30", "Config": {"Env": ["PG_VERSION=16.30"]}}
 D.up_raises = U.Timeout(["docker", "compose", "up", "-d", "--no-deps", "--pull", "never", "migrate", "postgres"], 1800)

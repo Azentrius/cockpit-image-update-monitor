@@ -555,6 +555,24 @@ python3 $H update imgupd-test-reg --no-dump > /tmp/e2e-reg4.log 2>&1; RC=$?
 S=$(jget "$(result_of /tmp/e2e-reg4.log)" 'd["status"]')
 check "Registry back with the new image: nochange" '[ $RC = 0 ] && [ "$S" = nochange ]'
 
+echo "=== 10d. Update in two steps: pull only, then roll out ==="
+# The registry gets the other image under the same tag; the local tag stays on what runs.
+docker tag "$OLD" "$REG/imgupd-test/reg:16"
+docker push -q "$REG/imgupd-test/reg:16" > /dev/null
+docker tag "$NEW" "$REG/imgupd-test/reg:16"
+OPS_N=$(wc -l < "$OPS")
+python3 $H pull imgupd-test-reg > /tmp/e2e-reg5.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-reg5.log
+S=$(jget "$(result_of /tmp/e2e-reg5.log)" 'd["status"]')
+TAGID=$(docker image inspect -f '{{.Id}}' "$REG/imgupd-test/reg:16")
+check "Pull only: exit 0, pulled, the tag on the other image, the container unchanged, no history, no rollback tag" \
+    '[ $RC = 0 ] && [ "$S" = pulled ] && [ "$TAGID" = "$OLD" ] && [ "$(img_of imgupd-test-reg)" = "$NEW" ] && [ "$(wc -l < "$OPS")" = "$OPS_N" ] && [ "$(reg_rollbacks)" = 0 ]'
+python3 $H update imgupd-test-reg --no-dump > /tmp/e2e-reg6.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-reg6.log
+S=$(jget "$(result_of /tmp/e2e-reg6.log)" 'd["status"]')
+check "Then the roll-out: exit 0, ok, the container on the pulled image" \
+    '[ $RC = 0 ] && [ "$S" = ok ] && [ "$(img_of imgupd-test-reg)" = "$OLD" ]'
+
 if [ "$E2E_MYSQL" = 1 ]; then
     echo "=== 11. MariaDB + MySQL: dumps with test data ==="
     mkdir -p "$D2"
