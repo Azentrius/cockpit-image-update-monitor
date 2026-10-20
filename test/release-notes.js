@@ -141,6 +141,16 @@ const noteText = (body) => [...body.querySelectorAll(".dm-notes-slot .dm-dialog-
     assert.strictEqual(b1.textContent, "BREAKING CHANGES\n• The API moved to /api/v2. A migration of stored models runs on the first start.");
     assert.deepStrictEqual([...b1.querySelectorAll("mark.dm-flag")].map((m) => m.textContent), ["BREAKING", "migration"]);
     assert.deepStrictEqual([...rels[3].querySelectorAll("mark.dm-flag")].map((m) => m.textContent), ["deprecated"]);
+    // Nested and split markup (what a filter by text replacement could miss):
+    // the text is escaped before anything is left out, so none of it is HTML.
+    const TRICKY = "<!<!-- -->-- x --><img src=x onerror=alert(1)>\n<scr<script>ipt>alert(1)</script>\n" +
+                   "<<b>img src=x onerror=alert(2)>\n<a href=\"javascript:alert(3)\">click</a>\n<iframe src=\"https://example.com\"></iframe>";
+    const tr = await openUpdate("en", PLAN_OLLAMA, { "/var/lib/diun-radar/releases.json": { repos: { "ollama/ollama":
+        { ...RELEASES.repos["ollama/ollama"], releases: [{ tag: "v0.40.3", version: "0.40.3", body: TRICKY }] } } } });
+    const tb = tr.body.querySelector(".dm-release-body");
+    console.log("tricky:", JSON.stringify(tb.textContent));
+    assert.strictEqual(tb.querySelectorAll("*").length, 0, "no element from the text");
+    assert.strictEqual(tr.d.querySelectorAll("#dm-dialog img, #dm-dialog script, #dm-dialog iframe, #dm-dialog-body a[href^='javascript']").length, 0);
     // 3. Empty text, a shortened one, links only to GitHub, new tab without opener.
     assert.strictEqual(rels[2].querySelector(".dm-dialog-note").textContent, "Kein Text.");
     assert.strictEqual(rels[2].querySelector("a"), null, "a link outside github.com is left out");

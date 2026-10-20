@@ -1280,22 +1280,23 @@
         });
         return ["breaking", "migration", "deprecated"].filter((w) => found.has(w));
     }
-    // HTML elements release notes use; other text in angle brackets
-    // (Vec<T>, <name>) stays.
-    const NOTE_TAG_RE = /<\/?(?:a|b|br|code|del|details|div|em|h[1-6]|hr|i|img|kbd|li|ol|p|picture|pre|source|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul|video)\b[^>\n]*>/gi;
+    // HTML elements release notes use, as they read once escaped; other text
+    // in angle brackets (Vec<T>, <name>) stays.
+    const NOTE_TAG_RE = /&lt;\/?(?:a|b|br|code|del|details|div|em|h[1-6]|hr|i|img|kbd|li|ol|p|picture|pre|source|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul|video)\b[^\n]*?&gt;/gi;
     // A release's Markdown as text: headings bold, list marks as bullets,
-    // links as their text; images, HTML and comments left out.
+    // links as their text; images, HTML and comments left out. Escaped
+    // first: what follows only shortens text that can no longer be HTML.
     function noteBody(text) {
-        const plain = String(text || "").replace(/\r\n?/g, "\n")
-            .replace(/<!--[\s\S]*?-->/g, "")
-            .replace(/<br\s*\/?>/gi, "\n")
+        const plain = esc(String(text || "").replace(/\r\n?/g, "\n"))
+            .replace(/&lt;!--[\s\S]*?--&gt;/g, "")
+            .replace(/&lt;br\s*\/?&gt;/gi, "\n")
             .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
             .replace(/\[([^\]]+)\]\([^)\s]+\)/g, "$1")
             .replace(NOTE_TAG_RE, "")
             .replace(/\n{3,}/g, "\n\n").trim();
         return plain.split("\n").map((line) => {
             const h = /^#{1,6}\s+(.*)$/.exec(line);
-            const html = esc(h ? h[1] : line.replace(/^(\s*)[*-]\s+/, "$1• "))
+            const html = (h ? h[1] : line.replace(/^(\s*)[*-]\s+/, "$1• "))
                 .replace(FLAG_RE, '<mark class="dm-flag">$1</mark>');
             return h ? `<strong>${html}</strong>` : html;
         }).join("\n");
