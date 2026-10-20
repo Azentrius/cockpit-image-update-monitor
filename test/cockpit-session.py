@@ -107,14 +107,28 @@ def new_files(old_deb):
     return set(os.listdir(page_dir)) - before
 
 
+REFUSED_RE = re.compile(r"Refused to execute script from '([^']+)'")
+
+
 def missed_new_file(e, fresh):
-    """The new file an error says Cockpit did not deliver (404, the failed request, the
-    console's "Failed to load resource"), or ""."""
-    if not (e[0] in ("http 404", "requestfailed") or (e[0] == "console" and "Failed to load resource" in e[1])):
+    """The new file an error says Cockpit did not deliver, or "": its 404, the failed
+    request, and the console's "Failed to load resource" and "Refused to execute script
+    from '…'" (Cockpit's 404 is an HTML page, which the browser does not run)."""
+    refused = REFUSED_RE.search(e[1]) if e[0] == "console" else None
+    if refused:
+        url = refused.group(1)
+    elif e[0] in ("http 404", "requestfailed") or (e[0] == "console" and "Failed to load resource" in e[1]):
+        url = e[2] or e[1].split(" ")[0]
+    else:
         return ""
-    url = e[2] or e[1].split(" ")[0]
     name = url.split("/image-updates/", 1)[-1].split("?")[0] if "/image-updates/" in url else ""
     return name if name in fresh else ""
+
+
+def broken_off(e):
+    """A request of the add-on's files the browser broke off (net::ERR_ABORTED): the page
+    loading itself again, or the session closed, while it still loaded fonts or styles."""
+    return e[0] == "requestfailed" and "ERR_ABORTED" in e[1] and OURS in e[2]
 
 
 def kind(e):
@@ -343,13 +357,13 @@ def main():
             frame.locator("#dm-sig-version").wait_for()
             poll(page, lambda: version_of(frame) == E["NEW_VERSION"], 60)
             fresh = new_files(old)
-            STALE.extend(x for x in errors if x[4] == "upgrade" and missed_new_file(x, fresh))
-            PHASE["now"] = "this build"
+            missed = sorted({missed_new_file(x, fresh) for x in errors if x[4] == "upgrade"} - {""})
             note("after the upgrade: reloaded in the same session, the new version", version_of(frame) == E["NEW_VERSION"],
-                 version_of(frame) + ("; Cockpit answered 404 for " +
-                                      ", ".join(sorted({missed_new_file(x, fresh) for x in STALE})) +
-                                      " until the page asked it to read the packages again" if STALE else ""))
-            ctx.close()
+                 version_of(frame) + ("; Cockpit answered 404 for " + ", ".join(missed) +
+                                      " until the page asked it to read the packages again" if missed else ""))
+            ctx.close()     # still the upgrade: what closing breaks off belongs to it
+            STALE.extend(x for x in errors if x[4] == "upgrade" and (missed_new_file(x, fresh) or broken_off(x)))
+            PHASE["now"] = "this build"
         else:
             PHASE["now"] = "this build"
             root("apt-get", "install", "-y", "-q", new)

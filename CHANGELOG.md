@@ -80,7 +80,8 @@ after the install, when the radar is set up).
   missing (seen in CI with Cockpit 314). The page then asks the bridge to read the packages again
   (`cockpit.Packages.Reload`) and loads once more; if a part is still missing, it says to log out and
   in again. Tests: `test/partial-load.js` (new); the Cockpit job accepts a 404 for a file new in this
-  build in the reload right after the upgrade only when the page then shows the new version.
+  build in the reload right after the upgrade (with the browser's lines about it, and the requests
+  that loading again breaks off) only when the page then shows the new version.
 
 ## 0.22.0 – 2026-10-20
 
