@@ -561,12 +561,14 @@ docker tag "$OLD" "$REG/imgupd-test/reg:16"
 docker push -q "$REG/imgupd-test/reg:16" > /dev/null
 docker tag "$NEW" "$REG/imgupd-test/reg:16"
 OPS_N=$(wc -l < "$OPS")
+# 10c keeps the rollback copy of its update with a warning; pull only adds none.
+RB_N=$(reg_rollbacks)
 python3 $H pull imgupd-test-reg > /tmp/e2e-reg5.log 2>&1; RC=$?
 sed 's/^/  | /' /tmp/e2e-reg5.log
 S=$(jget "$(result_of /tmp/e2e-reg5.log)" 'd["status"]')
 TAGID=$(docker image inspect -f '{{.Id}}' "$REG/imgupd-test/reg:16")
-check "Pull only: exit 0, pulled, the tag on the other image, the container unchanged, no history, no rollback tag" \
-    '[ $RC = 0 ] && [ "$S" = pulled ] && [ "$TAGID" = "$OLD" ] && [ "$(img_of imgupd-test-reg)" = "$NEW" ] && [ "$(wc -l < "$OPS")" = "$OPS_N" ] && [ "$(reg_rollbacks)" = 0 ]'
+check "Pull only: exit 0, pulled, the tag on the other image, the container unchanged, no history, no new rollback tag" \
+    '[ $RC = 0 ] && [ "$S" = pulled ] && [ "$TAGID" = "$OLD" ] && [ "$(img_of imgupd-test-reg)" = "$NEW" ] && [ "$(wc -l < "$OPS")" = "$OPS_N" ] && [ "$(reg_rollbacks)" = "$RB_N" ]'
 python3 $H update imgupd-test-reg --no-dump > /tmp/e2e-reg6.log 2>&1; RC=$?
 sed 's/^/  | /' /tmp/e2e-reg6.log
 S=$(jget "$(result_of /tmp/e2e-reg6.log)" 'd["status"]')
