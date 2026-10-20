@@ -9,8 +9,9 @@ together.
 | Path | Content | Owner / mode |
 |---|---|---|
 | `/usr/share/cockpit/image-updates/` | plugin (package `cockpit-image-updates`) | root, 644 |
-| `/usr/lib/cockpit-image-updates/` | helpers (`*.py`, `*.sh` 755; `diunlib.py`, `diunproc.py`, `diunstatus.py` 644) | root |
+| `/usr/lib/cockpit-image-updates/` | helpers (`*.py`, `*.sh` 755; `diunlib.py`, `diunnotes.py`, `diunproc.py`, `diunstatus.py` 644) | root |
 | `/var/lib/diun-radar/versions.json` | result of the version radar | root, 644 (StateDirectory) |
+| `/var/lib/diun-radar/releases.json` | release notes from GitHub for the update and version change dialogs (since 0.23.0, see [`releases.json`](#releasesjson-radar-since-0230)) | root, 644 |
 | `/var/lib/diun-radar/status.json` | the add-on's status for the Status Board (since 0.20.0, see [`status`](#status-diun-updatepy-since-0200)) and for the icon in Cockpit's menu (since 0.21.0, see [Status in Cockpit's menu](#status-in-cockpits-menu-since-0210)): names of containers, states and times only | root, 644 |
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
@@ -46,7 +47,7 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `retag <container> <tag> --dry-run` | read (since 0.11.0; the preview in “Change version”) | one JSON object: the `plan` plus `retag`, see below |
 | | `retag <container> <tag> --expect <fingerprint> [--no-dump]` | action (since 0.11.0) | text + `@@RESULT {…}` |
 | | `status --lang en\|de` | read (since 0.20.0; the Status Board, also **without root**) | one JSON object, schema 1, see [`status`](#status-diun-updatepy-since-0200) |
-| `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – (`--output` also writes `status.json` next to the file) |
+| `diun-versions.py` | `--output FILE` (systemd), `--table`, without arguments JSON lines | timer / diagnosis | – (`--output` also writes `status.json` and, since 0.23.0, `releases.json` next to the file) |
 
 Inputs are checked by regex:
 
@@ -184,6 +185,7 @@ until it has ended as well (exit 75 meanwhile). Check with `docker ps` before ac
 | `versions[…].choices` | (since 0.11.0, for the stage-2 selection field) what can replace the configured tag, in the installed version's scheme and never older: `pin` = the installed version's own tag, `null` if the registry lacks it; `lines` = major and minor lines (`5`, `5.4`, `16-alpine`; one or two blocks, never more) and the newest version tag in each, broad lines first, at most 12: only lines with a released version in them (a bare `9.2` before `9.2.0` may be a pre-release), the running version's own lines always, the others newest first; `newer` = exact tags with `level` `patch` / `minor` / `major`: every newer patch of the installed minor line (at most 10), the newest of each newer minor line and of each newer major (at most 15 each), newest first per level; `floating` = `latest`, `stable`, `production` (with the flavour suffix, e.g. `stable-apache`, or the bare flavour `apache`) when the registry has them. Pre-releases (`-rc.1`), other flavours and `v`-prefixed twins never count. Missing without a scheme and in data from radars before 0.11.0. |
 | `by_tag` | comparison with the configured tag itself. Only when the tag contains numbers; the plugin uses it as a fallback. |
 | `reach` | levels the configured tag delivers with the Update button. |
+| `source` | (since 0.23.0) the image's repository on GitHub, `{"repo": "owner/name", "via": "known|label|ghcr"}`, for the release notes (`diunnotes.source_of`, first match wins): `known` = a short list of checked images (`KNOWN`: official images on Docker Hub, and images whose label names the repository of their Dockerfile, `nextcloud` → `nextcloud/server`); `label` = `org.opencontainers.image.source` or `org.label-schema.vcs-url` on github.com (`.git`, `git@`, a path below the repository are fine); `ghcr` = `ghcr.io/<owner>/<name>`, whose owner is a GitHub account. Only names GitHub allows (account: letters, digits, single hyphens, 39 at most; repository: letters, digits, `.` `_` `-`, never `.` or `..`). Missing when none is found, and in data from older radars. |
 | `newest` | highest plain version tag. Shown when the installed version is unknown. |
 | `tag_now` | (since 0.10.0) only for floating tags (fewer than two version blocks: `latest`, `16-alpine`, `5`) and, since 0.19.0, line tags (`v1.6`): the digest the tag has in the registry right now (Docker Hub API or `skopeo inspect --raw`, no pull) and the version tag with the same digest (`version` / `tag`, `null` if none). Reused while the digest stays the same; missing when the lookup failed. |
 | `tag_now.pushed` / `tag_now.after` | only for a tag without numbers (`latest`, `main`) whose digest no version tag shares, and only on Docker Hub, the one registry that says when a tag was pushed: `after` = the newest release (`newest`) as `{"tag": "v4.5.3", "pushed": "…"}` and `pushed` = when the tag itself was pushed, at least a day later (two builds of one release are minutes apart). MobSF builds `latest` from its development branch. Asked again on every run, also while the digest stays the same. Missing in data from older radars. |
@@ -204,6 +206,50 @@ newer     = chips patch/minor/major; filled if in reach, otherwise outlined; db+
 status    = "Unknown" instead of "Up to date" when nothing was compared: installed version
             unknown, "unlisted", or a registry error without an earlier result
 ```
+
+### `releases.json` (radar, since 0.23.0)
+
+The release notes of stage 3, written by the radar run (`diun-versions.py --output`) after
+`versions.json` and `status.json`; `lib/diunnotes.py`. The page reads it when a dialog shows a plan;
+the browser never talks to GitHub.
+
+```json
+{"generated": "2026-10-20T12:00:00Z",
+ "repos": {
+   "cube-js/cube": {"status": "ok", "checked": "…", "tried": "…", "floor": "1.6.74", "top": "1.8.8",
+                    "more": false,
+                    "releases": [{"tag": "v1.8.8", "version": "1.8.8", "name": "…", "published": "…",
+                                  "url": "https://github.com/cube-js/cube/releases/tag/v1.8.8",
+                                  "body": "## What's Changed …", "cut": true}]},
+   "acme/gone": {"status": "missing", "checked": "…", "tried": "…"},
+   "acme/app":  {"status": "limited", "tried": "…", "error": "HTTP 403", "checked": "…", "releases": […]}
+ }}
+```
+
+- **Which sources:** those of the records (`source`) with something newer (`status` `patch`, `minor`
+  or `major`) and a known installed version. Others are left out of the file.
+- **Request:** `GET https://api.github.com/repos/<owner>/<name>/releases?per_page=100` without a
+  login (60 requests per hour per address), 20 s per request, one after another. At most 20 requests
+  per run (`MAX_REQUESTS`), none when 5 or fewer are left (`RESERVE`, from `X-RateLimit-Remaining`).
+- **Asked again:** never within an hour of the last try (`RECHECK`; “Run radar now” clicked again);
+  after 24 hours (`TTL`); sooner when the last try failed, or the radar now knows a newer version
+  (`top`) or an older installed one (`floor`) than that answer had. `missing` waits the 24 hours.
+- **Answers:** `ok`; `missing` on 404 (no such public repository); `limited` on 429, or 403 with no
+  request left or `Retry-After` (GitHub's secondary limit): no further request this run; `error`
+  otherwise (an HTTP status, or no network: no further request this run). On `limited` and `error`
+  the last `releases` stay with their `checked` time.
+- **Releases kept:** no drafts or pre-releases, no tags without a version (`stable`, `nightly-dev`)
+  or with a pre-release word after it (`-rc.1`, `b7`). The version is the first `N.N…` in the tag;
+  what comes before it (`v`, `release-`, `n8n@`) is its kind. In a repository with several kinds the
+  one whose versions the images have counts (else the one with the most releases). Kept are those
+  newer than the oldest installed version (`floor`), by version and not by date (redis and ClickHouse
+  publish maintenance branches in between), newest first, 25 at most (`KEEP`); `more` when older ones
+  in that range were left out or did not fit into the answer. `body` is the release's Markdown, cut at
+  8000 characters (`cut`). `url` only on github.com; `name` only when it says more than the tag.
+- **A problem never fails the radar run:** `versions.json` and `status.json` are written before; the
+  error goes to the journal (`release notes not written: …`).
+
+How the page shows it: see *Release notes* under [Plugin internals](#plugin-internals).
 
 ### `plan` (diun-update.py)
 
@@ -772,6 +818,21 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   - History: kind `retag` gets “Tag changed: <from_tag> → <to_tag>” under the image; its rollback
     dialog names the files it puts back (`changes[].file`). A rollback that stops with exit 2 or 5
     says that nothing changed. Failed builds count only kind `update`.
+- **Release notes** (since 0.23.0): the plan of an update and the preview of a version change have
+  a slot after the plan list and the dump tick box (before the warnings below it and the choice of
+  steps); `releases.json` is read when the plan is shown, and a slot of a plan shown again in the
+  meantime is left alone. Shown are the releases of the row's `source` newer than `installed_version`
+  and up to `target_version` (versions compared by their numbers, trailing zeros do not count; without
+  a target, a tag like `latest` that names none, all since the installed version, “Release notes after
+  1.6.74”): `<details>` closed, “Release notes 1.6.74 → 1.8.8: 3 releases” and, when any text mentions
+  *breaking*, *migration* or *deprecated*, a warning label with the words; per release its tag, name,
+  date and words, its text and “On GitHub” (a new tab, `noopener noreferrer`; only github.com links).
+  The text is text: headings bold, list marks as bullets, links as their text, images, HTML elements
+  and comments left out, everything else escaped (`<script>` stays visible text), the words marked
+  (`.dm-flag`). Below it the source and the time of its answer, and whether older releases are
+  missing. Otherwise one note, never an error: no source, the installed version unknown, not fetched
+  yet (also without `releases.json`), no releases, GitHub's limit, an error, no release in the range.
+  Nothing for the same version (`jump` `same`).
 - **Failed builds:** from the history, the newest update of each image counts; if it failed, its
   `new_digests` mark the build. A row with Diun's `digest` among them gets a note under the status. The
   history loads after the table, so the rows are drawn again when the marks change.
@@ -830,6 +891,7 @@ roll-outs pending, 17 new versions”).
 | File | Checks |
 |---|---|
 | `test/radar_test.py` | `diunlib` (version sources, reach), radar (scheme, comparison, choices for the selection field, hub/registry match with fakes, deeper first lookup, `tag_now`, line tags (release by digest, the tag's number on a miss, exact tags untouched, a registry outage keeping the release per image ID), a build after the newest release, the bases of an image built here (Dockerfile `FROM` lines, push times, newer or not), cache, outage) |
+| `test/notes_test.py` | `diunnotes.py` with a fake GitHub (a request to the real one fails it): the source (known, also against a label, the labels in their forms, the second image of a tag, ghcr.io, other hosts, names GitHub would not take), versions of interest per record and per source, releases of an answer (drafts, pre-releases, tags without a version, cut text, links, kinds of tags), which of them (by version not by date, the image's kind of tag, newer than installed, `KEEP` and `more`), when a source is asked again (`RECHECK`, `TTL`, a newer or older version, `missing`, errors), GitHub's limit (403 none left, 403 `Retry-After`, 429: no further request, the last answer kept), a server error, no network, `RESERVE`, `MAX_REQUESTS`; the radar run writing `source` and `releases.json` (644), GitHub down (the last releases kept), a broken module or label not failing the run |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
 | `test/status_test.py` | `diunstatus.py` and `diun-update.py status`: the page's rules for the rows (Diun's event of the tag, `docker.io/library/`, another tag, a digest reference, dismissed, the same build in Docker's and Diun's time, a date before 1980, the newest event, roll-out first, CI jobs, no digest, a newer patch, a database major, `by_tag`, an empty comparison, a line tag refined by the radar, the base of an image built here), failed updates from the history (rolled back, a failed rollback also as written up to 0.18.0, aborted, still running, `discarded`; which later run settles which: another service and tag of the same project, the same image in other compose files or another directory, a retry and a tag change of the same services, overlapping groups, rollbacks and aborted runs next to an unrelated success, entries without services; the resulting state, summary and detail), the radar's age, state and summary in English and German with plurals, the contract's shape, no German in English, the fixture `status.json` of real host data, `status` without the file, with an unreadable one, from the file in German, the radar's age judged when asked, the history as root and the file without root, Docker not answering (the last file stays), `events.jsonl` as a link or a pipe and a large one, the arguments (exit 64, no root needed), the write after `rollback` and `cleanup` (silent) and none after `--dry-run`, a wrong call or without root, the radar run writing it and not failing for it; the `link` of every item in every state and language, and a link the Status Board would not take caught by the shape check |
 | `test/status-rows.js` | the page with the fixtures of a real host marks exactly the containers “Update available”, “Roll-out pending” and “New version” that `test/fixtures/status.json` names |
@@ -843,6 +905,7 @@ roll-outs pending, 17 new versions”).
 | `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes (a failed rollback offered again, an aborted and a running update, the helper's own cause), output button, a build that failed before (row note, second tick box), “together with” in the rows, CI job containers left out, the warning for running CI jobs, plan groups and dependencies, delete |
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, no update for the same build under a new digest, the registry link from any event of the image, a dismissed event, the events-only view |
 | `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English; the states while the dry-run and the run work are checked at fixed points (the stub's answers wait for a gate) |
+| `test/release-notes.js` | release notes in the update dialog and the preview of a version change: the range (installed, target], newest first, closed; the warning words in the summary and per release; the text as text (links, images, HTML, comments, `<script>`, angle brackets that are no HTML); empty and cut texts, links only to GitHub; the slot's place; English without German, the singular; a note for every missing piece (no source, not fetched, no file, no releases, limit, error, nothing in range, the installed version unknown, nothing after it, a broken file); without a target all since the installed version; kept releases under a limit; nothing for the same version; another choice in the preview |
 | `test/radar-cleanup.js` | “Run radar now”, cleanup box and “Clean up now”, marks, versions in the history and the update result |
 | `test/version-cols.js` | columns Configured / Installed / Newest, chips, legend, not in a registry, a build after the newest release, the newest build of a registry without release tags, both build cells with stale data (marked, the error in the tooltip, no claim of a fresh check, gone after a good run), the revision of a development build, the bases of an image built here, a line tag refined by the radar, and kept with its patch when the registry failed |
 | `test/page-frame.js` | header, tabs (mouse, keyboard, nothing loads), status labels with icons, buttons per place, dialog buttons, signature |

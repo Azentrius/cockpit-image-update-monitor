@@ -4,10 +4,12 @@
 
 A click on a tile of the Status Board opens the page where the finding is: the tab, and there the
 first row of that kind. The menu icon warns as well when the radar reached no registry. An update can
-now be done in two steps: download now, roll out later.
+now be done in two steps: download now, roll out later. The update and version change dialogs show
+the release notes between the two versions, from GitHub (stage 3).
 
 **Upgrading:** nothing to do. The next radar run or update writes `status.json`; `status` gives the
-links at once.
+links at once. The release notes come with the next radar run (the package starts one two minutes
+after the install, when the radar is set up).
 
 - **Links for the Status Board.** Every item of `diun-update.py status` now carries a `link` to its
   place on the page: “Updates available” `#/updates/update`, “Roll-out pending” `#/updates/rollout`,
@@ -44,6 +46,25 @@ links at once.
   the button's label, the dump moot, the command, the result; no choice for an image already here) and
   a new section 10d in `test/e2e-server.sh` (pull only against the local registry: the tag moves, the
   container and the history stay; then the roll-out).
+- **Release notes in the dialogs** (stage 3). The radar names each image's repository on GitHub
+  (`source` in `versions.json`: a short list of checked images such as `nextcloud` → nextcloud/server
+  and `redis` → redis/redis, the label `org.opencontainers.image.source` or `org.label-schema.vcs-url`,
+  or `ghcr.io/<owner>/<name>`) and, for the images with something newer, fetches their releases into
+  `/var/lib/diun-radar/releases.json` (new module `lib/diunnotes.py`). The update dialog and the
+  preview of a version change show, closed below the plan, the releases newer than the installed
+  version and up to the target (all since the installed version for a tag like `latest` that names
+  no target), newest first, each with its date, its text and a link to GitHub; a
+  warning label names *breaking*, *migration* or *deprecated* when a text mentions them, and the text
+  marks them. The text is shown as text: Markdown's headings, lists and links read as such, images,
+  HTML and comments are left out. When there are none, a note says why (no source, not fetched yet,
+  no releases, GitHub's limit, an error, none between the two versions). GitHub without a login allows
+  60 requests per hour: one request per image with something newer, at most 20 per run, none with 5
+  or fewer left, an answer kept for 24 hours (sooner when a newer version turns up, never within an
+  hour); on the limit or without network the last answer stays. A problem there never fails the radar
+  run. Tests: `test/notes_test.py` (new: the sources, the releases of an answer and which of them, when
+  a source is asked again, the limit, errors, the radar run writing both files), `test/release-notes.js`
+  (new: the dialogs, the text as text, every note, English and German), the Cockpit job in CI checks
+  that the hardened radar unit writes `releases.json`.
 
 ## 0.22.0 – 2026-10-20
 

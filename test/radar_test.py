@@ -16,6 +16,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(os.path.dirname(HERE), "lib")
 sys.path.insert(0, ROOT)
 import diunlib as L  # noqa: E402
+import diunnotes  # noqa: E402
+
+# A radar run asks GitHub for release notes (diunnotes, tested in notes_test.py):
+# never from this test. A request is counted and fails, like no network.
+GITHUB_ASKED = []
+
+
+def no_github(repo):
+    GITHUB_ASKED.append(repo)
+    raise OSError("no network in this test")
+
+
+diunnotes.fetch = no_github
 
 
 def load(name, file):
@@ -738,6 +751,9 @@ kept = [r for r in written["images"] if r["image"] == "ghcr.io/acme/app"][0]
 check("radar: main writes no_registry, keeps the last good entry stale, and says so",
       (rc, written.get("no_registry"), kept["stale"], kept["status"], "no registry reached" in out.getvalue()),
       (0, {"error": DNS, "images": 2}, True, good_app["status"], True))
+check("radar: main writes releases.json next to it, GitHub only through diunnotes",
+      (os.path.exists(os.path.join(os.path.dirname(NR_OUT), "releases.json")), all(isinstance(x, str) for x in GITHUB_ASKED)),
+      (True, True))
 
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

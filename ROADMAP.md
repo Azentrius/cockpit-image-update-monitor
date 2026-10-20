@@ -135,7 +135,7 @@ chips, selection field, preview, tick boxes). Where it differs from the plan bel
 - Several lines of one image (e.g. `web`, `worker`, `migrate`) change together, as an update recreates
   all of them; only anchors, `include:` and shared or composed variables stop it.
 - A git repository is named as a hint; the add-on does not commit.
-- The pointer to the release notes comes with stage 3.
+- The pointer to the release notes came with stage 3 (0.23.0).
 
 **Goal:** the version of a container can be changed in the page, safely: a click on an *outlined* chip
 (e.g. “Patch v2.1.5” with `v2.1.4` configured), or a selection field with the versions the registry
@@ -183,7 +183,20 @@ offers.
 
 ---
 
-## Stage 3 – Release notes in the dialog
+## Stage 3 – Release notes in the dialog ✅
+
+Done in 0.23.0 (see [CHANGELOG](CHANGELOG.md)): the radar names each image's repository on GitHub
+(`source` in `versions.json`), fetches the releases of the images with something newer into
+`releases.json`, and the update dialog and the preview of a version change show those between the
+installed and the target version. Where it differs from the plan below:
+- The source: a short list of checked images, the labels `org.opencontainers.image.source` and
+  `org.label-schema.vcs-url`, and `ghcr.io/<owner>/<name>`. Diun's hub link names Docker Hub's page,
+  not the source, and is not used.
+- No token yet: without a login, with one request per image that has something newer, an answer kept
+  for 24 hours and at most 20 requests per run, the 60 per hour are enough on the reference host. A
+  token in `/etc/image-updates.conf` stays open (the cleanup's strict parser has to learn the key, and
+  the radar must read it despite its hardening without the page ever seeing it).
+- The pointer to the release notes in a version change (stage 2) is these notes.
 
 **Goal:** see what changes before the click.
 

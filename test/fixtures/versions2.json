@@ -9,6 +9,10 @@
    ],
    "db": false,
    "reach": [],
+   "source": {
+    "repo": "crazy-max/diun",
+    "via": "label"
+   },
    "installed": {
     "sha256:diun": {
      "version": "4.33.0",
@@ -42,6 +46,10 @@
    ],
    "db": false,
    "reach": [],
+   "source": {
+    "repo": "Tecnativa/docker-socket-proxy",
+    "via": "label"
+   },
    "installed": {
     "sha256:diun-socket-proxy": {
      "version": "0.4.1",
@@ -77,6 +85,10 @@
    ],
    "db": false,
    "reach": [],
+   "source": {
+    "repo": "ONLYOFFICE/DocumentServer",
+    "via": "known"
+   },
    "installed": {
     "sha256:onlyoffice-ds": {
      "version": "9.4.0.1",
@@ -115,6 +127,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "nextcloud/server",
+    "via": "known"
+   },
    "installed": {
     "sha256:nextcloud-family-app-1": {
      "version": "34.0.3",
@@ -273,6 +289,10 @@
     "patch",
     "minor"
    ],
+   "source": {
+    "repo": "redis/redis",
+    "via": "known"
+   },
    "installed": {
     "sha256:nextcloud-family-redis-1": {
      "version": "7.4.11",
@@ -310,6 +330,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "docusealco/docuseal",
+    "via": "known"
+   },
    "installed": {
     "sha256:docuseal": {
      "version": "3.1.6",
@@ -369,6 +393,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "sakowicz/actual-ai",
+    "via": "known"
+   },
    "installed": {
     "sha256:actual-ai": {
      "version": "2.4.1",
@@ -402,6 +430,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "ollama/ollama",
+    "via": "known"
+   },
    "installed": {
     "sha256:ollama": {
      "version": "0.30.11",
@@ -457,6 +489,10 @@
    ],
    "db": false,
    "reach": [],
+   "source": {
+    "repo": "actualbudget/actual",
+    "via": "known"
+   },
    "installed": {
     "sha256:actual_server": {
      "version": "26.6.0",
@@ -490,6 +526,10 @@
    ],
    "db": false,
    "reach": [],
+   "source": {
+    "repo": "plausible/analytics",
+    "via": "label"
+   },
    "installed": {
     "sha256:plausible": {
      "version": "2.1.4",
@@ -557,6 +597,10 @@
    ],
    "db": true,
    "reach": [],
+   "source": {
+    "repo": "ClickHouse/ClickHouse",
+    "via": "known"
+   },
    "installed": {
     "sha256:plausible_events_db": {
      "version": "24.3.3.102",
@@ -595,6 +639,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "rustdesk-org/rustdesk-server",
+    "via": "label"
+   },
    "installed": {
     "sha256:hbbs": {
      "version": "1.1.15",
@@ -630,6 +678,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "calcom/cal.com",
+    "via": "label"
+   },
    "installed": {
     "sha256:calcom": {
      "version": "6.2.0",
@@ -693,6 +745,10 @@
    ],
    "db": false,
    "reach": [],
+   "source": {
+    "repo": "cube-js/cube",
+    "via": "label"
+   },
    "installed": {
     "sha256:formbricks-cube": {
      "version": "1.6.6",
@@ -768,6 +824,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "valkey-io/valkey",
+    "via": "label"
+   },
    "installed": {
     "sha256:formbricks-redis": {
      "version": "9.1.0",
@@ -803,6 +863,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "cbcoutinho/nextcloud-mcp-server",
+    "via": "label"
+   },
    "installed": {
     "sha256:prod-mcp-1": {
      "version": null,
@@ -828,6 +892,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "formbricks/formbricks",
+    "via": "ghcr"
+   },
    "installed": {
     "sha256:formbricks-app": {
      "version": null,
@@ -859,6 +927,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "bokysan/docker-postfix",
+    "via": "known"
+   },
    "installed": {
     "sha256:smtp-relay-2": {
      "version": "5.1.0",
@@ -934,6 +1006,10 @@
     "minor",
     "major"
    ],
+   "source": {
+    "repo": "formbricks/hub",
+    "via": "ghcr"
+   },
    "installed": {
     "sha256:formbricks-hub": {
      "version": "0.4.0",
