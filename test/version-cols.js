@@ -444,7 +444,9 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     await flush();
     c = cells(row(bb, "prod-mcp-1"));
     console.log("built here, newer base:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
-    assert.deepStrictEqual(c.slice(3, 6).map((x) => x.textContent.trim()), ["?", "Basis neuer: caddy:2 = 2.11.7", "Neue Version"]);
+    assert.deepStrictEqual(c.slice(3, 6).map((x) => x.textContent.trim()), ["2.11.4 Basis caddy:2", "Basis neuer: caddy:2 = 2.11.7", "Neue Version"]);
+    assert(c[3].querySelector(".dm-ver").title.startsWith("Auf diesem Server gebaut: die Version, die das Basis-Image caddy:2 mitbringt"),
+           "the installed column: the version the final base brings, with where it comes from");
     tip = c[4].querySelector(".dm-level").title.split("\n");
     console.log("  " + tip.join(" / "));
     assert.deepStrictEqual(tip, [
@@ -466,7 +468,7 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
         .forEach((x) => { Object.keys(x).filter((k) => !["image", "tag", "final"].includes(k)).forEach((k) => delete x[k]); x.error = "registry down"; });
     bb = boot("de", errs);
     await flush();
-    assert.deepStrictEqual(cells(row(bb, "prod-mcp-1")).slice(4, 6).map((x) => x.textContent.trim()), ["Basis nicht geprüft", "Unbekannt"]);
+    assert.deepStrictEqual(cells(row(bb, "prod-mcp-1")).slice(3, 6).map((x) => x.textContent.trim()), ["?", "Basis nicht geprüft", "Unbekannt"]);
     bb = boot("en", bases(true, { pinned: true, newer: false }));
     await flush();
     c = cells(row(bb, "prod-mcp-1"));

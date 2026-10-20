@@ -110,10 +110,17 @@
     // "→ 16.15" when a newer image is already pulled but not rolled out.
     // Without a version, a development build that names its source revision
     // shows it: "main @35b2a97" (pomerium:main on a test host, 2026-10-18).
+    // An image built on this server (rec.base) names no version of its own:
+    // the version its final base brings (caddy:2 -> 2.11.6), as the radar read
+    // it from the build's variables, stands in. Only shown: the row's status
+    // follows the bases (baseCell).
     function installedCell(ctn, rec, inst) {
         const rev = !inst.v && ctn.revision ? shortRevision(ctn.revision) : "";
+        const base = !inst.v && !rev && rec && Array.isArray(rec.base) ? rec.base.find((b) => b.final && b.version) : null;
+        const baseRef = base ? `${base.image}:${base.tag}` : "";
         const lines = [inst.v ? sourceText(inst)
             : rev ? t("inst.revision", { rev: ctn.revision })
+            : base ? t("inst.base", { image: baseRef })
             : t(inst.looked ? "inst.unknown" : "inst.pending")];
         if (rev && ctn.created && !isNaN(new Date(ctn.created))) lines.push(t("inst.built", { date: fmtDate(new Date(ctn.created)) }));
         if (ctn.digest) lines.push(t("inst.digestLine", { d: shortDigest(ctn.digest) }));
@@ -121,6 +128,8 @@
         let html = inst.v
             ? `<span class="dm-ver" title="${title}">${esc(inst.v)}</span>`
             : rev ? `<span class="dm-ver" title="${title}">${esc(ctn.tag)} @${esc(rev)}</span>`
+            : base ? `<span class="dm-ver" title="${title}">${esc(base.version)}</span>` +
+                     ` <span class="dm-muted dm-small dm-base-note">${esc(t("inst.baseNote", { image: baseRef }))}</span>`
             : `<span class="dm-muted" title="${title}">?</span>`;
         const pv = ctn.pulled ? pulledVersionOf(ctn, rec) : null;
         if (pv && pv !== inst.v) {
