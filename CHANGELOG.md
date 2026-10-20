@@ -65,6 +65,9 @@ after the install, when the radar is set up).
   a source is asked again, the limit, errors, the radar run writing both files), `test/release-notes.js`
   (new: the dialogs, the text as text, every note, English and German), the Cockpit job in CI checks
   that the hardened radar unit writes `releases.json`.
+- **Tests without a tag filter.** Five jsdom tests took the `<script>` tags out of `index.html` with a
+  regular expression, which CodeQL reports as an incomplete tag filter (`js/bad-tag-filter`). They
+  now remove the script elements from the parsed page, as the other tests do.
 
 ## 0.22.0 – 2026-10-20
 

@@ -8,8 +8,7 @@ const { JSDOM } = require("jsdom");
 
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
-const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8")
-    .replace(/<script[^>]*><\/script>/g, "");
+const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
 // The page as index.html loads it: the texts (i18n.js), then the code (diun.js).
 const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
@@ -48,6 +47,7 @@ async function settle() {
 function boot({ language, deps = DEPS_OK, install } = {}) {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
     const w = dom.window;
+    w.document.querySelectorAll("script").forEach((s) => s.remove());   // the page's own tags never run
     // jsdom has no modal dialogs: minimal stand-ins.
     w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
     w.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };

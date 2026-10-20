@@ -8,8 +8,7 @@ const { JSDOM } = require("jsdom");
 
 const PLUGIN = path.join(__dirname, "..", "plugin");
 const FIX = path.join(__dirname, "fixtures");
-const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8")
-    .replace(/<script[^>]*><\/script>/g, "");          // we inject scripts ourselves
+const html = fs.readFileSync(path.join(PLUGIN, "index.html"), "utf8");
 // The page as index.html loads it: the texts (i18n.js), then the code (diun.js).
 const js = ["i18n.js", "diun.js"].map((f) => fs.readFileSync(path.join(PLUGIN, f), "utf8")).join("\n");
 const fixtures = {
@@ -22,6 +21,7 @@ const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 async function scenario(name, { files = fixtures, spawnOk = true, now = "2026-10-12T02:50:00Z" } = {}) {
     const dom = new JSDOM(html, { runScripts: "outside-only" });
     const w = dom.window;
+    w.document.querySelectorAll("script").forEach((s) => s.remove());   // the page's own tags never run
     const calls = { spawn: [], reads: 0 };
     const watchers = [];
     const tags = {};           // current file tag per path, like Cockpit's
