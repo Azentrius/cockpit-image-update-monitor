@@ -242,8 +242,9 @@ what failed, what was rolled back.
 In progress. Since 0.23.0 the helper does a PostgreSQL major by dump and restore (`diun-update.py
 dbmajor`, see [docs/INTERNALS.md](docs/INTERNALS.md#dbmajor-database-major-stage-5-since-0230)), with
 its rollback and the release of the kept data; the end-to-end test runs 16 → 17 with test data, the
-rollback and the release. Open: the assistant in the page, MariaDB/MySQL, path B. Where it differs
-from the plan below:
+rollback and the release. The page offers it in “Change version” with two tick boxes (a backup checked
+elsewhere, the downtime) and releases the kept data from the history. Open: MariaDB/MySQL, path B.
+Where it differs from the plan below:
 - No new volume and no change of the volume line: the old data is moved aside (into a volume of its
   own next to a named volume, into a sibling directory of a bind mount), by renames on the same
   filesystem, and the new major starts on the emptied place. The compose file changes in its tag line

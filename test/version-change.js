@@ -168,10 +168,10 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     optionsOf(a.d).forEach((g) => console.log("  ", g));
     assert.deepStrictEqual(optionsOf(a.d), [
         "Laufende Version festsetzen: 16.14-alpine (läuft jetzt)",
-        "Versionslinien: Updates innerhalb der Linie: 18-alpine – Datenbank-Major, braucht eine Migration [x], " +
-            "17-alpine – Datenbank-Major, braucht eine Migration [x]",
+        "Versionslinien: Updates innerhalb der Linie: 18-alpine – Datenbank-Major per Dump und Restore, " +
+            "17-alpine – Datenbank-Major per Dump und Restore",
         "Minor-Versionen: 16.15-alpine",
-        "Major-Versionen: 18.6-alpine – Datenbank-Major, braucht eine Migration [x], 17.11-alpine – Datenbank-Major, braucht eine Migration [x]",
+        "Major-Versionen: 18.6-alpine – Datenbank-Major per Dump und Restore, 17.11-alpine – Datenbank-Major per Dump und Restore",
         "Folgt jeder neuen Version: alpine – Datenbank-Major, braucht eine Migration [x]"]);
     a.$("dm-dialog-cancel").click();
     rowOf(a.d, "nextcloud-family-app-1").querySelector("button[data-retag]").click();
@@ -420,7 +420,8 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     en.$("dm-tab-btn-backups").click();
     await settle();
     const all = en.d.documentElement.outerHTML + enOpts;
-    assert(enOpts.includes("18-alpine – database major, needs a migration"));
+    assert(enOpts.includes("18-alpine – database major by dump and restore") &&
+           enOpts.includes("alpine – database major, needs a migration"), enOpts);
     assert(all.includes("Tag changed: v2.1.4 → v2") && all.includes("latest follows every new release"));
     const german = ["Version ändern", "Versionslinien", "festsetzen", "läuft jetzt", "derzeit", "Datenbank", "Hauptversion",
                     "Folgt jeder", "Prüfe", "Änderung", "Variable", "geändert", "konfiguriert", "Klicken", "Bringt", "bewusst"];

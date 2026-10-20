@@ -92,11 +92,15 @@ after the install, when the radar is set up).
   on the emptied place, the dump restored, the counts compared, the waiting services started. The old
   data stays until `delete-olddata` releases it; `rollback` moves it back and keeps the new major's.
   PostgreSQL 18 needs `PGDATA` in the compose file (or the volume at `/var/lib/postgresql`); the plan
-  says so. The page's assistant follows; the history already names a major and the data it keeps, and
-  its rollback says what happens to the data. Tests: `test/major_test.py` (new: the plan and every refusal,
+  says so. In the page *Change version* offers PostgreSQL majors with a known target: the preview
+  shows the plan of the major (where the data lies, what stops meanwhile, the extensions, the size),
+  asks for two tick boxes (a backup checked elsewhere, the downtime) and runs it; the history names a
+  major and the data it keeps, *Release* deletes that data after a confirmation, and its rollback says
+  what happens to the data. Tests: `test/major_test.py` (new: the plan and every refusal,
   counts, restore errors, moving data aside and back, the release) and section 17 of
   `test/e2e-server.sh` (16 to 17 with test data in two databases, an extension and a role; the data
-  and checksums the same after the major, after its rollback and after a second major; the releases).
+  and checksums the same after the major, after its rollback and after a second major; the releases),
+  `test/db-major.js` (new: the assistant in the page and the release).
 
 ## 0.22.0 – 2026-10-20
 

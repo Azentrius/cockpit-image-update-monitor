@@ -701,10 +701,10 @@ const BASE_SCRIPT = {
                      kept: { where: "volume glitchtip_pgdata-pg16-20261020-120000", bytes: 162529280, major: 16, can_release: true } }];
     for (const [lang, note, kept, desc] of [
         ["de", "Datenbank-Major: PostgreSQL 16 → 17",
-         "Die Daten von PostgreSQL 16 sind aufbewahrt: volume glitchtip_pgdata-pg16-20261020-120000 (155,00 MiB); freigeben mit diun-update.py delete-olddata.",
+         "Die Daten von PostgreSQL 16 sind aufbewahrt: volume glitchtip_pgdata-pg16-20261020-120000 (155,00 MiB).",
          "Stoppt die Datenbank und die Dienste, die auf sie warten, bewahrt die Daten von PostgreSQL 17 auf, legt die Daten von PostgreSQL 16 zurück"],
         ["en", "Database major: PostgreSQL 16 → 17",
-         "The data of PostgreSQL 16 is kept: volume glitchtip_pgdata-pg16-20261020-120000 (155.00 MiB); release it with diun-update.py delete-olddata.",
+         "The data of PostgreSQL 16 is kept: volume glitchtip_pgdata-pg16-20261020-120000 (155.00 MiB).",
          "Stops the database and the services that wait for it, keeps the data of PostgreSQL 17, moves the data of PostgreSQL 16 back"]]) {
         const mp = boot(lang, { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: MAJOR }) } });
         await settle();

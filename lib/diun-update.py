@@ -2698,6 +2698,9 @@ def cmd_backups():
                 o["kept"] = {"where": kept_where(kept), "bytes": kept_bytes(kept),
                              "major": o.get("to_major") if o.get("rolled_back") else o.get("from_major"),
                              "can_release": o.get("status") == "ok" or bool(o.get("rolled_back"))}
+            # Without the old data a rollback has nothing to move back.
+            if o.get("can_rollback") and not o.get("rolled_back") and o.get("old_data") and "kept" not in o:
+                o["can_rollback"] = False
             for k in ("data", "old_data", "new_data"):
                 o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))
