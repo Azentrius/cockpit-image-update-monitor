@@ -189,6 +189,34 @@ const BASE_SCRIPT = {
     console.log("result:", b.d.getElementById("dm-dialog-result").textContent);
     assert.strictEqual(b.d.getElementById("dm-dialog-result").textContent, "Update erfolgreich. Rollback-Kopie: ollama/ollama:rollback-20261012-032000");
 
+    // 2b. Update in two steps: only fetch the image now, roll it out later (e.g. in a maintenance
+    // window). The choice changes the command and the button and makes the dump moot.
+    const pullOk = { chunks: ["Pull ollama/ollama:latest …\n",
+                              '@@RESULT {"status":"pulled","from_version":"0.30.11","to_version":"0.40.6","image":"ollama/ollama:latest"}\n'] };
+    for (const [lang, now, only, done] of [
+        ["de", "Update", "Nur herunterladen", "Image heruntergeladen (0.40.6). Die Container laufen unverändert weiter; ausrollen mit „Image ausrollen“, zum Beispiel im Wartungsfenster."],
+        ["en", "Update", "Download only", "Image downloaded (0.40.6). The containers keep running unchanged; roll it out with “Roll out image”, for example in a maintenance window."]]) {
+        const tp = boot(lang, { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_OLLAMA) },
+                                                "diun-update.py pull": pullOk });
+        await settle();
+        tp.d.querySelector('button[data-update="ollama"]').click();
+        await settle();
+        const steps = [...tp.d.querySelectorAll('#dm-dialog-body input[name="dm-step"]')];
+        console.log("two steps (" + lang + "):", steps.map((x) => x.closest("label").textContent.trim()).join(" | "));
+        assert.deepStrictEqual(steps.map((x) => [x.value, x.checked]), [["now", true], ["pull", false]]);
+        const confirm = tp.d.getElementById("dm-dialog-confirm");
+        assert.strictEqual(confirm.textContent.trim(), now);
+        steps[1].checked = true;
+        steps[1].dispatchEvent(new tp.w.Event("change", { bubbles: true }));
+        assert.strictEqual(confirm.textContent.trim(), only);
+        assert(tp.d.getElementById("dm-dump-check").disabled, "pull only: no dump to choose");
+        confirm.click();
+        await settle();
+        assert.strictEqual(JSON.stringify(tp.last("pull").cmd), JSON.stringify(["/usr/lib/cockpit-image-updates/diun-update.py", "pull", "ollama"]));
+        assert.strictEqual(tp.last("update"), undefined, "no update ran");
+        assert.strictEqual(tp.d.getElementById("dm-dialog-result").textContent, done);
+    }
+
     // 3. Without dump -> --no-dump; failure -> rollback offered -> rollback runs
     const c = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_GLITCH) },
         "diun-update.py update": { chunks: ["…\n", '@@RESULT {"op":"20261012-033000-glitchtip-postgres","status":"failed"}\n'], fail: { exit_status: 4 } },
@@ -197,6 +225,8 @@ const BASE_SCRIPT = {
     c.d.querySelector('button[data-update="glitchtip-postgres"]').click();
     await settle();
     console.log("\ndialog:", c.d.getElementById("dm-dialog-title").textContent, "|", c.d.getElementById("dm-dialog-desc").textContent);
+    assert.strictEqual(c.d.querySelectorAll('#dm-dialog-body input[name="dm-step"]').length, 0,
+                       "an image pulled already: no choice, this is the roll-out");
     c.d.getElementById("dm-dump-check").checked = false;
     c.d.getElementById("dm-dialog-confirm").click();
     await settle();

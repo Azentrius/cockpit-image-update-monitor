@@ -161,6 +161,8 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
 .dm-reason-line { font-family: var(--az-font-code); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .dm-alert-line { display: block; margin-block-start: var(--space-xs); }
 /* Overview: the update to this very build failed before */
+.dm-steps { border: 0; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
+.dm-steps legend { padding: 0; margin-block-end: 4px; font-weight: 600; }
 .dm-row-note { display: block; max-inline-size: 16rem; margin-block-start: 2px; color: var(--text-subtle); font-size: 12px; }
 .dm-dialog-result.is-ok { color: var(--status-success); }
 .dm-dialog-result.is-error { color: var(--danger-text); }
@@ -201,8 +203,8 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
     font-size: 13px;
 }
 /* A tick box with its text: the whole line is the target (29 px, 44 px on a phone). */
-.dm-check { display: flex; align-items: center; gap: var(--space-sm); min-block-size: 29px; margin: 0; cursor: pointer; }
-.dm-check input { flex: none; inline-size: 16px; block-size: 16px; margin: 0; accent-color: var(--primary); }
+.dm-check, .dm-radio { display: flex; align-items: center; gap: var(--space-sm); min-block-size: 29px; margin: 0; cursor: pointer; }
+.dm-check input, .dm-radio input { flex: none; inline-size: 16px; block-size: 16px; margin: 0; accent-color: var(--primary); }
 /* History: the cause under the result, two lines at most (full text as title) */
 .dm-op-reason {
     display: -webkit-box;
@@ -225,7 +227,7 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
     .az-table--stack .dm-levels { justify-content: flex-end; }
     .az-table--stack td.az-cell-actions .dm-cell { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-sm); }
     .az-table--stack .dm-slot { display: none; }
-    .dm-level-btn, .dm-check { min-block-size: 44px; }
+    .dm-level-btn, .dm-check, .dm-radio { min-block-size: 44px; }
     .dm-loading { padding: var(--space-lg) var(--space-md); }
     .dm-legend { flex-direction: column; padding-inline: var(--space-md); }
     .dm-dep { flex-direction: column; align-items: stretch; }

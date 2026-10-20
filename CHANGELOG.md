@@ -3,7 +3,8 @@
 ## 0.23.0 – 2026-10-20
 
 A click on a tile of the Status Board opens the page where the finding is: the tab, and there the
-first row of that kind. The menu icon warns as well when the radar reached no registry.
+first row of that kind. The menu icon warns as well when the radar reached no registry. An update can
+now be done in two steps: download now, roll out later.
 
 **Upgrading:** nothing to do. The next radar run or update writes `status.json`; `status` gives the
 links at once.
@@ -30,6 +31,19 @@ links at once.
   board would not take. `test/menu-status.js`: a radar run that reached no registry, also outdated
   and next to a failed update, against `diunstatus.py`. The Cockpit job in CI jumps with
   `cockpit.jump` into the loaded page (the tab, no reload) and back after a tab was chosen on it.
+- **Update in two steps** (the last open item of stage 1.2). The update dialog offers, below the plan
+  and its warnings, “Update now” or “Download only” (“Nur herunterladen”). Download only runs the new
+  verb `diun-update.py pull <container>`: the update lock, the same plan and refusals as `update`, then
+  `docker compose pull` of the plan's services under `DOCKER_TIMEOUT`, and nothing that runs changes
+  (no dump, no rollback copy, no history entry). The row then shows “Roll-out pending”, and “Roll out
+  image” later runs the update as before, e.g. in the maintenance window. A failed pull, a time limit or
+  a signal is exit 5; nothing newer is `nochange`; `status.json` is written again. Tests:
+  `test/update_test.py` (pulled with the version that came, only the plan's services pulled and nothing
+  else done, the tag on the new image while the containers keep the old one, nothing newer, a failed
+  pull, a time limit, a signal, a wrong call), `test/update-backups.js` (the choice in German and English,
+  the button's label, the dump moot, the command, the result; no choice for an image already here) and
+  a new section 10d in `test/e2e-server.sh` (pull only against the local registry: the tag moves, the
+  container and the history stay; then the roll-out).
 
 ## 0.22.0 – 2026-10-20
 

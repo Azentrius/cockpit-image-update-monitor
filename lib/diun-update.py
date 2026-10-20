@@ -1513,6 +1513,47 @@ def cmd_update(name, do_dump=True):
     return roll_out(name, plan, ctx, do_dump)
 
 
+def cmd_pull(name):
+    """Step one of an update in two steps: fetch the image of the plan's
+    services and change nothing that runs. The row then shows "Roll-out
+    pending", and a later update rolls the image out (e.g. in a maintenance
+    window). No dump, no rollback copy and no history entry: nothing that runs
+    changed, so there is nothing to take back. Every failure is exit 5."""
+    lock()
+    with before_change():
+        plan, ctx = make_plan(name)
+    if not plan["updatable"]:
+        raise Abort(2, f"Nicht aktualisierbar: {plan['reason']}", f"Not updatable: {plan['reason']}")
+    ref, services, running = plan["image"], plan["services"], plan["old_image"]
+    say(f"Nur herunterladen: {ref} für {', '.join(services)} – die laufenden Container bleiben unverändert.",
+        f"Download only: {ref} for {', '.join(services)} – the running containers stay unchanged.")
+    with before_change():
+        try:
+            rc = stream(compose_cmd(ctx) + ["pull", *services])
+        except Timeout as e:
+            raise Abort(5, f"Der Pull hat nach {e.seconds} s nicht geendet und wurde abgebrochen (DOCKER_TIMEOUT in "
+                           f"{CONF}) – nichts geändert. Docker kann ein begonnenes Herunterladen noch beenden.",
+                        f"The pull did not end within {e.seconds} s and was stopped (DOCKER_TIMEOUT in {CONF}) – "
+                        f"nothing changed. Docker may still finish a download it had started.")
+    if rc != 0:
+        error = reason_line(STREAM_TAIL) or f"exit {rc}"
+        raise Abort(5, f"Der Pull ist fehlgeschlagen – nichts geändert. Pull: {error}",
+                    f"The pull failed – nothing changed. Pull: {error}")
+    new_id = image_id(ref)
+    if not new_id or new_id == running:
+        say("Kein neueres Image verfügbar – nichts geändert.", "No newer image available – nothing changed.")
+        result(status="nochange", image=ref, from_version=plan["installed_version"],
+               to_version=plan["installed_version"])
+        return 0
+    to_version = version_of(ref, new_id)
+    say(f"Heruntergeladen: {ref} ({short_id(new_id)}{', ' + to_version if to_version else ''}). Ausrollen mit "
+        f"„Image ausrollen“ oder `diun-update.py update {name}`.",
+        f"Downloaded: {ref} ({short_id(new_id)}{', ' + to_version if to_version else ''}). Roll it out with "
+        f"“Roll out image” or `diun-update.py update {name}`.")
+    result(status="pulled", image=ref, from_version=plan["installed_version"], to_version=to_version)
+    return 0
+
+
 def cmd_retag(name, new_tag, expect, do_dump=True):
     """Change the configured tag (stage 2): the plan of `retag --dry-run`
     once more, and only if it still matches what the page showed."""
@@ -2350,10 +2391,12 @@ def main(argv):
         plan, _ = make_plan(argv[1])
         print(json.dumps(plan, ensure_ascii=False))
         return 0
-    if argv[:1] in (["update"], ["rollback"], ["delete-image"]) or argv[:1] == ["retag"] and "--expect" in argv:
+    if argv[:1] in (["update"], ["pull"], ["rollback"], ["delete-image"]) or argv[:1] == ["retag"] and "--expect" in argv:
         load_limits()
     if len(argv) in (2, 3) and argv[0] == "update" and (len(argv) == 2 or argv[2] == "--no-dump"):
         return keep_output(cmd_update, argv[1], do_dump=len(argv) == 2)
+    if len(argv) == 2 and argv[0] == "pull":
+        return cmd_pull(argv[1])
     if len(argv) == 2 and argv[0] == "rollback":
         return keep_output(cmd_rollback, argv[1])
     if len(argv) == 2 and argv[0] == "log":
@@ -2403,7 +2446,7 @@ def entry(argv):
     if guard is not None and guard.repeats:
         say(f"{guard.repeats} weitere(s) Signal(e) während des Aufräumens nicht beachtet.",
             f"{guard.repeats} more signal(s) ignored while cleaning up.")
-    if argv[:1] in (["update"], ["retag"], ["rollback"], ["cleanup"]) and "--dry-run" not in argv \
+    if argv[:1] in (["update"], ["pull"], ["retag"], ["rollback"], ["cleanup"]) and "--dry-run" not in argv \
             and code not in (64, 75, 77):
         refresh_status()
     return code
