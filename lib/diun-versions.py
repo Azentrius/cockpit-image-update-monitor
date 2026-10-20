@@ -73,6 +73,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -816,6 +817,43 @@ def table(recs):
         print("  ".join(str(c).ljust(w) for c, w in zip(row, widths)).rstrip())
 
 
+RETRY_PAUSE = 30            # seconds before the one retry of a run that reached no registry
+
+
+def reached_none(recs):
+    """No registry answered this run: every image ended in a registry error.
+    That is the server's DNS or network, not the registries (build-host,
+    2026-10-20: the resolver answered "server misbehaving" for every name).
+    "unlisted" is an answer (access denied), so it counts as reached."""
+    return bool(recs) and all(r.get("status") == "error" for r in recs)
+
+
+def common_error(recs):
+    """The most frequent error of a run, shortened."""
+    errs = [str(r.get("error") or "") for r in recs if r.get("error")]
+    return max(sorted(set(errs)), key=errs.count)[-300:] if errs else ""
+
+
+def check_all(groups, cache, tags_now, now=None, sleep=None, clock=None):
+    """analyse() for every image. A run that reached no registry is tried once
+    more after RETRY_PAUSE seconds. Returns (records, time of the run,
+    no_registry): no_registry is {"error", "images"} when the second try
+    reached none either, else None."""
+    clock = clock or now_utc
+
+    def run(at):
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            return list(pool.map(lambda it: analyse(it, cache, at, tags_now), groups.items()))
+    now = now or clock()
+    recs = run(now)
+    if reached_none(recs):
+        print(f"no registry reached ({common_error(recs)}); trying again in {RETRY_PAUSE} s", file=sys.stderr)
+        (sleep or time.sleep)(RETRY_PAUSE)
+        now = clock()
+        recs = run(now)
+    return recs, now, ({"error": common_error(recs), "images": len(recs)} if reached_none(recs) else None)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Version radar for running containers")
     ap.add_argument("--table", action="store_true", help="human-readable table")
@@ -831,9 +869,7 @@ def main():
 
     prev = load_previous(args.output) if args.output else []
     cache, tags_now = digest_cache(prev), tag_now_cache(prev)
-    now = now_utc()
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        recs = list(pool.map(lambda it: analyse(it, cache, now, tags_now), groups.items()))
+    recs, now, no_registry = check_all(groups, cache, tags_now)
     for r in recs:
         r["checked"] = iso(now)
     if args.output:
@@ -842,12 +878,16 @@ def main():
 
     if args.output:
         doc = {"generated": iso(now), "images": recs}
+        if no_registry:
+            doc["no_registry"] = no_registry
         write_atomic(args.output, doc)
         errors = sum(1 for r in recs if r["status"] == "error" or r.get("stale"))
         unlisted = sum(1 for r in recs if r["status"] == "unlisted")
         unknown = sum(1 for r in recs for x in (r.get("installed") or {}).values() if not x.get("version"))
         print(f"{len(recs)} images checked, {errors} with registry errors, {unlisted} not in a registry, "
               f"{unknown} without a known version -> {args.output}")
+        if no_registry:
+            print(f"no registry reached, also on the second try: {no_registry['error']}")
         # The status for the Status Board; a problem there never fails the run.
         status = os.path.join(os.path.dirname(os.path.abspath(args.output)), "status.json")
         try:

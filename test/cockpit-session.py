@@ -352,6 +352,17 @@ def main():
         runs = root("journalctl", "-u", "diun-radar.service", "-o", "cat", "--no-pager", check=False)
         note("journal: the radar runs finished", runs.count("Finished") >= 2 or runs.count("Deactivated successfully") >= 2,
              f"{runs.count('Finished')} finished")
+        # After an install the package starts the radar two minutes later, by a timer: the same apt
+        # run can restart the resolver or the network (build-host, 2026-10-20). It no longer
+        # restarts the running radar timer either, which started the radar at once (OnBootSec=).
+        root("/var/lib/dpkg/info/cockpit-image-update-monitor.postinst", "configure", check=False)
+        later = root("systemctl", "is-active", "diun-radar-after-install.timer", check=False)
+        busy = root("systemctl", "is-active", "diun-radar.service", check=False)
+        timer = root("systemctl", "is-active", "diun-radar.timer", check=False)
+        root("systemctl", "stop", "diun-radar-after-install.timer", check=False)
+        note("after an install: the radar starts two minutes later by a timer, not at once, its timer runs on",
+             later == "active" and busy not in ("activating", "active") and timer == "active",
+             f"after-install timer {later}, radar {busy}, radar timer {timer}")
         check_menu(page, "en", "after the radar runs")
         shot(page, "radar")
 

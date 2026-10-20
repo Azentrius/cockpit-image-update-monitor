@@ -338,6 +338,30 @@ for hours, want_en, want_de in ((2, "2 h", "2 Std."), (0.2, "< 1 h", "< 1 Std.")
 check("a radar time that cannot be read: warning",
       by_id(S.document(facts(generated="yesterday"), "en", NOW, VERSION))["radar"]["state"], "warning")
 
+# A radar run that reached no registry, not even on its second try: a warning
+# that names DNS and the network. The error itself (with a resolver address)
+# stays out of status.json, which names containers only.
+nr_versions = {"generated": "2026-10-12T02:17:34Z", "images": [],
+               "no_registry": {"error": "lookup ghcr.io on 127.0.0.53:53: server misbehaving", "images": 21}}
+check("radar facts: no registry reached, without the error text",
+      S.radar_facts(nr_versions), {"found": True, "generated": "2026-10-12T02:17:34Z", "reached": False})
+check("radar facts: a run that reached a registry carries no mark", "reached" in S.radar_facts(radar()), False)
+nr_facts = facts()
+nr_facts["radar"] = S.radar_facts(nr_versions)
+en, de = (S.document(nr_facts, lang, NOW, VERSION) for lang in ("en", "de"))
+check("status: a radar run that reached no registry is a warning, in the summary and the title",
+      (en["state"], en["summary"], by_id(en)["radar"]["state"], by_id(en)["radar"]["title"], de["summary"]),
+      ("warning", "Version radar reached no registry", "warning", "Version radar reached no registry",
+       "Versions-Radar erreichte keine Registry"))
+check("status: its detail points to DNS and the network, the age is the value, no address in it",
+      ("DNS" in by_id(en)["radar"].get("detail", ""), "DNS" in by_id(de)["radar"].get("detail", ""),
+       by_id(en)["radar"].get("value"),
+       "127.0.0.53" in json.dumps(en) + json.dumps(de)),
+      (True, True, by_id(S.document(facts(), "en", NOW, VERSION))["radar"]["value"], False))
+nr_facts["radar"] = dict(nr_facts["radar"], generated=S.iso(NOW - timedelta(days=2)))
+check("status: an old run that reached no registry is outdated first",
+      by_id(S.document(nr_facts, "en", NOW, VERSION))["radar"]["title"], "Version radar outdated")
+
 # ------------------------------------------------------- state and summary
 quiet_doc = S.document(facts(), "en", NOW, VERSION)
 check("nothing found: ok, and it says so", (quiet_doc["state"], quiet_doc["summary"]),

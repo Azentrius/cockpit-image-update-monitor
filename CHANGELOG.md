@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.22.0 – 2026-10-20
+
+A radar run that reaches no registry at all tries once more and then says so, and an install no
+longer starts the radar in the middle of the `apt` run.
+
+**Upgrading:** nothing to do. This upgrade itself already starts the radar two minutes later.
+
+- **No registry reached.** On build-host (2026-10-20) the resolver answered “server misbehaving” for
+  every name during two radar runs: all 21 images got a registry error, and the page showed “(older
+  data)” 20 times without saying why. When every image of a run ends in a registry error (an
+  “unlisted” image counts as an answer), the radar now waits 30 seconds and tries all of them once
+  more. If no registry answers then either, `versions.json` carries `no_registry` with the most
+  frequent error, the header says “(no registry reached)” with the error and a pointer to DNS and
+  the network in its tooltip, and the Status Board and the menu icon show the warning “Version radar
+  reached no registry” (without the error, which can name addresses). The entries stay the last good
+  ones, marked “(older data)” as before.
+- **The radar after an install.** The package started the radar at once after every install or
+  upgrade, twice even: `configure` restarted the running radar timer, and a timer whose `OnBootSec=`
+  lies in the past starts its service at once, then it started the service itself. Both fell into
+  the same `apt` run, which can restart `systemd-resolved` or the network. Now a running timer is
+  left alone (`daemon-reload` reads the package's unit), and the refresh runs two minutes later by a
+  timer `diun-radar-after-install` (at once only where `systemd-run` fails). Removing the package
+  stops that timer.
+- **Tests.** `test/radar_test.py`: a run that reaches no registry and the second try that works, one
+  that fails twice, one registry down, no images, every registry answering “denied”, and `main()`
+  writing `no_registry` next to the kept entries. `test/status_test.py`: the warning, its summary and
+  detail in English and German, no address in it, an old run outdated first. `test/version-cols.js`:
+  the header and its tooltip. The Cockpit job in CI runs the package's `configure` again on the real
+  runner: the timer `diun-radar-after-install` waits, the radar does not start, its timer keeps running.
+
 ## 0.21.2 – 2026-10-20
 
 A failed update stays failed until a later run of the same services settles it, and the newest

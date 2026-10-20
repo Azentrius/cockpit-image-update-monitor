@@ -375,6 +375,22 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     if (keepChecked === undefined) delete pf.checked; else pf.checked = keepChecked;
     pf.tag_now = keepNow;
 
+    // A radar run that reached no registry, not even on its second try
+    // (versions.json "no_registry"): the meta line says so, its tooltip names
+    // the error and points to DNS and the network.
+    const nrDoc = JSON.parse(JSON.stringify(radar));
+    nrDoc.no_registry = { error: "lookup ghcr.io on 127.0.0.53:53: server misbehaving", images: 21 };
+    for (const [lang, word, dns] of [["de", "(keine Registry erreicht)", "DNS"], ["en", "(no registry reached)", "DNS"]]) {
+        const nd = boot(lang, { ...FILES, "/var/lib/diun-radar/versions.json": nrDoc });
+        await flush();
+        const meta = nd.getElementById("dm-meta");
+        console.log("no registry reached:", meta.textContent);
+        assert(meta.textContent.endsWith(word), meta.textContent);
+        assert(meta.title.includes("server misbehaving") && meta.title.includes(dns), meta.title);
+    }
+    assert(!d.getElementById("dm-meta").textContent.includes("Registry"), "a good run: no word about registries");
+    assert.strictEqual(d.getElementById("dm-meta").title, "", "a good run: no tooltip");
+
     // An image built on the server (a test host, 2026-10-18: caddy-caddy is
     // xcaddy on caddy:2-builder, copied onto caddy:2): no registry shows it,
     // the radar checks the bases of its Dockerfile instead.

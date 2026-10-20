@@ -40,7 +40,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.21.2";
+    const VERSION = "0.22.0";
     const LIB = "/usr/lib/cockpit-image-updates/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -679,7 +679,14 @@
         if (!radarDoc || !radarDoc.generated) return t("meta.radarNone");
         const a = ago(radarDoc.generated);
         if (!a) return t("meta.radarBad");
-        return t("meta.radar", { ago: a.text }) + (a.hours > RADAR_STALE_H ? " " + t("meta.outdated") : "");
+        return t("meta.radar", { ago: a.text }) + (a.hours > RADAR_STALE_H ? " " + t("meta.outdated") : "") +
+            (noRegistry(radarDoc) ? " " + t("meta.noRegistry") : "");
+    }
+    // The radar's last run reached no registry, not even on its second try
+    // (versions.json "no_registry"): the server's DNS or network, mostly.
+    function noRegistry(radarDoc) {
+        const nr = radarDoc && radarDoc.no_registry;
+        return nr && typeof nr === "object" ? nr : null;
     }
 
     // fromEvents: no inventory, the rows come from Diun's events alone.
@@ -721,8 +728,10 @@
             t("meta.newver", { n: newver }),
             t("meta.containers", { n: containers.length }),
         ].concat(ciJobs.length ? [t("meta.ciJobs", { n: ciJobs.length })] : [], [radarMeta(radarDoc)]).join(" · ");
-        $("dm-meta").title = ciJobs.length
-            ? [t("meta.ciJobsTip")].concat(ciJobs.map((c) => ciJobText(c.name, null))).join("\n") : "";
+        const nr = noRegistry(radarDoc);
+        $("dm-meta").title = (nr ? [t("meta.noRegistryTip", { error: String(nr.error || "?").replace(/[.\s]+$/, "") })] : [])
+            .concat(ciJobs.length ? [t("meta.ciJobsTip")].concat(ciJobs.map((c) => ciJobText(c.name, null))) : [])
+            .join("\n");
 
         if (containers.length === 0) {
             $("dm-table").hidden = true;

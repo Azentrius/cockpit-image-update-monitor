@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 if [ -d /run/systemd/system ]; then
     systemctl disable --now diun-radar.timer diun-cleanup.timer > /dev/null 2>&1 || true
+    systemctl stop diun-radar-after-install.timer > /dev/null 2>&1 || true
 fi
 # The helpers run as root (the page, the radar, the cleanup), and Python leaves the compiled
 # diunlib, diunproc and diunstatus in __pycache__ next to them. No package owns these files; without
