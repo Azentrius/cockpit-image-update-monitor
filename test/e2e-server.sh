@@ -775,15 +775,15 @@ echo "=== 17. Database major: PostgreSQL 16 to 17 by dump and restore, rollback,
 # A project of its own: the database (its own user and database, a named volume)
 # and an app that waits for it. Test data in two databases, an extension, a role.
 V17=$(pg_version "$PG17_IMAGE")
-docker tag "$OLD" imgupd-test/pgm:16
-docker tag "$PG17_IMAGE" "imgupd-test/pgm:$V17"
+docker tag "$OLD" imgupd-test/postgres:16
+docker tag "$PG17_IMAGE" "imgupd-test/postgres:$V17"
 docker tag "$OLD" imgupd-test/pgm-app:1
 mkdir -p "$D4"
 cat > "$D4/docker-compose.yml" <<EOF
 name: $P4
 services:
   db:
-    image: imgupd-test/pgm:16
+    image: imgupd-test/postgres:16
     container_name: imgupd-test-major-db
     environment:
       POSTGRES_USER: owner
@@ -825,8 +825,8 @@ try:
     d = json.load(open(p))
 except (OSError, ValueError):
     d = {"images": []}
-d["images"] = [r for r in d.get("images") or [] if r.get("image") != "imgupd-test/pgm"]
-d["images"].append({"image": "imgupd-test/pgm", "tag": "16", "db": True, "containers": ["imgupd-test-major-db"],
+d["images"] = [r for r in d.get("images") or [] if r.get("image") != "imgupd-test/postgres"]
+d["images"].append({"image": "imgupd-test/postgres", "tag": "16", "db": True, "containers": ["imgupd-test-major-db"],
                     "versions": {version: {"status": "major", "choices": {
                         "pin": None, "lines": [], "newer": [{"tag": target, "level": "major"}], "floating": []}}}})
 os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -836,7 +836,9 @@ with os.fdopen(fd, "w") as f:
 os.chmod(tmp, 0o644)
 os.replace(tmp, p)
 PY
+# The image's name ends in "postgres": the helper reads the installed version from PG_VERSION.
 DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
+echo "  | plan: $(jget "$DRY" '(d["installed_version"], d["retag"]["reason"], d["major"]["possible"], d["major"]["reason"], d["major"]["detail"])')"
 MJ=$(jget "$DRY" '(d["major"]["possible"], d["major"]["from_major"], d["major"]["to_major"], d["major"]["data"]["name"], d["major"]["stop"], d["major"]["extensions"])')
 check "dbmajor --dry-run: possible, 16 to 17, the named volume, the app stopped meanwhile, pgcrypto" \
     '[ "$MJ" = "(True, 16, 17, '"'"'imgupd-test-major_pgdata'"'"', ['"'"'app'"'"'], ['"'"'pgcrypto'"'"'])" ]'
@@ -851,9 +853,9 @@ OPM=$(jget "$RM" 'd["op"]')
 SM=$(jget "$RM" '(d["status"], d["image"])')
 KEPT16=$(docker volume ls -q --filter name='^imgupd-test-major_pgdata-pg16-')
 check "dbmajor: exit 0, ok, PostgreSQL 17 runs with the same data (counts, checksums, the role)" \
-    '[ $RC = 0 ] && [ "$SM" = "('"'"'ok'"'"', '"'"'imgupd-test/pgm:'"$V17"''"'"')" ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 17 ] && [ "$(DATA)" = "$DATA0" ]'
+    '[ $RC = 0 ] && [ "$SM" = "('"'"'ok'"'"', '"'"'imgupd-test/postgres:'"$V17"''"'"')" ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 17 ] && [ "$(DATA)" = "$DATA0" ]'
 check "dbmajor: the tag line changed, the old data kept in a volume of its own (PostgreSQL 16)" \
-    '[ "$(grep -c "image: imgupd-test/pgm:$V17$" "$D4/docker-compose.yml")" = 1 ] && [ -n "$KEPT16" ] && [ "$(cat "$(docker volume inspect -f "{{.Mountpoint}}" "$KEPT16")/PG_VERSION")" = 16 ]'
+    '[ "$(grep -c "image: imgupd-test/postgres:$V17$" "$D4/docker-compose.yml")" = 1 ] && [ -n "$KEPT16" ] && [ "$(cat "$(docker volume inspect -f "{{.Mountpoint}}" "$KEPT16")/PG_VERSION")" = 16 ]'
 check "dbmajor: the app runs again, the extension is there, the history knows the run" \
     '[ "$(docker inspect -f "{{.State.Running}}" imgupd-test-major-app)" = true ] && [ "$(q shop "select extversion is not null from pg_extension where extname = '"'"'pgcrypto'"'"'")" = t ] && grep -q "\"id\": \"$OPM\".*\"kind\": \"dbmajor\"" "$OPS"'
 BKM=$(python3 $H backups)
