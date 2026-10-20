@@ -2,8 +2,9 @@
 
 ## 0.22.0 – 2026-10-20
 
-A radar run that reaches no registry at all tries once more and then says so, and an install no
-longer starts the radar in the middle of the `apt` run.
+A radar run that reaches no registry at all tries once more and then says so, an install no longer
+starts the radar in the middle of the `apt` run, a rollback copy that is gone is named, and an image
+with nothing new for over a year is pointed out.
 
 **Upgrading:** nothing to do. This upgrade itself already starts the radar two minutes later.
 
@@ -29,6 +30,19 @@ longer starts the radar in the middle of the `apt` run.
   detail in English and German, no address in it, an old run outdated first. `test/version-cols.js`:
   the header and its tooltip. The Cockpit job in CI runs the package's `configure` again on the real
   runner: the timer `diun-radar-after-install` waits, the radar does not start, its timer keeps running.
+- **Rollback copy gone.** A `docker image prune -a` of another tool (Docker Manager, a cleanup script)
+  deletes the rollback images, and the history then only left the rollback button out without saying
+  why. `backups` now marks such a run `rollback_gone`, and the history says “Rollback copy gone” with
+  the image and the possible causes in the tooltip. Tests: `test/update_test.py` (a run whose copy is
+  gone, a failed rollback whose copy is gone, no mark where the copy is there, was rolled back or never
+  existed) and `test/update-backups.js` (the note in German and English, no rollback button).
+- **Nothing new for over a year.** “Up to date” said nothing about age: `ronmi/forgejo-mcp` runs the
+  newest `latest`, built on 28 Oct 2025 and unchanged since. When the container runs the newest there is
+  and its image was built over a year ago, the newest column adds “nothing new for over a year”; the
+  tooltip names the build date and says the project may be abandoned. Not where something newer is known
+  (also a database major) and not for a fixed date before 1980; the status stays up to date. Tests:
+  `test/version-cols.js` (a version and the newest build of a registry without release tags, built over
+  a year ago, in German and English; none for a recent build or a database major).
 
 ## 0.21.2 – 2026-10-20
 

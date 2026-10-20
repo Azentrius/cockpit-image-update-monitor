@@ -1397,6 +1397,27 @@ check("backups: broken rules -> error, nothing offered",
       (bool(bk["cleanup"]["error"]), bk["cleanup"]["dumps"], bk["cleanup"]["images"]), (True, [], []))
 os.unlink(U.CONF)
 
+# A rollback copy that is gone (deleted by the cleanup, in the backups tab or
+# outside the add-on, e.g. docker image prune -a): the history says so
+# (rollback_gone) instead of only leaving the rollback button out.
+U.record({"id": "20261007-030000-b-db", "ts": "x", "kind": "update", "container": "b-db", "project": "b",
+          "image": "postgres:16", "rollback": "postgres:rollback-20261007-030000", "dumps": [], "status": "ok"})
+U.record({"id": "20261007-040000-c-db", "ts": "x", "kind": "update", "container": "c-db", "project": "c",
+          "image": "postgres:16", "rollback": "postgres:rollback-20261007-040000", "dumps": [], "status": "ok",
+          "rolled_back": True, "rollback_status": "ok"})
+U.record({"id": "20261007-050000-d-db", "ts": "x", "kind": "update", "container": "d-db", "project": "d",
+          "image": "postgres:16", "rollback": "postgres:rollback-20261007-050000", "dumps": [], "status": "failed",
+          "rolled_back": True, "rollback_status": "failed"})
+gone = {o["id"]: o for o in json.loads(quiet(U.cmd_backups)[1])["ops"]}
+check("backups: the rollback copy is gone: marked, no rollback offered",
+      (gone["20261007-030000-b-db"].get("rollback_gone"), gone["20261007-030000-b-db"]["can_rollback"]), (True, False))
+check("backups: a failed rollback whose copy is gone: marked as well",
+      gone["20261007-050000-d-db"].get("rollback_gone"), True)
+check("backups: no mark where the copy is there, was rolled back, or there never was one",
+      ["rollback_gone" in gone[i] for i in ("20261005-030000-a-db", "20261007-040000-c-db", "20261004-030000-ollama")],
+      [False, False, False])
+check("backups: the copy that is there can still be rolled back", gone["20261005-030000-a-db"]["can_rollback"], True)
+
 # ------------------------------------------------------------------ radar
 U.systemctl = Systemctl(installed=False)
 check("radar: not set up -> 2", quiet(U.cmd_radar)[0], 2)

@@ -637,5 +637,28 @@ const BASE_SCRIPT = {
     console.log("\nEN German leftovers:", found.length ? found : "none");
     assert.deepStrictEqual(found, []);
 
+    // A rollback copy that is gone (deleted by the cleanup, in this tab or outside the add-on):
+    // the history says so, with the image in the tooltip, instead of only leaving the button out.
+    const GONE = [{ id: "20261012-050000-g", ts: "2026-10-12T03:00:00Z", kind: "update", container: "g", image: "g:latest",
+                    services: ["g"], rollback: "g:rollback-20261012-050000", dumps: [], status: "ok", can_rollback: false,
+                    rollback_gone: true },
+                  { ...BACKUPS.ops[0] }];
+    for (const [lang, word, tip] of [
+        ["de", "Rollback-Kopie fehlt", "Das Rollback-Image g:rollback-20261012-050000 gibt es nicht mehr"],
+        ["en", "Rollback copy gone", "The rollback image g:rollback-20261012-050000 no longer exists"]]) {
+        const gp = boot(lang, { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: GONE }) } });
+        await settle();
+        gp.d.getElementById("dm-tab-btn-backups").click();
+        await settle();
+        const rows = [...gp.d.querySelectorAll("#dm-ops tr")];
+        const note = rows[0].querySelector(".dm-rb-gone");
+        console.log("rollback copy gone (" + lang + "):", note ? note.textContent : "no note");
+        assert(note && note.textContent === word, lang + ": " + rows[0].textContent);
+        assert(note.title.startsWith(tip) && note.title.includes("prune"), note.title);
+        assert(!rows[0].querySelector("button[data-op]"), "no rollback button where the copy is gone");
+        assert(!rows[1].querySelector(".dm-rb-gone") && rows[1].querySelector("button[data-op]"),
+               "a copy that is there: the button, no note");
+    }
+
     console.log("\nALL CHECKS PASSED");
 })().catch((e) => { console.error("FEHLGESCHLAGEN:", e.stack || e.message); process.exit(1); });
