@@ -194,6 +194,10 @@ class Docker:
         self.up_runs = None          # image ID recreated containers run, whatever the tag names
         self.up_raises = None        # exception `compose up` raises (diunproc.Timeout: it did not end)
         self.undefined = set()       # services the compose files no longer define
+        self.build_to = None         # (ref, image id) the next `compose build` tags
+        self.build_rc = 0            # exit code of `compose build` (it may have tagged one service before)
+        self.build_out = []          # what a failing `compose build` prints
+        self.build_raises = None     # exception `compose build` raises
 
     def add(self, c):
         self.containers[c["Name"].lstrip("/")] = c
@@ -238,7 +242,7 @@ class Docker:
         if cmd[:3] == ["docker", "image", "ls"]:
             lines = []
             for ref, iid in sorted(self.tags.items()):
-                repo, tag = ref.rsplit(":", 1)
+                repo, tag = U.split_ref(ref)
                 lines.append(json.dumps({"Repository": repo, "Tag": tag, "ID": iid, "Size": "100MB",
                                          "CreatedAt": "2026-01-01 00:00:00 +0000 UTC"}))
             return "".join(x + "\n" for x in lines), 0, ""
@@ -278,6 +282,15 @@ class Docker:
 
     def stream(self, cmd):
         self.streamed.append(list(cmd))
+        if "build" in cmd:
+            if self.build_raises:
+                raise self.build_raises
+            if self.build_to:
+                ref, iid = self.build_to
+                self.tags[U.norm_ref(ref)] = iid
+            if self.build_rc:
+                U.STREAM_TAIL[:] = self.build_out
+            return self.build_rc
         if "pull" in cmd and self.pull_raises:
             raise self.pull_raises
         if "pull" in cmd and self.pull_rc:
@@ -1287,6 +1300,100 @@ check("kept output is cut at LOG_MAX and says so", (rc, kept.rstrip().endswith("
 check("a locally tagged build has no registry digests", ops()[res["op"]]["new_digests"], [])
 U.LOG_MAX = real_max
 LOGS.clear()
+
+# ----------------------------------------------------------------- rebuild
+# An image built on this server (compose `build:`): `rebuild` builds it again
+# with fresh bases instead of the pull and goes on as an update.
+reset_fs()
+fresh_docker()
+U.systemctl = Systemctl()
+U.wait_healthy = lambda project, services: (True, [], {})
+D.add(ctn("caddy", "caddy-caddy", "sha256:c1", project="caddy", service="caddy"))
+D.add(ctn("nginx", "nginx:1.27", "sha256:n", project="caddy", service="nginx"))
+D.cfg = {"services": {"caddy": {"build": {"context": "."}, "image": "caddy-caddy"}}}
+D.tags = {"caddy-caddy": "sha256:c1", "nginx:1.27": "sha256:n"}
+D.images = {"sha256:c1": {"Id": "sha256:c1", "Config": {"Env": ["CADDY_VERSION=v2.11.4"]}},
+            "sha256:c2": {"Id": "sha256:c2", "Config": {"Env": ["CADDY_VERSION=v2.11.7"]}}}
+with open(U.VERSIONS, "w") as f:
+    json.dump({"images": [{"image": "caddy-caddy", "tag": "latest", "status": "unlisted",
+                           "base": [{"image": "caddy", "tag": "2-builder", "final": False},
+                                    {"image": "caddy", "tag": "2", "final": True, "version": "2.11.4",
+                                     "now": "2.11.7", "newer": True}]}]}, f)
+check("rebuild: an update still refuses the built image", plan("caddy")["reason"], "built-locally")
+with as_uid(0):
+    rc, out = quiet(U.main, ["rebuild", "caddy", "--dry-run"])
+p = json.loads(out)
+check("rebuild --dry-run: updatable, the versions of the final base",
+      (rc, p["updatable"], p["build"], p["installed_version"], p["target_version"], p["jump"], p["jump_unknown"]),
+      (0, True, True, "2.11.4", "2.11.7", "patch", False))
+check("rebuild --dry-run: read-only", [c for c in D.streamed], [])
+with as_uid(0):
+    rc, out = quiet(U.main, ["rebuild", "nginx", "--dry-run"])
+check("rebuild --dry-run: a pulled image is no rebuild", (rc, json.loads(out)["reason"]), (0, "not-built"))
+check("rebuild: invalid name -> 64", main_rc("rebuild", "../x"), 64)
+release_lock()
+check("rebuild: unknown option -> 64", main_rc("rebuild", "caddy", "--now"), 64)
+check("rebuild: an image pulled -> 2", main_rc("rebuild", "nginx"), 2)
+release_lock()
+
+D.build_rc, D.build_to = 1, ("caddy-caddy", "sha256:half")
+D.build_out = ["#5 ERROR: failed to solve: process \"/bin/sh -c xcaddy build\" did not complete successfully: exit code: 1"]
+n_ops = len(ops())
+with as_uid(0):
+    rc, out = quiet(U.main, ["rebuild", "caddy"])
+release_lock()
+check("rebuild fails: exit 5, nothing changed, the build's error named",
+      (rc, "The rebuild failed – nothing changed. Build: " in out, "failed to solve" in out), (5, True, True))
+check("rebuild fails: the tag back on the image it named, no rollback tag, the container as it was",
+      (D.tags["caddy-caddy"], [r for r in D.tags if "rollback" in r], D.containers["caddy"]["Image"]),
+      ("sha256:c1", [], "sha256:c1"))
+check("rebuild fails: no compose pull, no up",
+      [c for c in D.streamed if "pull" in c or "up" in c], [])
+check("rebuild fails: not in the history", len(ops()), n_ops)
+
+D.build_rc, D.build_to, D.streamed = 0, None, []
+with as_uid(0):
+    rc, out = quiet(U.main, ["rebuild", "caddy", "--no-dump"])
+release_lock()
+res = last_result(out)
+check("rebuild with the same image: nothing changed",
+      (rc, res["status"], "The rebuild gave the same image – nothing changed." in out,
+       [r for r in D.tags if "rollback" in r], ops()[res["op"]]["kind"]), (0, "nochange", True, [], "rebuild"))
+
+D.build_to, D.streamed = ("caddy-caddy", "sha256:c2"), []
+with as_uid(0):
+    rc, out = quiet(U.main, ["rebuild", "caddy"])
+release_lock()
+res = last_result(out)
+op = ops()[res["op"]]
+check("rebuild: exit 0, the new build runs, versions of the final base",
+      (rc, res["status"], D.containers["caddy"]["Image"], res["from_version"], res["to_version"]),
+      (0, "ok", "sha256:c2", "2.11.4", "2.11.7"))
+check("rebuild: build --pull of the service, no compose pull, up without pull",
+      ([c[c.index("build"):] for c in D.streamed if "build" in c], [c for c in D.streamed if "pull" in c],
+       [c[c.index("up"):] for c in D.streamed if "up" in c]),
+      ([["build", "--pull", "caddy"]], [], [["up", "-d", "--no-deps", "--pull", "never", "caddy"]]))
+check("rebuild: says so, in the history as a rebuild with its rollback copy",
+      ("Rebuilding caddy-caddy in project caddy: services caddy" in out, "Rebuild successful." in out,
+       "No supported database container in this project – no dump." in out,
+       op["kind"], op["rollback"], D.tags.get(op["rollback"])),
+      (True, True, True, "rebuild", res["rollback"], "sha256:c1"))
+check("rebuild: the history offers the rollback", history(res["op"])["can_rollback"], True)
+with as_uid(0):
+    rc, _ = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+check("rebuild rolled back: the old build runs again", (rc, D.containers["caddy"]["Image"]), (0, "sha256:c1"))
+
+D.build_to, D.build_raises = None, U.Timeout(["docker", "compose", "build", "--pull", "caddy"], 1800, [])
+rb_tags = sorted(r for r in D.tags if "rollback" in r)
+with as_uid(0):
+    rc, out = quiet(U.main, ["rebuild", "caddy"])
+release_lock()
+check("rebuild that does not end: exit 5, nothing changed",
+      (rc, "The rebuild did not end within 1800 s" in out, sorted(r for r in D.tags if "rollback" in r)),
+      (5, True, rb_tags))
+D.build_raises = None
+D.cfg = {"services": {}}
 
 # ------------------------------------------------------------ cleanup rules
 reset_fs()

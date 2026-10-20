@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.24.0 – 2026-10-21
+
+Images built on the server (compose `build:`) can be updated: once a base image is newer, the row
+offers Rebuild, which builds the image again with fresh bases and runs it like an update, with the
+dumps, the rollback copy and the history. Their Installed column shows the version the final base
+brings instead of `?`.
+
+**Upgrading:** nothing to do.
+
+- **Rebuild in the helper.** `diun-update.py rebuild <container> [--no-dump]`, its plan
+  `rebuild <container> --dry-run`, for a compose service with `build:`: the steps of an update with
+  `docker compose build --pull <services>` in place of the pull. A build that fails, runs over
+  `DOCKER_TIMEOUT` or is stopped changes nothing that runs (exit 5), and the image tag stays on the
+  build it named. A build that gives the same image is `nochange`. The history keeps the run as kind
+  `rebuild`, with the versions of the final base; the rollback is the one of an update. An update
+  still refuses such an image (`built-locally`), and `rebuild` refuses a pulled one (`not-built`).
+- **Rebuild in the page.** A row whose base image is newer (“base newer: caddy:2 = 2.11.7”) gets
+  *Rebuild* in the update's place, when compose runs the container. The dialog lists the base images
+  (newer, unchanged, pinned), then the plan of an update, without the two steps and without release
+  notes. The base cell's tooltip names the button, the history marks the run “Rebuilt on this server”.
+- **Installed version of a built image.** The Installed column shows the version the final base
+  brings, as the build carries it in its variables (`2.11.4 base caddy:2`), with a tooltip that says
+  so. The row's status still follows the bases.
+- **Tests.** `test/update_test.py`: the plan of a rebuild with the versions of the final base, its
+  refusals, a failing build that puts the tag back and leaves no history, the same build, a rebuild
+  with its versions, history and rollback, a build over its time limit. `test/update-backups.js`: the
+  button, the dialog with the base images in both languages, with and without dump, the outcomes,
+  the rollback after a failure, a refusal, the history note. `test/version-cols.js`: the installed
+  version of a built image, the button only with a newer base and for containers compose runs.
+  `test/e2e-server.sh` section 18 (project `imgupd-test-build`): a Dockerfile on a base in the local
+  registry, the update refused, a failing build changing nothing, the rebuild bringing the newer base
+  through `--pull`, its versions and history, the rollback.
+
 ## 0.23.0 – 2026-10-20
 
 A click on a tile of the Status Board opens the page where the finding is: the tab, and there the

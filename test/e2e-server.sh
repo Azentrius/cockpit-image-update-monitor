@@ -23,6 +23,8 @@
 # The database major (stage 5) runs in a project of its own, "imgupd-test-major":
 # PostgreSQL 16 (OLD_IMAGE) to 17 (PG17_IMAGE, default postgres:17-alpine) with
 # test data, the rollback and the release of the kept data.
+# The rebuild of an image built on the server runs in "imgupd-test-build": a
+# Dockerfile on a base image in the local registry, which gets a newer build.
 # Pulls that work, fail or find a newer image already here run against a local
 # registry (REGISTRY_IMAGE, default registry:2.8.3, on 127.0.0.1 at
 # E2E_REGISTRY_PORT, default 5000); the MariaDB/MySQL dumps use it too. Every
@@ -48,10 +50,12 @@ P=imgupd-test
 P2=imgupd-test-my
 P3=imgupd-test-reg
 P4=imgupd-test-major
+P5=imgupd-test-build
 D=${E2E_DIR:-/root/imgupd-test}
 D2=$D-my
 D3=$D-reg
 D4=$D-major
+D5=$D-build
 REG_PORT=${E2E_REGISTRY_PORT:-5000}
 REG=localhost:$REG_PORT
 REGISTRY_IMAGE=${REGISTRY_IMAGE:-registry:2.8.3}
@@ -64,7 +68,7 @@ export DIUN_LANG=en
 
 [ "$(id -u)" = 0 ] || { echo "ABORT: run as root"; exit 1; }
 [ -x "$H" ] || { echo "ABORT: $H missing (install first)"; exit 1; }
-for p in "$P" "$P2" "$P3" "$P4"; do
+for p in "$P" "$P2" "$P3" "$P4" "$P5"; do
     if [ -n "$(docker ps -aq --filter label=com.docker.compose.project="$p")" ]; then
         echo "ABORT: compose project $p exists already"; exit 1
     fi
@@ -189,6 +193,7 @@ cleanup() {
     docker compose -p "$P2" -f "$D2/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P3" -f "$D3/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P4" -f "$D4/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
+    docker compose -p "$P5" -f "$D5/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     for v in $(docker volume ls -q --filter name='^imgupd-test-major_'); do
         docker volume rm "$v" >/dev/null 2>&1 && echo "removed volume $v"
     done
@@ -207,7 +212,7 @@ cleanup() {
             echo "WARNING: $t not removed"
         fi
     done
-    rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${DUMPS:?}/${P4:?}" "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}"
+    rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${DUMPS:?}/${P4:?}" "${DUMPS:?}/${P5:?}" "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}"
     rmdir "$BK_DIR/compose" 2>/dev/null
     rm -f "${LOGS:?}"/[0-9]*-imgupd-test-*.log
     if [ -f "$VERSIONS" ]; then
@@ -243,7 +248,7 @@ PY
         python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import diunstatus; diunstatus.refresh()' "$LIB" \
             && echo "status.json: written again without the test project"
     fi
-    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz
+    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" "${D5:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz
     echo "Left over: $(docker ps -a --format '{{.Names}}' | grep -c imgupd) containers," \
          "$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/') tags," \
          "$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' | wc -l) test dump folders," \
@@ -881,6 +886,82 @@ python3 $H delete-olddata "$OPM2" > /tmp/e2e-m6.log 2>&1; RC=$?
 check "delete-olddata twice: exit 2, nothing kept any more" '[ $RC = 2 ]'
 CR=$(jget "$(python3 $H backups)" '[(o["can_rollback"], "kept" in o) for o in d["ops"] if o["id"] == "'"$OPM2"'"]')
 check "backups after the release: no rollback offered any more, nothing kept" '[ "$CR" = "[(False, False)]" ]'
+
+echo "=== 18. Rebuild of an image built on the server: a newer base from the registry, rollback ==="
+# The base is OLD in the local registry; the build on it runs. Then the registry
+# gets NEW under the same tag while the local tag stays on OLD: only a build
+# with --pull brings NEW.
+wait_for 60 registry_up
+BASE_REF="$REG/imgupd-test/postgres:16"
+docker tag "$OLD" "$BASE_REF"
+docker push -q "$BASE_REF" > /dev/null
+mkdir -p "$D5"
+printf 'FROM %s\nLABEL de.azentrius.e2e=rebuild\n' "$BASE_REF" > "$D5/Dockerfile"
+cat > "$D5/docker-compose.yml" <<EOF
+name: $P5
+services:
+  app:
+    build: .
+    image: imgupd-test/built:1
+    container_name: imgupd-test-build
+    entrypoint: ["sh", "-c"]
+    command: ["sleep infinity"]
+EOF
+docker compose -p "$P5" -f "$D5/docker-compose.yml" up -d --build --wait 2>&1 | tail -n 2
+B1=$(img_of imgupd-test-build)
+check "Built on the server, on the base OLD" '[ "$(pg_version "$B1")" = "$(pg_version "$OLD")" ]'
+check "An update refuses the built image" '[ "$(jget "$(python3 $H plan imgupd-test-build)" "d[\"reason\"]")" = built-locally ]'
+docker tag "$NEW" "$BASE_REF"
+docker push -q "$BASE_REF" > /dev/null
+docker tag "$OLD" "$BASE_REF"
+# The radar names the base (it cannot read the Dockerfile under /root itself).
+for _ in $(seq 120); do systemctl is-active --quiet diun-radar.service || break; sleep 1; done
+python3 - "$VERSIONS" "$REG/imgupd-test/postgres" "$(pg_version "$OLD")" "$(pg_version "$NEW")" <<'PY'
+import json, os, sys, tempfile
+p, base, version, now = sys.argv[1:5]
+try:
+    d = json.load(open(p))
+except (OSError, ValueError):
+    d = {"images": []}
+d["images"] = [r for r in d.get("images") or [] if r.get("image") != "imgupd-test/built"]
+d["images"].append({"image": "imgupd-test/built", "tag": "1", "status": "unlisted", "containers": ["imgupd-test-build"],
+                    "base": [{"image": base, "tag": "16", "final": True, "version": version, "now": now, "newer": True}]})
+os.makedirs(os.path.dirname(p), exist_ok=True)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p))
+with os.fdopen(fd, "w") as f:
+    json.dump(d, f, ensure_ascii=False, indent=1)
+os.chmod(tmp, 0o644)
+os.replace(tmp, p)
+PY
+DRY=$(python3 $H rebuild imgupd-test-build --dry-run)
+echo "  | plan: $(jget "$DRY" '(d["updatable"], d["reason"], d["build"], d["installed_version"], d["target_version"], d["jump"])')"
+check "rebuild --dry-run: possible, the versions of the base" \
+    '[ "$(jget "$DRY" "(d[\"updatable\"], d[\"build\"], d[\"installed_version\"], d[\"target_version\"])")" = "(True, True, '"'"'$(pg_version "$OLD")'"'"', '"'"'$(pg_version "$NEW")'"'"')" ]'
+# A build that fails changes nothing: no history, the tag and the container as they were.
+cp "$D5/Dockerfile" "$D5/Dockerfile.good"
+echo 'RUN echo "e2e: this build fails" && false' >> "$D5/Dockerfile"
+OPS_N=$(wc -l < "$OPS")
+python3 $H rebuild imgupd-test-build --no-dump > /tmp/e2e-b1.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-b1.log | tail -n 6
+check "A failing build: exit 5, said so, no history, the tag and the container unchanged, no rollback tag" \
+    '[ $RC = 5 ] && grep -qF "The rebuild failed – nothing changed." /tmp/e2e-b1.log && [ "$(wc -l < "$OPS")" = "$OPS_N" ] && [ "$(docker image inspect -f "{{.Id}}" imgupd-test/built:1)" = "$B1" ] && [ "$(img_of imgupd-test-build)" = "$B1" ] && [ "$(docker image ls --format "{{.Tag}}" imgupd-test/built | grep -c rollback)" = 0 ]'
+mv "$D5/Dockerfile.good" "$D5/Dockerfile"
+python3 $H rebuild imgupd-test-build > /tmp/e2e-b2.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-b2.log
+RB=$(result_of /tmp/e2e-b2.log)
+OPB=$(jget "$RB" 'd["op"]')
+B2=$(img_of imgupd-test-build)
+check "rebuild: exit 0, ok, the container on a new build on the base NEW (pulled by the build)" \
+    '[ $RC = 0 ] && [ "$(jget "$RB" "d[\"status\"]")" = ok ] && [ "$B2" != "$B1" ] && [ "$(pg_version "$B2")" = "$(pg_version "$NEW")" ]'
+check "rebuild: the versions of the base in the result, a rebuild in the history, the old build as rollback copy" \
+    '[ "$(jget "$RB" "(d[\"from_version\"], d[\"to_version\"])")" = "('"'"'$(pg_version "$OLD")'"'"', '"'"'$(pg_version "$NEW")'"'"')" ] && grep -q "\"id\": \"$OPB\".*\"kind\": \"rebuild\"" "$OPS" && [ "$(docker image inspect -f "{{.Id}}" "$(jget "$RB" "d[\"rollback\"]")")" = "$B1" ]'
+check "rebuild: the output names the rebuild and its success" \
+    'grep -q "Rebuilding imgupd-test/built:1 in project imgupd-test-build: services app" /tmp/e2e-b2.log && grep -q "Rebuild successful." /tmp/e2e-b2.log'
+CRB=$(jget "$(python3 $H backups)" '[o["can_rollback"] for o in d["ops"] if o["id"] == "'"$OPB"'"]')
+check "backups: the rebuild can be rolled back" '[ "$CRB" = "[True]" ]'
+python3 $H rollback "$OPB" > /tmp/e2e-b3.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-b3.log | tail -n 4
+check "rebuild rolled back: exit 0, the old build runs again" '[ $RC = 0 ] && [ "$(img_of imgupd-test-build)" = "$B1" ]'
 
 echo
 if [ "$FAIL" = 0 ]; then echo "E2E: ALL CHECKS PASSED"; else echo "E2E: FAILURES"; fi

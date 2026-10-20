@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-21 (0.23.0). Each stage is cut so that it is useful on its own and brings its own tests. The order
+As of 2026-10-21 (0.24.0). Each stage is cut so that it is useful on its own and brings its own tests. The order
 is the recommendation.
 
 **Guardrails for every stage** (they keep applying unchanged):
@@ -74,6 +74,9 @@ installed version was unknown and the jump invisible.
   version.
 - ✅ **Update in two steps** (a choice in the dialog): fetch first (pull only; nothing that runs changes,
   the row shows “Roll-out pending” with the version that came), roll out second.
+- ✅ **Images built on the server** (0.24.0): the version their final base brings as the installed
+  one, and *Rebuild* once a base is newer (`docker compose build --pull` in place of the pull, with
+  dumps, rollback copy and history).
 
 **While switching**
 - ✅ **Reason first:** when containers do not come up, the result names the most telling error line

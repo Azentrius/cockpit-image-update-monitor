@@ -218,6 +218,95 @@ const BASE_SCRIPT = {
         assert.strictEqual(tp.d.getElementById("dm-dialog-result").textContent, done);
     }
 
+    // 2c. An image built on this server with a newer base: "Rebuild" in the
+    // update's place. Its plan comes from `rebuild --dry-run`, the dialog lists
+    // the bases, offers no two steps and no release notes; the run is `rebuild`.
+    const RADAR = "/var/lib/diun-radar/versions.json";
+    const realRadar = files[RADAR];
+    const builtRadar = JSON.parse(JSON.stringify(realRadar));
+    const pm = builtRadar.images.find((x) => x.image === "ghcr.io/cbcoutinho/nextcloud-mcp-server");
+    ["versions", "by_tag", "newest", "tag_now"].forEach((k) => delete pm[k]);
+    Object.assign(pm, { status: "unlisted", built: "2026-06-15T18:35:36Z",
+        base: [{ image: "caddy", tag: "2-builder", final: false, now: "2.11.7", pushed: "2026-10-14T00:25:00Z", newer: true },
+               { image: "caddy", tag: "2", final: true, version: "2.11.4", now: "2.11.7", pushed: "2026-10-14T00:20:11Z", newer: true },
+               { image: "alpine", tag: "3.20", final: false, pinned: true, newer: false },
+               { image: "golang", tag: "1.25", final: false, newer: false, now: "1.25.3" }] });
+    files[RADAR] = builtRadar;
+    const PLAN_BUILT = { container: "prod-mcp-1", image: "ghcr.io/cbcoutinho/nextcloud-mcp-server:latest", updatable: true,
+        build: true, project: "prod", workdir: "/opt/prod", services: ["prod-mcp-1"], containers: ["prod-mcp-1"], pulled: false,
+        config_changed: false, dbs: [{ name: "prod-db", kind: "postgres", running: true, size: 52428800 }], free_bytes: 40 * 2 ** 30,
+        installed_version: "2.11.4", tag_digits: 0, jump_unknown: false, target_version: "2.11.7", jump: "patch" };
+    const rebuildRun = (status, extra) => ({ chunks: ["Rebuilding …\n", "@@RESULT " + JSON.stringify({ op: "20261012-034000-prod-mcp-1",
+        status, rollback: "ghcr.io/cbcoutinho/nextcloud-mcp-server:rollback-20261012-034000", ...extra }) + "\n"] });
+    for (const [lang, btn, title, bases, ok, same] of [
+        ["de", "Neu bauen", "prod-mcp-1 neu bauen?",
+         "Basis-Images: caddy:2-builder neuer: 2.11.7caddy:2 neuer: 2.11.7alpine:3.20 per Digest festgelegt, bleibtgolang:1.25 unverändert",
+         "Neubau erfolgreich: 2.11.4 → 2.11.7. Rollback-Kopie: ghcr.io/cbcoutinho/nextcloud-mcp-server:rollback-20261012-034000",
+         "Der Neubau ergab dasselbe Image – nichts geändert."],
+        ["en", "Rebuild", "Rebuild prod-mcp-1?",
+         "Base images: caddy:2-builder newer: 2.11.7caddy:2 newer: 2.11.7alpine:3.20 pinned by digest, staysgolang:1.25 unchanged",
+         "Rebuild successful: 2.11.4 → 2.11.7. Rollback copy: ghcr.io/cbcoutinho/nextcloud-mcp-server:rollback-20261012-034000",
+         "The rebuild gave the same image – nothing changed."]]) {
+        for (const [result, want] of [[rebuildRun("ok", { from_version: "2.11.4", to_version: "2.11.7" }), ok],
+                                      [rebuildRun("nochange", { rollback: null }), same]]) {
+            const rb = boot(lang, { ...BASE_SCRIPT,
+                "diun-update.py rebuild": (cmd) => cmd.includes("--dry-run") ? { out: JSON.stringify(PLAN_BUILT) } : result });
+            await settle();
+            const button = rb.d.querySelector('button[data-kind="rebuild"]');
+            assert.strictEqual(button.textContent.trim(), btn);
+            button.click();
+            await settle();
+            assert.deepStrictEqual(rb.calls.filter((c) => c.cmd[1] === "rebuild").map((c) => c.cmd.slice(1)),
+                                   [["rebuild", "prod-mcp-1", "--dry-run"]], "the plan of a rebuild, no update plan");
+            assert.strictEqual(rb.last("plan"), undefined);
+            const rbBody = rb.d.getElementById("dm-dialog-body");
+            assert.strictEqual(rb.d.getElementById("dm-dialog-title").textContent, title);
+            assert.strictEqual(kvRows(rbBody)[0], bases);
+            assert.strictEqual(rbBody.querySelectorAll('input[name="dm-step"]').length, 0, "a rebuild has no two steps");
+            assert.strictEqual(rbBody.querySelector(".dm-notes-slot").textContent, "", "no release notes for a build");
+            const confirm = rb.d.getElementById("dm-dialog-confirm");
+            assert.strictEqual(confirm.textContent.trim(), btn);
+            assert(!confirm.disabled);
+            if (want === ok) rb.d.getElementById("dm-dump-check").checked = false;
+            confirm.click();
+            await settle();
+            assert.deepStrictEqual(rb.last("rebuild").cmd.slice(1), want === ok ? ["rebuild", "prod-mcp-1", "--no-dump"] : ["rebuild", "prod-mcp-1"]);
+            assert.strictEqual(rb.last("update"), undefined, "no update ran");
+            assert.strictEqual(rb.d.getElementById("dm-dialog-result").textContent, want);
+        }
+    }
+    console.log("\nrebuild: button, plan with the bases, rebuild with and without dump, outcomes (de, en)");
+    // A failed rebuild offers the rollback as a failed update does.
+    const rf = boot("de", { ...BASE_SCRIPT, "diun-update.py rollback": { chunks: ['@@RESULT {"status":"ok"}\n'] },
+        "diun-update.py rebuild": (cmd) => cmd.includes("--dry-run") ? { out: JSON.stringify(PLAN_BUILT) }
+            : { ...rebuildRun("failed"), fail: { exit_status: 4 } } });
+    await settle();
+    rf.d.querySelector('button[data-kind="rebuild"]').click();
+    await settle();
+    rf.d.getElementById("dm-dialog-confirm").click();
+    await settle();
+    assert.strictEqual(rf.d.getElementById("dm-dialog-extra").textContent.trim(), "Update zurückrollen");
+    rf.d.getElementById("dm-dialog-extra").click();
+    await settle();
+    assert.deepStrictEqual(rf.last("rollback").cmd.slice(1), ["rollback", "20261012-034000-prod-mcp-1"]);
+    // A pulled image is no rebuild: the helper says so, nothing to confirm.
+    const nbu = boot("en", { ...BASE_SCRIPT,
+        "diun-update.py rebuild": { out: JSON.stringify({ ...PLAN_BUILT, updatable: false, reason: "not-built" }) } });
+    await settle();
+    nbu.d.querySelector('button[data-kind="rebuild"]').click();
+    await settle();
+    assert(nbu.d.getElementById("dm-dialog-desc").textContent.includes("the image is pulled from a registry, not built on this server – use Update."));
+    assert(nbu.d.getElementById("dm-dialog-confirm").hidden);
+    files[RADAR] = realRadar;
+    // In the history a rebuild says what it was.
+    const hb = boot("de", { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: [{ ...BACKUPS.ops[0],
+        id: "20261012-034000-prod-mcp-1", kind: "rebuild", container: "prod-mcp-1", image: "ghcr.io/cbcoutinho/nextcloud-mcp-server:latest",
+        from_version: "2.11.4", to_version: "2.11.7" }] }) } });
+    await settle();
+    hb.d.getElementById("dm-tab-btn-backups").click();
+    await settle();
+    assert.deepStrictEqual([...hb.d.querySelectorAll("#dm-ops .dm-row-note")].map((x) => x.textContent), ["Auf diesem Server neu gebaut"]);
+
     // 3. Without dump -> --no-dump; failure -> rollback offered -> rollback runs
     const c = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_GLITCH) },
         "diun-update.py update": { chunks: ["…\n", '@@RESULT {"op":"20261012-033000-glitchtip-postgres","status":"failed"}\n'], fail: { exit_status: 4 } },

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /* Image Update Monitor, a Cockpit add-on: the update (stage 1): its plan, the
- * choice of an update in two steps, the outcome, and the rollback. Part of the
- * page, see common.js. */
+ * choice of an update in two steps, the rebuild of an image built on the
+ * server, the outcome, and the rollback. Part of the page, see common.js. */
 (function () {
     "use strict";
     const P = window.ImageUpdatesPage;
@@ -110,14 +110,29 @@
         return box && !box.checked ? ["--no-dump"] : [];
     }
 
+    // The base images of a rebuild, as the radar checked them (rec.base).
+    function basesItem(name) {
+        const rec = P.rowRec.get(name);
+        const bases = rec && Array.isArray(rec.base) ? rec.base : [];
+        if (!bases.length) return "";
+        const lines = bases.map((b) => `<code>${esc(b.image + ":" + b.tag)}</code> <span class="dm-muted">` +
+            esc(b.pinned ? t("upd.basePinned") : b.error ? t("upd.baseUnchecked")
+                : b.newer ? t("upd.baseNewer", { now: b.now || "?" }) : t("upd.baseCurrent")) + `</span>`);
+        return `<ul class="dm-kv"><li><span class="dm-kv-k">${esc(t("upd.bases"))}</span>` +
+               `<span class="dm-kv-v">${lines.join("<br>")}</span></li></ul>`;
+    }
+
+    // kind: "update", "pulled" (the image is here, roll it out) or "rebuild"
+    // (an image built on this server, built again with fresh bases).
     function startUpdate(name, kind) {
-        const title = t(kind === "pulled" ? "upd.titlePulled" : "upd.title", { name });
+        const rebuild = kind === "rebuild";
+        const title = t(kind === "pulled" ? "upd.titlePulled" : rebuild ? "upd.titleRebuild" : "upd.title", { name });
         const superseded = ticket();
         // A plan that arrives after the dialog was closed (or after another
         // container's dialog was opened) must not pop the dialog up again.
         const stale = () => superseded() || !$("dm-dialog").hasAttribute("open");
         dlg.open({ title, desc: t("upd.planning") });
-        spawnHelper([UPDATE_CMD, "plan", name], "try")
+        spawnHelper(rebuild ? [UPDATE_CMD, "rebuild", name, "--dry-run"] : [UPDATE_CMD, "plan", name], "try")
             .then((out) => {
                 if (stale()) return;
                 let plan;
@@ -128,21 +143,23 @@
                     dlg.update({ title, desc: t("upd.notPossible", { reason }) });
                     return;
                 }
-                const desc = t(kind === "pulled" || plan.pulled ? "upd.descPulled" : "upd.desc", { image: plan.image });
-                const failed = P.rowFailed.get(name) || null;
+                const desc = t(rebuild ? "upd.descRebuild" : kind === "pulled" || plan.pulled ? "upd.descPulled" : "upd.desc",
+                               { image: plan.image });
+                const failed = rebuild ? null : P.rowFailed.get(name) || null;
                 // Update in two steps: only fetch the image now and roll it out
                 // later. Not for an image that is here already: that is the roll-out.
-                const twoSteps = kind !== "pulled" && !plan.pulled;
+                const twoSteps = !rebuild && kind !== "pulled" && !plan.pulled;
                 const pullOnly = () => { const r = $("dm-dialog-body").querySelector('input[name="dm-step"]:checked'); return !!r && r.value === "pull"; };
-                const label = () => t(kind === "pulled" ? "btn.rollout" : pullOnly() ? "btn.pullOnly" : "btn.update");
+                const label = () => t(rebuild ? "btn.rebuild" : kind === "pulled" ? "btn.rollout" : pullOnly() ? "btn.pullOnly" : "btn.update");
                 confirmAndRun({
-                    title, desc, body: planBody(plan, failed) + (twoSteps ? stepChoice() : ""),
+                    title, desc, body: (rebuild ? basesItem(name) : "") + planBody(plan, failed) + (twoSteps ? stepChoice() : ""),
                     confirm: {
                         label: label(),
                         disabled: !!plan.jump_unknown || !!failed || plan.jump === "major" || (plan.ci_jobs || []).length > 0,
-                        argv: () => pullOnly() ? [UPDATE_CMD, "pull", name] : [UPDATE_CMD, "update", name].concat(dumpArgs()),
+                        argv: () => rebuild ? [UPDATE_CMD, "rebuild", name].concat(dumpArgs())
+                            : pullOnly() ? [UPDATE_CMD, "pull", name] : [UPDATE_CMD, "update", name].concat(dumpArgs()),
                     },
-                    onDone: (o) => updateOutcome(o, name),
+                    onDone: (o) => updateOutcome(o, name, rebuild),
                 });
                 const gates = [...$("dm-dialog-body").querySelectorAll(".dm-gate")];
                 const relabel = () => dlg.btn("dm-dialog-confirm", label(), { visible: true, disabled: !gates.every((x) => x.checked) });
@@ -152,7 +169,8 @@
                     if (dump) dump.disabled = pullOnly();
                     relabel();
                 }));
-                P.showNotes($("dm-dialog-body").querySelector(".dm-notes-slot"), plan, name);
+                // Release notes belong to a registry's image, not to a build.
+                if (!rebuild) P.showNotes($("dm-dialog-body").querySelector(".dm-notes-slot"), plan, name);
             })
             .catch((ex) => {
                 if (stale()) return;
@@ -169,16 +187,16 @@
             `</fieldset>`;
     }
 
-    function updateOutcome(o, name) {
+    function updateOutcome(o, name, rebuild) {
         const r = o.result || {};
-        if (o.ok && r.status === "nochange") { dlg.result(t("upd.nochange"), true); return true; }
+        if (o.ok && r.status === "nochange") { dlg.result(t(rebuild ? "upd.nochangeRebuild" : "upd.nochange"), true); return true; }
         if (o.ok && r.status === "pulled") {
             dlg.result(t("upd.pulledOk", { v: r.to_version ? ` (${r.to_version})` : "" }), true);
             return true;
         }
         if (o.ok) {
             const vers = r.from_version && r.to_version && r.from_version !== r.to_version;
-            dlg.result(t(vers ? "upd.okVersions" : "upd.ok",
+            dlg.result(t(rebuild ? (vers ? "upd.okRebuildVersions" : "upd.okRebuild") : vers ? "upd.okVersions" : "upd.ok",
                          { rb: r.rollback || "", from: r.from_version, to: r.to_version }), true);
             return true;
         }

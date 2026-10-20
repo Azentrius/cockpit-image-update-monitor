@@ -189,6 +189,7 @@
             const files = ctn.files || [];
             const dir = files.length ? files[0].slice(0, files[0].lastIndexOf("/")) || "/" : "?";
             lines.push(t("ver.baseRebuild", { service: ctn.service || "?", dir }));
+            if (ctn.managed) lines.push(t("ver.baseRebuildBtn"));
             const text = first.now ? t("ver.baseNewerNow", { ref: ref(first), now: first.now }) : t("ver.baseNewer", { ref: ref(first) });
             return { html: `<span class="az-label az-label--info dm-level" data-level="base" title="${esc(lines.join("\n"))}">` +
                            `${icon("info-circle")}${esc(text)}</span>`, news: true, compared: true, baseChecked: true };
@@ -422,8 +423,13 @@
             : esc(ctn.image);
 
         // Three places: the update, "Change version", "Dismiss" (see iconSlot).
+        // An image built on this server with a newer base: "Rebuild" in the
+        // update's place (`rebuild`, the update with a build instead of the
+        // pull; an update refuses such an image).
         let main = "";
-        if (kind === "update" || kind === "pulled") {
+        if (ver.baseChecked && ver.news && ctn.managed) {
+            main = textButton("arrow-circle-up", t("btn.rebuild"), `data-update="${esc(ctn.name)}" data-kind="rebuild"`);
+        } else if (kind === "update" || kind === "pulled") {
             main = ctn.managed
                 ? textButton("arrow-circle-up", t(kind === "pulled" ? "btn.rollout" : "btn.update"),
                              `data-update="${esc(ctn.name)}" data-kind="${kind}"`)
