@@ -20,6 +20,9 @@
 # helpers from another folder (e.g. a branch before it is installed).
 # The tag change (stage 2) needs choices from the radar: the test puts a
 # record for its own image into versions.json and removes it again.
+# The database major (stage 5) runs in a project of its own, "imgupd-test-major":
+# PostgreSQL 16 (OLD_IMAGE) to 17 (PG17_IMAGE, default postgres:17-alpine) with
+# test data, the rollback and the release of the kept data.
 # Pulls that work, fail or find a newer image already here run against a local
 # registry (REGISTRY_IMAGE, default registry:2.8.3, on 127.0.0.1 at
 # E2E_REGISTRY_PORT, default 5000); the MariaDB/MySQL dumps use it too. Every
@@ -44,9 +47,11 @@ STATUS=/var/lib/diun-radar/status.json
 P=imgupd-test
 P2=imgupd-test-my
 P3=imgupd-test-reg
+P4=imgupd-test-major
 D=${E2E_DIR:-/root/imgupd-test}
 D2=$D-my
 D3=$D-reg
+D4=$D-major
 REG_PORT=${E2E_REGISTRY_PORT:-5000}
 REG=localhost:$REG_PORT
 REGISTRY_IMAGE=${REGISTRY_IMAGE:-registry:2.8.3}
@@ -59,7 +64,7 @@ export DIUN_LANG=en
 
 [ "$(id -u)" = 0 ] || { echo "ABORT: run as root"; exit 1; }
 [ -x "$H" ] || { echo "ABORT: $H missing (install first)"; exit 1; }
-for p in "$P" "$P2" "$P3"; do
+for p in "$P" "$P2" "$P3" "$P4"; do
     if [ -n "$(docker ps -aq --filter label=com.docker.compose.project="$p")" ]; then
         echo "ABORT: compose project $p exists already"; exit 1
     fi
@@ -71,8 +76,9 @@ OLD_IMAGE=${OLD_IMAGE:-postgres:16.14-alpine}
 NEW_IMAGE=${NEW_IMAGE:-postgres:16.15-alpine}
 MARIADB_IMAGE=${MARIADB_IMAGE:-mariadb:11}
 MYSQL_IMAGE=${MYSQL_IMAGE:-mysql:8}
+PG17_IMAGE=${PG17_IMAGE:-postgres:17-alpine}
 E2E_MYSQL=${E2E_MYSQL:-1}
-IMAGES="$OLD_IMAGE $NEW_IMAGE $REGISTRY_IMAGE"
+IMAGES="$OLD_IMAGE $NEW_IMAGE $REGISTRY_IMAGE $PG17_IMAGE"
 [ "$E2E_MYSQL" = 1 ] && IMAGES="$IMAGES $MARIADB_IMAGE $MYSQL_IMAGE"
 for i in $IMAGES; do
     docker image inspect "$i" >/dev/null 2>&1 || docker pull -q "$i" >/dev/null || { echo "ABORT: $i not available"; exit 1; }
@@ -182,6 +188,10 @@ cleanup() {
     docker compose -p "$P" -f "$D/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P2" -f "$D2/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P3" -f "$D3/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
+    docker compose -p "$P4" -f "$D4/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
+    for v in $(docker volume ls -q --filter name='^imgupd-test-major_'); do
+        docker volume rm "$v" >/dev/null 2>&1 && echo "removed volume $v"
+    done
     for c in $(docker ps -aq --filter name='^imgupd-test-'); do
         docker rm -f -v "$c" >/dev/null 2>&1
     done
@@ -197,7 +207,7 @@ cleanup() {
             echo "WARNING: $t not removed"
         fi
     done
-    rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${BK_DIR:?}/compose/${P:?}"
+    rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${DUMPS:?}/${P4:?}" "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}"
     rmdir "$BK_DIR/compose" 2>/dev/null
     rm -f "${LOGS:?}"/[0-9]*-imgupd-test-*.log
     if [ -f "$VERSIONS" ]; then
@@ -233,12 +243,13 @@ PY
         python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import diunstatus; diunstatus.refresh()' "$LIB" \
             && echo "status.json: written again without the test project"
     fi
-    rm -rf "${D:?}" "${D2:?}" "${D3:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz
+    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz
     echo "Left over: $(docker ps -a --format '{{.Names}}' | grep -c imgupd) containers," \
          "$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/') tags," \
          "$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' | wc -l) test dump folders," \
          "$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l) test logs," \
-         "$(find "$BK_DIR/compose" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l) test file backups"
+         "$(find "$BK_DIR/compose" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l) test file backups," \
+         "$(docker volume ls -q --filter name='^imgupd-test-major_' | wc -l) test volumes"
 }
 trap cleanup EXIT
 
@@ -759,6 +770,115 @@ check "retag with an override file, rollback: the override byte-identical, conta
     '[ $RC = 0 ] && [ "$(sum_of "$D/docker-compose.override.yml")" = "$SUMO" ] && [ "$(sum_of "$D/docker-compose.yml")" = "$SUMB" ] && [ "$(cfg_image imgupd-test-db)" = imgupd-test/pg:16 ]'
 rm -f "$D/docker-compose.override.yml"
 write_compose "sleep infinity"
+
+echo "=== 17. Database major: PostgreSQL 16 to 17 by dump and restore, rollback, release ==="
+# A project of its own: the database (its own user and database, a named volume)
+# and an app that waits for it. Test data in two databases, an extension, a role.
+V17=$(pg_version "$PG17_IMAGE")
+docker tag "$OLD" imgupd-test/postgres:16
+docker tag "$PG17_IMAGE" "imgupd-test/postgres:$V17"
+docker tag "$OLD" imgupd-test/pgm-app:1
+mkdir -p "$D4"
+cat > "$D4/docker-compose.yml" <<EOF
+name: $P4
+services:
+  db:
+    image: imgupd-test/postgres:16
+    container_name: imgupd-test-major-db
+    environment:
+      POSTGRES_USER: owner
+      POSTGRES_PASSWORD: test-only
+      POSTGRES_DB: appdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U owner -d appdb"]
+      interval: 2s
+      retries: 60
+  app:
+    image: imgupd-test/pgm-app:1
+    container_name: imgupd-test-major-app
+    entrypoint: ["sh", "-c"]
+    command: ["sleep infinity"]
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  pgdata:
+EOF
+docker compose -p "$P4" -f "$D4/docker-compose.yml" up -d --wait 2>&1 | tail -n 2
+MDB=imgupd-test-major-db
+q() { docker exec "$MDB" psql -X -U owner -d "$1" -At -c "$2"; }
+q appdb "create table notes(id int primary key, t text); insert into notes select g, md5(g::text) from generate_series(1, 300) g;
+         create role reader login password 'test-only'; grant select on notes to reader;" > /dev/null
+q appdb "create database shop" > /dev/null
+q shop "create extension pgcrypto; create table items(id serial primary key, name text, h text);
+        insert into items(name, h) select 'item ' || g, encode(digest(g::text, 'sha256'), 'hex') from generate_series(1, 5000) g;
+        create table empty_one(x int);" > /dev/null
+DATA() { echo "$(q appdb "select count(*), md5(string_agg(t, ',' order by id)) from notes")/$(q shop "select count(*), md5(string_agg(h, ',' order by id)) from items")/$(q appdb "select count(*) from pg_roles where rolname = 'reader'")"; }
+DATA0=$(DATA)
+SUMM=$(sum_of "$D4/docker-compose.yml")
+python3 - "$VERSIONS" "$(pg_version "$OLD")" "$V17" <<'PY'
+import json, os, sys, tempfile
+p, version, target = sys.argv[1:4]
+try:
+    d = json.load(open(p))
+except (OSError, ValueError):
+    d = {"images": []}
+d["images"] = [r for r in d.get("images") or [] if r.get("image") != "imgupd-test/postgres"]
+d["images"].append({"image": "imgupd-test/postgres", "tag": "16", "db": True, "containers": ["imgupd-test-major-db"],
+                    "versions": {version: {"status": "major", "choices": {
+                        "pin": None, "lines": [], "newer": [{"tag": target, "level": "major"}], "floating": []}}}})
+os.makedirs(os.path.dirname(p), exist_ok=True)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p))
+with os.fdopen(fd, "w") as f:
+    json.dump(d, f, ensure_ascii=False, indent=1)
+os.chmod(tmp, 0o644)
+os.replace(tmp, p)
+PY
+# The image's name ends in "postgres": the helper reads the installed version from PG_VERSION.
+DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
+echo "  | plan: $(jget "$DRY" '(d["installed_version"], d["retag"]["reason"], d["major"]["possible"], d["major"]["reason"], d["major"]["detail"])')"
+MJ=$(jget "$DRY" '(d["major"]["possible"], d["major"]["from_major"], d["major"]["to_major"], d["major"]["data"]["name"], d["major"]["stop"], d["major"]["extensions"])')
+check "dbmajor --dry-run: possible, 16 to 17, the named volume, the app stopped meanwhile, pgcrypto" \
+    '[ "$MJ" = "(True, 16, 17, '"'"'imgupd-test-major_pgdata'"'"', ['"'"'app'"'"'], ['"'"'pgcrypto'"'"'])" ]'
+FPM=$(jget "$DRY" 'd["major"]["fingerprint"]')
+python3 $H dbmajor "$MDB" "$V17" --expect "$(printf '%064d' 0)" > /tmp/e2e-m0.log 2>&1; RC=$?
+check "dbmajor with another fingerprint: exit 5, nothing changed" \
+    '[ $RC = 5 ] && [ "$(sum_of "$D4/docker-compose.yml")" = "$SUMM" ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 16 ]'
+python3 $H dbmajor "$MDB" "$V17" --expect "$FPM" > /tmp/e2e-m1.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-m1.log
+RM=$(result_of /tmp/e2e-m1.log)
+OPM=$(jget "$RM" 'd["op"]')
+SM=$(jget "$RM" '(d["status"], d["image"])')
+KEPT16=$(docker volume ls -q --filter name='^imgupd-test-major_pgdata-pg16-')
+check "dbmajor: exit 0, ok, PostgreSQL 17 runs with the same data (counts, checksums, the role)" \
+    '[ $RC = 0 ] && [ "$SM" = "('"'"'ok'"'"', '"'"'imgupd-test/postgres:'"$V17"''"'"')" ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 17 ] && [ "$(DATA)" = "$DATA0" ]'
+check "dbmajor: the tag line changed, the old data kept in a volume of its own (PostgreSQL 16)" \
+    '[ "$(grep -c "image: imgupd-test/postgres:$V17$" "$D4/docker-compose.yml")" = 1 ] && [ -n "$KEPT16" ] && [ "$(cat "$(docker volume inspect -f "{{.Mountpoint}}" "$KEPT16")/PG_VERSION")" = 16 ]'
+check "dbmajor: the app runs again, the extension is there, the history knows the run" \
+    '[ "$(docker inspect -f "{{.State.Running}}" imgupd-test-major-app)" = true ] && [ "$(q shop "select extversion is not null from pg_extension where extname = '"'"'pgcrypto'"'"'")" = t ] && grep -q "\"id\": \"$OPM\".*\"kind\": \"dbmajor\"" "$OPS"'
+BKM=$(python3 $H backups)
+KM=$(jget "$BKM" '[ (o["kept"]["major"], o["kept"]["can_release"], o["can_rollback"]) for o in d["ops"] if o["id"] == "'"$OPM"'"]')
+check "backups: the kept data of PostgreSQL 16, to release or to roll back to" '[ "$KM" = "[(16, True, True)]" ]'
+python3 $H rollback "$OPM" > /tmp/e2e-m2.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-m2.log
+KEPT17=$(docker volume ls -q --filter name='^imgupd-test-major_pgdata-pg17-')
+check "dbmajor rollback: exit 0, PostgreSQL 16 with the old data, the file byte-identical, the app runs" \
+    '[ $RC = 0 ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 16 ] && [ "$(DATA)" = "$DATA0" ] && [ "$(sum_of "$D4/docker-compose.yml")" = "$SUMM" ] && [ "$(docker inspect -f "{{.State.Running}}" imgupd-test-major-app)" = true ]'
+check "dbmajor rollback: the old data back in place, the new major's kept (PostgreSQL 17)" \
+    '[ -z "$(docker volume ls -q --filter name="^$KEPT16\$")" ] && [ -n "$KEPT17" ] && [ "$(cat "$(docker volume inspect -f "{{.Mountpoint}}" "$KEPT17")/PG_VERSION")" = 17 ]'
+python3 $H delete-olddata "$OPM" > /tmp/e2e-m3.log 2>&1; RC=$?
+check "delete-olddata after the rollback: the new major's data released" \
+    '[ $RC = 0 ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_pgdata-pg17-")" ]'
+DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
+python3 $H dbmajor "$MDB" "$V17" --expect "$(jget "$DRY" 'd["major"]["fingerprint"]')" > /tmp/e2e-m4.log 2>&1; RC=$?
+OPM2=$(jget "$(result_of /tmp/e2e-m4.log)" 'd["op"]')
+python3 $H delete-olddata "$OPM2" > /tmp/e2e-m5.log 2>&1; RC2=$?
+check "dbmajor again, then delete-olddata: PostgreSQL 17 with the data, the old data released" \
+    '[ $RC = 0 ] && [ $RC2 = 0 ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 17 ] && [ "$(DATA)" = "$DATA0" ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_pgdata-pg16-")" ]'
+python3 $H delete-olddata "$OPM2" > /tmp/e2e-m6.log 2>&1; RC=$?
+check "delete-olddata twice: exit 2, nothing kept any more" '[ $RC = 2 ]'
 
 echo
 if [ "$FAIL" = 0 ]; then echo "E2E: ALL CHECKS PASSED"; else echo "E2E: FAILURES"; fi

@@ -30,6 +30,7 @@ run "python: diunlib + version radar"   python3 radar_test.py
 run "python: release notes (GitHub)"    python3 notes_test.py
 run "python: inventory"                 python3 inv_test.py
 run "python: update/rollback/cleanup"   python3 update_test.py
+run "python: database majors (stage 5)" python3 major_test.py
 run "python: status for the Status Board" python3 status_test.py
 run "python: time limits, signals"      python3 proc_test.py
 run "python: upgrade base (CI)"        python3 upgrade_base_test.py

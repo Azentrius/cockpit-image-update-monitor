@@ -50,8 +50,28 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 checked, then the update steps 3 to 6 with the
                                 new tag. A rollback restores the files.
 
-Only retag changes the compose or .env files, and only the lines it showed.
-Images built locally or pinned by digest are not updated.
+  dbmajor <container> <tag> --dry-run
+                                read-only: the plan of a database major
+                                (stage 5, PostgreSQL): the tag change to the
+                                new major, where the data lies, the services
+                                that wait for the database, the extensions in
+                                use, and a fingerprint; or why not
+  dbmajor <container> <tag> --expect <fingerprint>
+                                the major itself (dump and restore): the new
+                                image, the rollback tag, the waiting services
+                                stopped, a dump, every table counted, the tag
+                                line written, the database stopped and its data
+                                moved aside (kept until released), the new
+                                major started on the empty data directory, the
+                                dump restored, the counts compared, the waiting
+                                services started. A rollback moves the data
+                                back (and keeps the new major's).
+  delete-olddata <op-id>        release the data a database major kept: the
+                                old major's after a good run, the new major's
+                                after a rollback
+
+Only retag and dbmajor change the compose or .env files, and only the lines
+they showed. Images built locally or pinned by digest are not updated.
 
 Everything the addon writes lives in /var/backups/image-updates (root only):
   dumps/<project>/<stamp>_<container>.sql.gz
@@ -880,11 +900,12 @@ def fingerprint(new_tag, changes):
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def make_retag(name, new_tag):
+def make_retag(name, new_tag, db_major=False):
     """Read-only plan of a tag change (`retag … --dry-run`): the plan of an
     update plus what the radar offers the new tag as, the version it brings,
     where the tag is written and every line before and after; or why it
-    cannot be done here. Returns (plan, compose context)."""
+    cannot be done here. Returns (plan, compose context). db_major: the tag
+    change of a database major (stage 5, make_major), which retag refuses."""
     if not TAG_ARG_RE.match(new_tag):
         raise Abort(64, f"Ungültiger Tag: {new_tag}", f"Invalid tag: {new_tag}")
     plan, ctx = make_plan(name)
@@ -919,7 +940,7 @@ def make_retag(name, new_tag):
         return nums_of(v)[0]
 
     # A database major needs a migration (stage 5); a floating tag can bring one.
-    if rec.get("db") and (target is None or major(target) != major(installed)):
+    if rec.get("db") and (target is None or major(target) != major(installed)) and not db_major:
         return refuse("db-major")
     # Nextcloud upgrades one major version per step only.
     if NEXTCLOUD_RE.search(norm_ref(repo)) and (target is None or major(target) - major(installed) > 1):
@@ -1845,6 +1866,561 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
     return 0
 
 
+# -------------------------------------------------------- database majors ----
+# Stage 5: a PostgreSQL major (16 -> 17) by dump and restore. The data of the
+# old major is moved aside, not copied: into a volume of its own next to a
+# named volume, or into a sibling directory of a bind mount (renames on the
+# same filesystem: no second copy, no time). It stays until it is released
+# (delete-olddata); a rollback moves it back. The compose file changes only in
+# its tag line (stage 2).
+PGDATA_DEFAULT = "/var/lib/postgresql/data"
+PG_NEW_LAYOUT = 18          # from 18 on the image keeps its data in /var/lib/postgresql/<major>/docker
+READY_TIMEOUT = 300         # seconds for the new major to accept connections over TCP
+ANON_VOLUME_RE = re.compile(r"^[0-9a-f]{64}$")
+KEPT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,250}[.-]pg\d{1,3}-\d{8}-\d{6}$")   # move_aside's names
+# Every database, every table (also partitioned ones), counted exactly:
+# "database|schema.table|rows" per line.
+PG_COUNTS = r"""U="${POSTGRES_USER:-postgres}"
+dbs=$(psql -X -U "$U" -d postgres -At -c "select datname from pg_database where datallowconn and datname <> 'template1' order by 1") || exit 1
+printf '%s\n' "$dbs" | while IFS= read -r d; do
+  printf '%s\n' "select format('select %L, %L, count(*) from %I.%I', current_database(), n.nspname || '.' || c.relname, n.nspname, c.relname) from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relkind in ('r', 'p') and n.nspname <> 'information_schema' and n.nspname !~ '^pg_' order by 1 \gexec" |
+    psql -X -U "$U" -d "$d" -At -F '|' -v ON_ERROR_STOP=1 || exit 1
+done"""
+PG_EXTENSIONS = r"""U="${POSTGRES_USER:-postgres}"
+dbs=$(psql -X -U "$U" -d postgres -At -c "select datname from pg_database where datallowconn order by 1") || exit 1
+printf '%s\n' "$dbs" | while IFS= read -r d; do psql -X -U "$U" -d "$d" -At -c "select extname from pg_extension" || exit 1; done"""
+PG_READY = 'pg_isready -q -h 127.0.0.1 -p "${PGPORT:-5432}" -U "${POSTGRES_USER:-postgres}"'
+# The database the image creates on its first start is empty; the dump creates it again with its data.
+PG_DROP_FIRST = r"""U="${POSTGRES_USER:-postgres}"; D="${POSTGRES_DB:-$U}"
+[ "$D" = postgres ] || [ "$D" = template1 ] || printf 'DROP DATABASE IF EXISTS :"d";\n' |
+  psql -X -q -v ON_ERROR_STOP=1 -v d="$D" -U "$U" -d postgres"""
+PG_RESTORE = 'exec psql -X -q -v ON_ERROR_STOP=0 -U "${POSTGRES_USER:-postgres}" -d postgres -o /dev/null'
+PG_ANALYZE = 'exec vacuumdb -U "${POSTGRES_USER:-postgres}" --all --analyze-only --quiet'
+
+
+def major_of(version):
+    try:
+        return nums_of(version)[0] if version else None
+    except ValueError:
+        return None
+
+
+def inside(path, mount):
+    """path is mount itself or lies below it."""
+    path, mount = os.path.normpath(path), os.path.normpath(mount)
+    return path == mount or path.startswith(mount.rstrip("/") + "/")
+
+
+def env_of(c):
+    out = {}
+    for e in c["Config"].get("Env") or []:
+        k, _, v = e.partition("=")
+        out[k] = v
+    return out
+
+
+def data_mount(c, pgdata):
+    """The mount that holds PGDATA (the longest destination that contains it):
+    {"type": "volume|bind", "name", "driver", "source", "destination"} or None."""
+    best = None
+    for m in c.get("Mounts") or []:
+        dest = m.get("Destination") or ""
+        if dest and inside(pgdata, dest) and (best is None or len(dest) > len(best["destination"])):
+            best = {"type": m.get("Type"), "name": m.get("Name"), "driver": m.get("Driver"),
+                    "source": m.get("Source"), "destination": dest}
+    return best
+
+
+def pg_lines(name, script, timeout=None):
+    """Lines a shell script prints in the database container."""
+    out = run(["docker", "exec", name, "sh", "-c", script], timeout=timeout or LIMITS["dump"])
+    return [ln for ln in out.splitlines() if ln.strip()]
+
+
+def table_counts(name):
+    """{database: {schema.table: rows}} of every table, counted exactly."""
+    counts = {}
+    for ln in pg_lines(name, PG_COUNTS):
+        db, _, rest = ln.partition("|")
+        table, _, n = rest.rpartition("|")
+        if table and n.strip().isdigit():
+            counts.setdefault(db, {})[table] = int(n)
+    return counts
+
+
+def compare_counts(before, after):
+    """What differs: ["db: schema.table 120 -> 119", …] (missing tables as -)."""
+    out = []
+    for db in sorted(set(before) | set(after)):
+        a, b = before.get(db) or {}, after.get(db) or {}
+        for t in sorted(set(a) | set(b)):
+            if a.get(t) != b.get(t):
+                out.append(f"{db}: {t} {a.get(t, '-')} -> {b.get(t, '-')}")
+    return out
+
+
+def count_summary(counts):
+    return pick(f"{len(counts)} Datenbanken, {sum(len(t) for t in counts.values())} Tabellen, "
+                f"{sum(n for t in counts.values() for n in t.values())} Zeilen",
+                f"{len(counts)} databases, {sum(len(t) for t in counts.values())} tables, "
+                f"{sum(n for t in counts.values() for n in t.values())} rows")
+
+
+def missing_extensions(ref, used):
+    """The extensions in use that the image `ref` does not ship."""
+    if not used:
+        return []
+    out = run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "sh", ref, "-c",
+               'ls "$(pg_config --sharedir)/extension"'], timeout=LIMITS["docker"])
+    have = {f[:-len(".control")] for f in out.split() if f.endswith(".control")}
+    return sorted(e for e in used if e not in have)
+
+
+RESTORE_OK_RE = re.compile(r'ERROR:\s+role "[^"]+" already exists')
+
+
+def restore_errors(stderr):
+    """The error lines of a restore with psql, except the role the new
+    database was created with, which the dump creates again."""
+    return [ln.strip() for ln in stderr.splitlines() if "ERROR:" in ln and not RESTORE_OK_RE.search(ln)]
+
+
+def make_major(name, new_tag):
+    """Read-only plan of a database major (`dbmajor … --dry-run`): the plan of
+    the tag change to the new major (make_retag) plus "major": the majors,
+    where the data lies and where the new major will keep it, the services
+    stopped meanwhile, the extensions in use, the space; or why not."""
+    plan, ctx = make_retag(name, new_tag, db_major=True)
+    rt = plan["retag"]
+    mj = plan["major"] = {"possible": False, "reason": None, "detail": None, "from_major": None,
+                          "to_major": None, "data": None, "pgdata": None, "stop": [], "extensions": [],
+                          "data_bytes": None, "data_free": None, "fingerprint": None}
+
+    def refuse(reason, detail=None):
+        mj["reason"], mj["detail"] = reason, detail
+        return plan, ctx
+
+    if not rt["possible"]:
+        return refuse(rt["reason"], rt.get("detail"))
+    c = inspect(name)
+    if kind_of(c) != "postgres":
+        return refuse("major-not-postgres")
+    if len(plan["services"]) != 1 or len(plan["containers"]) != 1:
+        return refuse("major-several", ", ".join(plan["containers"]))
+    if not c["State"].get("Running"):
+        return refuse("major-stopped")
+    old, new = major_of(plan["installed_version"]), major_of(plan["target_version"])
+    if old is None or new is None or new <= old:
+        return refuse("major-not-newer", plan["target_version"])
+    mj["from_major"], mj["to_major"] = old, new
+    mount = data_mount(c, env_of(c).get("PGDATA") or PGDATA_DEFAULT)
+    if not mount or mount["type"] not in ("volume", "bind") or not mount["source"]:
+        return refuse("major-no-volume", env_of(c).get("PGDATA") or PGDATA_DEFAULT)
+    if mount["type"] == "volume" and (mount["driver"] or "local") != "local":
+        return refuse("major-volume-driver", mount["driver"])
+    if mount["type"] == "volume" and ANON_VOLUME_RE.match(mount["name"] or ""):
+        return refuse("major-anonymous-volume", mount["destination"])
+    src = mount["source"]
+    if not os.path.isdir(src):
+        return refuse("major-no-volume", src)
+    if mount["type"] == "bind" and (os.path.ismount(src) or os.stat(src).st_dev != os.stat(os.path.dirname(
+            os.path.normpath(src))).st_dev):
+        return refuse("major-bind-mountpoint", src)
+    mj["data"] = mount
+    # Where the new major keeps its data must lie in that mount: from 18 on the
+    # image uses /var/lib/postgresql/18/docker unless the compose file sets PGDATA.
+    service = plan["services"][0]
+    env = (((ctx.get("cfg") or {}).get("services") or {}).get(service) or {}).get("environment") or {}
+    pgdata = (env.get("PGDATA") if isinstance(env, dict) else None) or \
+        (f"/var/lib/postgresql/{new}/docker" if new >= PG_NEW_LAYOUT else PGDATA_DEFAULT)
+    if not inside(pgdata, mount["destination"]):
+        return refuse("major-pgdata", f"{pgdata} | {mount['destination']}")
+    mj["pgdata"] = pgdata
+    mj["stop"] = [d["service"] for d in plan["dependents"]
+                  if any((inspect(n)["State"] or {}).get("Running") for n in d["containers"])]
+    try:
+        mj["extensions"] = sorted(set(pg_lines(name, PG_EXTENSIONS, timeout=120)) - {"plpgsql"})
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        return refuse("major-unreadable", (getattr(e, "stderr", None) or str(e)).strip()[-300:])
+    mj["data_bytes"] = next((d["size"] for d in plan["dbs"] if d["name"] == name), None)
+    mj["data_free"] = shutil.disk_usage(src).free
+    if mj["data_bytes"] is not None and mj["data_free"] < mj["data_bytes"] + FREE_MARGIN:
+        return refuse("major-space", f"{human(mj['data_free'])} | {human(mj['data_bytes'] + FREE_MARGIN)}")
+    mj["fingerprint"] = hashlib.sha256(json.dumps([rt["fingerprint"], mount, pgdata, mj["stop"]],
+                                                  sort_keys=True).encode()).hexdigest()
+    mj["possible"] = True
+    return plan, ctx
+
+
+def cmd_major(name, new_tag, expect):
+    """A database major: the plan of `dbmajor --dry-run` once more, and only
+    if it still matches what the page showed."""
+    if not FP_RE.match(expect):
+        raise Abort(64, f"Ungültiger Fingerabdruck: {expect}", f"Invalid fingerprint: {expect}")
+    lock()
+    with before_change():
+        plan, ctx = make_major(name, new_tag)
+    mj = plan["major"]
+    if not mj["possible"]:
+        why = (mj["reason"] or "?") + (f" ({mj['detail']})" if mj.get("detail") else "")
+        raise Abort(5, f"Datenbank-Major nicht möglich: {why}", f"Database major not possible: {why}")
+    if mj["fingerprint"] != expect:
+        raise Abort(5, "Dateien oder Daten haben sich seit der Vorschau geändert – nichts geändert, bitte neu planen.",
+                    "The files or the data changed since the preview – nothing changed, please plan again.")
+    return migrate(name, plan, ctx)
+
+
+def move_entries(src, dst):
+    """Move everything in directory src into directory dst (renames). When one
+    entry does not move, those that did go back, and the error stands."""
+    moved = []
+    try:
+        for e in sorted(os.listdir(src)):
+            os.rename(os.path.join(src, e), os.path.join(dst, e))
+            moved.append(e)
+    except OSError:
+        for e in reversed(moved):
+            os.rename(os.path.join(dst, e), os.path.join(src, e))
+        raise
+
+
+def move_aside(data, suffix, op_id):
+    """Move the data in a mount (data_mount) into a place of its own:
+    {"type": "volume", "name", "path"} for a volume, {"type": "bind", "path"}
+    for a directory. Raises OSError (nothing moved) unless it is the same
+    filesystem."""
+    src = data["source"]
+    if data["type"] == "volume":
+        name = f"{data['name']}-{suffix}"
+        run(["docker", "volume", "create", "--label", f"image-updates.op={op_id}", name])
+        dst = run(["docker", "volume", "inspect", "-f", "{{.Mountpoint}}", name]).strip()
+        kept = {"type": "volume", "name": name, "path": dst}
+    else:
+        dst = os.path.normpath(src) + "." + suffix
+        st = os.stat(src)
+        os.mkdir(dst, st.st_mode & 0o7777)
+        os.chown(dst, st.st_uid, st.st_gid)
+        kept = {"type": "bind", "path": dst}
+    if os.stat(src).st_dev != os.stat(dst).st_dev:
+        drop_kept(kept)
+        raise OSError(f"{dst} is not on the filesystem of {src}")
+    try:
+        move_entries(src, dst)      # what moved goes back if one entry does not: nothing is split
+    except OSError:
+        drop_kept(kept)
+        raise
+    return kept
+
+
+def drop_kept(kept):
+    """Remove a place move_aside made (its data with it)."""
+    if kept["type"] == "volume":
+        run(["docker", "volume", "rm", kept["name"]])
+    elif os.path.isdir(kept["path"]):
+        shutil.rmtree(kept["path"])
+
+
+def kept_where(kept):
+    return kept and (pick(f"Volume {kept['name']}", f"volume {kept['name']}") if kept["type"] == "volume"
+                     else kept["path"])
+
+
+def wait_postgres(name):
+    """The new major accepts connections over TCP: the server the image runs
+    while it sets up a new cluster listens on its socket only. False when the
+    container stops or READY_TIMEOUT passes."""
+    deadline = time.time() + READY_TIMEOUT
+    while time.time() < deadline:
+        state = inspect(name)["State"] or {}
+        if state.get("Status") in ("exited", "dead") or state.get("Restarting"):
+            return False
+        try:
+            if subprocess.run(["docker", "exec", name, "sh", "-c", PG_READY], capture_output=True,
+                              timeout=30).returncode == 0:
+                return True
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(2)
+    return False
+
+
+def restore_into(name, rel):
+    """Restore a dump (pg_dumpall, gzip) into the new major: its error lines
+    (restore_errors). The database the image created first goes before."""
+    run(["docker", "exec", name, "sh", "-c", PG_DROP_FIRST], timeout=120)
+    p = subprocess.run(["sh", "-c", 'gunzip -c "$1" | docker exec -i "$2" sh -c "$3"', "sh",
+                        os.path.join(DUMPS, rel), name, PG_RESTORE],
+                       capture_output=True, text=True, timeout=LIMITS["dump"])
+    errors = restore_errors(p.stderr or "")
+    if p.returncode != 0 and not errors:
+        errors = [(p.stderr or "").strip()[-300:] or f"exit {p.returncode}"]
+    return errors
+
+
+def start_stopped(op, base):
+    """Start the services a major stopped (best effort, for the cases that end
+    before the database changed)."""
+    if op.get("stopped"):
+        stream(base + ["start", *op["stopped"]])
+
+
+def undo_early(op, base):
+    """A major that ends before the database changed: what it did goes back
+    (drop_run), the services it stopped start again."""
+    with held():
+        drop_run(op)
+        try:
+            start_stopped(op, base)
+        except (OSError, subprocess.SubprocessError, Timeout):
+            say("Die gestoppten Dienste ließen sich nicht starten: " + ", ".join(op["stopped"]),
+                "The services stopped could not be started: " + ", ".join(op["stopped"]))
+
+
+def major_reason(name, source, line):
+    return {"container": name, "state": None, "exit_code": None, "oom": False, "source": source, "line": line}
+
+
+def migrate(name, plan, ctx):
+    """The database major. In the history (kind "dbmajor") before the tag line
+    is written; until the database is stopped anything that ends the run takes
+    back what it did and starts the services it stopped (exit 5). From then on
+    a failure is a failed run with its rollback (exit 4); the services that wait
+    for the database stay stopped until it is rolled back or fixed."""
+    rt, mj = plan["retag"], plan["major"]
+    st = stamp()
+    op_id = f"{st}-{name}"
+    ref, new_ref = plan["image"], rt["image"]
+    repo = split_ref(ref)[0]
+    service, project = plan["services"][0], plan["project"]
+    base = compose_cmd(ctx)
+    old, new = mj["from_major"], mj["to_major"]
+    with before_change():
+        old_id = inspect(name)["Image"]
+    op = {"id": op_id, "ts": now_iso(), "kind": "dbmajor", "container": name, "project": project,
+          "workdir": ctx["workdir"], "files": ctx["files"], "env_files": ctx["env_files"],
+          "services": [service], "containers": [name], "image": ref, "old_id": old_id,
+          "from_version": plan["installed_version"], "to_version": None,
+          "to_image": new_ref, "from_tag": rt["from_tag"], "to_tag": rt["tag"],
+          "changes": [{k: c[k] for k in ("file", "line", "old", "new")} for c in rt["changes"]],
+          "from_major": old, "to_major": new, "data": mj["data"], "old_data": None, "stopped": [],
+          "rollback": None, "dumps": [], "status": "running", "pid": os.getpid()}
+    say(f"Datenbank-Major {ref} → {new_ref} (PostgreSQL {old} → {new}) in Projekt {project}.",
+        f"Database major {ref} to {new_ref} (PostgreSQL {old} to {new}) in project {project}.")
+    say("Die Datenbank und die Dienste, die auf sie warten, sind bis zum Ende nicht erreichbar.",
+        "The database and the services that wait for it are unavailable until the end.")
+
+    # 1. The new image, and the extensions the databases use in it.
+    with before_change():
+        try:
+            pull_rc = stream(["docker", "pull", new_ref])
+        except Timeout as e:
+            raise Abort(5, f"Der Pull hat nach {e.seconds} s nicht geendet – nichts geändert.",
+                        f"The pull did not end within {e.seconds} s – nothing changed.")
+        new_id = image_id(new_ref)
+        if not new_id:
+            raise Abort(5, f"Das Image {new_ref} ist nicht verfügbar – nichts geändert. Pull: "
+                           f"{reason_line(STREAM_TAIL) or pull_rc}",
+                        f"The image {new_ref} is not available – nothing changed. Pull: "
+                        f"{reason_line(STREAM_TAIL) or pull_rc}")
+        if pull_rc != 0:
+            say(f"Warnung: Der Pull ist fehlgeschlagen; {new_ref} liegt schon auf dem Server und wird verwendet.",
+                f"Warning: the pull failed; {new_ref} is on the server already and is used.")
+        missing = missing_extensions(new_ref, mj["extensions"])
+        if missing:
+            raise Abort(5, f"{new_ref} hat die Erweiterungen {', '.join(missing)} nicht, die die Datenbanken nutzen "
+                           f"– nichts geändert. Ein Image mit ihnen wählen (z. B. pgvector/pgvector).",
+                        f"{new_ref} lacks the extensions {', '.join(missing)} the databases use – nothing changed. "
+                        f"Choose an image that has them (e.g. pgvector/pgvector).")
+        if mj["extensions"]:
+            say(f"Erweiterungen im neuen Image vorhanden: {', '.join(mj['extensions'])}",
+                f"Extensions present in the new image: {', '.join(mj['extensions'])}")
+    need = (mj["data_bytes"] or 0) + FREE_MARGIN
+    if plan["free_bytes"] is not None and plan["free_bytes"] < need:
+        raise Abort(5, f"Zu wenig Platz in {BASE}: {human(plan['free_bytes'])} frei, {human(need)} nötig.",
+                    f"Not enough space in {BASE}: {human(plan['free_bytes'])} free, {human(need)} needed.")
+
+    # 2. - 5. Until the database is stopped: undone completely when anything ends the run.
+    try:
+        rb = f"{repo}:rollback-{st}"
+        run(["docker", "tag", old_id, rb])
+        op["rollback"] = rb
+        say(f"Rollback-Sicherung: {rb}", f"Rollback image: {rb}")
+        if mj["stop"]:
+            op["stopped"] = list(mj["stop"])
+            say(f"Gestoppt, damit nichts mehr schreibt: {', '.join(mj['stop'])}",
+                f"Stopped, so that nothing writes any more: {', '.join(mj['stop'])}")
+            if stream(base + ["stop", *mj["stop"]]) != 0:
+                raise Abort(5, "Die wartenden Dienste ließen sich nicht stoppen – nichts geändert.",
+                            "The waiting services could not be stopped – nothing changed.")
+        db = next(d for d in plan["dbs"] if d["name"] == name)
+        op["dumps"].append(dump_db(project, db, st))
+        before = table_counts(name)
+        say(f"Gezählt: {count_summary(before)}", f"Counted: {count_summary(before)}")
+        change_files(op, ctx, rt, [service], st)
+    except Interrupted as e:
+        undo_early(op, base)
+        raise stopped(e, "Dump, Rollback-Kopie und Dateien zurückgenommen, die gestoppten Dienste wieder gestartet.",
+                      "dump, rollback copy and files taken back, the stopped services started again.")
+    except BaseException:
+        undo_early(op, base)
+        raise
+
+    # 6. - 8. The database changes from here on.
+    ok, reason = False, None
+    try:
+        if stream(base + ["stop", service]) != 0:
+            raise RuntimeError(pick("docker compose stop schlug fehl", "docker compose stop failed"))
+        op["old_data"] = move_aside(mj["data"], f"pg{old}-{st}", op_id)
+        record(op, log=op_id + ".log")
+        say(f"Die Daten von PostgreSQL {old} liegen jetzt in {kept_where(op['old_data'])}; sie bleiben, bis sie "
+            f"freigegeben werden.",
+            f"The data of PostgreSQL {old} is now in {kept_where(op['old_data'])}; it stays until released.")
+        rc = stream(base + ["up", "-d", "--no-deps", "--pull", "never", service])
+        if rc != 0 or not wait_postgres(name):
+            show_logs([name])
+            reason = failure_reason([name], compose_rc=rc)
+            raise RuntimeError("not ready")
+        op["new_id"] = new_id
+        op["to_version"] = version_of(new_ref, new_id)
+        say(f"PostgreSQL {new} läuft. Spiele den Dump ein …", f"PostgreSQL {new} runs. Restoring the dump …")
+        errors = restore_into(name, op["dumps"][0])
+        if errors:
+            for ln in errors[:20]:
+                print(ln)
+            reason = major_reason(name, "restore", errors[0][-REASON_MAX:])
+            raise RuntimeError("restore")
+        after = table_counts(name)
+        diff = compare_counts(before, after)
+        if diff:
+            for ln in diff[:20]:
+                print(ln)
+            reason = major_reason(name, "counts", pick(f"Zeilen weichen ab: {diff[0]}", f"rows differ: {diff[0]}"))
+            raise RuntimeError("counts")
+        say(f"Gezählt nach dem Einspielen: {count_summary(after)} – gleich.",
+            f"Counted after the restore: {count_summary(after)} – the same.")
+        try:
+            run(["docker", "exec", name, "sh", "-c", PG_ANALYZE], timeout=LIMITS["dump"])
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            say("Hinweis: Die Statistiken ließen sich nicht erneuern (vacuumdb --analyze-only).",
+                "Note: the statistics could not be renewed (vacuumdb --analyze-only).")
+        # 9. The services that wait for the database
+        if op["stopped"]:
+            rc = stream(base + ["start", *op["stopped"]])
+            started, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(project, op["stopped"])
+            if not started:
+                names = failed or [n for d in plan["dependents"] for n in d["containers"]]
+                show_logs(names)
+                reason = failure_reason(names, compose_rc=rc)
+                raise RuntimeError("dependents")
+        ok = True
+    except (Exception, Interrupted) as e:
+        if reason is None:
+            reason = error_reason(e)
+    versions = {"from_version": op["from_version"], "to_version": op["to_version"], "image": new_ref,
+                "backup": op.get("backup"), "old_data": kept_where(op["old_data"])}
+    if not ok:
+        op["status"], op["reason"] = "failed", reason
+        record(op, log=op_id + ".log")
+        say_reason(reason)
+        say("Datenbank-Major fehlgeschlagen. Zurückrollen ist möglich: Es legt die alten Daten zurück und stellt "
+            "die Dateien wieder her. Die wartenden Dienste bleiben bis dahin gestoppt.",
+            "Database major failed. A rollback is possible: it moves the old data back and restores the files. "
+            "The waiting services stay stopped until then.")
+        result(op=op_id, status="failed", rollback=op["rollback"], dumps=op["dumps"], reason=reason, **versions)
+        return 4
+    op["status"] = "ok"
+    record(op, log=op_id + ".log")
+    say(f"Datenbank-Major erfolgreich: PostgreSQL {new}.", f"Database major successful: PostgreSQL {new}.")
+    try:
+        start_radar()
+    except Interrupted as e:
+        say(f"{e.name}: Radar-Start übersprungen.", f"{e.name}: radar start skipped.")
+    result(op=op_id, status="ok", rollback=op["rollback"], dumps=op["dumps"], **versions)
+    return 0
+
+
+def swap_back(op, base):
+    """The rollback of a major, once the files are back: the database stopped,
+    the new major's data moved aside (kept until released), the old data moved
+    back to where it was. Returns where the new major's data is kept."""
+    kept = op.get("old_data")
+    # The services that wait for the database stop as well (the rollback starts them again).
+    if stream(base + ["stop", *(op.get("stopped") or []), *op["services"]]) != 0:
+        raise RuntimeError(pick("docker compose stop schlug fehl", "docker compose stop failed"))
+    new_kept = move_aside(op["data"], f"pg{op['to_major']}-{stamp()}", op["id"])
+    record({"id": op["id"], "new_data": new_kept, "old_data": kept})
+    try:
+        move_entries(kept["path"], op["data"]["source"])
+    except OSError:
+        # Back to where this rollback began (move_entries took back its part):
+        # the new major's data in place again; the rollback can run again.
+        move_entries(new_kept["path"], op["data"]["source"])
+        drop_kept(new_kept)
+        record({"id": op["id"], "new_data": None, "old_data": kept})
+        raise
+    try:
+        drop_kept(kept)
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    record({"id": op["id"], "old_data": None})
+    say(f"Die Daten von PostgreSQL {op['from_major']} liegen wieder an ihrem Ort; die von PostgreSQL "
+        f"{op['to_major']} bleiben in {kept_where(new_kept)}, bis sie freigegeben werden.",
+        f"The data of PostgreSQL {op['from_major']} is back in its place; that of PostgreSQL {op['to_major']} stays "
+        f"in {kept_where(new_kept)} until released.")
+    return new_kept
+
+
+def kept_of(op):
+    """The data a major keeps that is not in use: the old major's after a run
+    that was not rolled back, the new major's after a rollback."""
+    return op.get("new_data") if op.get("rolled_back") else op.get("old_data")
+
+
+def kept_ok(kept):
+    """A place move_aside made, by its name: nothing else is ever deleted."""
+    if not isinstance(kept, dict):
+        return False
+    if kept.get("type") == "volume":
+        return bool(KEPT_RE.match(kept.get("name") or ""))
+    path = kept.get("path") or ""
+    return kept.get("type") == "bind" and bool(KEPT_RE.match(os.path.basename(path))) and os.path.isabs(path) \
+        and path == os.path.normpath(path) and not os.path.islink(path)
+
+
+def kept_bytes(kept):
+    try:
+        out = run(["du", "-sb", kept["path"]], timeout=60)
+        return int(out.split()[0])
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError, IndexError):
+        return None
+
+
+def kept_exists(kept):
+    if kept["type"] == "volume":
+        return run(["docker", "volume", "inspect", kept["name"]], check=False, timeout=60).strip() not in ("", "[]")
+    return os.path.isdir(kept["path"])
+
+
+def cmd_delete_olddata(op_id):
+    if not OP_RE.match(op_id):
+        raise Abort(64, f"Ungültige Vorgangs-ID: {op_id}", f"Invalid operation id: {op_id}")
+    lock()
+    op = load_ops().get(op_id)
+    if not op or op.get("kind") != "dbmajor":
+        raise Abort(2, f"Vorgang {op_id} nicht gefunden.", f"Operation {op_id} not found.")
+    if op.get("status") != "ok" and not op.get("rolled_back"):
+        raise Abort(3, "Die alten Daten sind der Weg zurück, solange der Major nicht gelungen oder zurückgerollt ist.",
+                    "The old data is the way back as long as the major has not succeeded or been rolled back.")
+    kept = kept_of(op)
+    if not kept_ok(kept) or not kept_exists(kept):
+        raise Abort(2, "Keine aufbewahrten Daten zu diesem Vorgang.", "No kept data for this operation.")
+    say(f"Gebe {kept_where(kept)} frei …", f"Releasing {kept_where(kept)} …")
+    drop_kept(kept)
+    record({"id": op_id, "data_released": now_iso()})
+    say("Freigegeben.", "Released.")
+    return 0
+
+
 def compose_images(ctx, services):
     """{service: image} as `docker compose config` gives it now; exit 5 if
     compose cannot read its files."""
@@ -1896,7 +2472,7 @@ def cmd_rollback(op_id):
         raise Abort(64, f"Ungültige Vorgangs-ID: {op_id}", f"Invalid operation id: {op_id}")
     lock()
     op = load_ops().get(op_id)
-    if not op or op.get("kind") not in ("update", "retag"):
+    if not op or op.get("kind") not in ("update", "retag", "dbmajor"):
         raise Abort(2, f"Vorgang {op_id} nicht gefunden.", f"Operation {op_id} not found.")
     # A rollback that went through is not repeated; one that failed may run
     # again (up to 0.18.0 a failed one was marked rolled_back as well).
@@ -1908,7 +2484,12 @@ def cmd_rollback(op_id):
         raise Abort(2, "Das Rollback-Image existiert nicht mehr.", "The rollback image no longer exists.")
     ctx = {"project": op["project"], "workdir": op["workdir"], "files": op["files"],
            "env_files": op.get("env_files") or []}
-    saved = (op.get("backup_files") or []) if op.get("kind") == "retag" else []
+    saved = (op.get("backup_files") or []) if op.get("kind") in ("retag", "dbmajor") else []
+    major = op.get("kind") == "dbmajor"
+    # A major that moved the data aside moves it back: the old data must still be there.
+    if major and op.get("old_data") and not (kept_ok(op["old_data"]) and kept_exists(op["old_data"])):
+        raise Abort(2, f"Die alten Daten ({kept_where(op['old_data'])}) sind nicht mehr da – nichts geändert.",
+                    f"The old data ({kept_where(op['old_data'])}) is gone – nothing changed.")
     # A tag change is undone with its files. Check them all before touching one:
     # a file edited since then, or a damaged backup, stops the rollback. A file
     # that is back already (an earlier attempt, a run that ended before writing
@@ -1937,8 +2518,12 @@ def cmd_rollback(op_id):
             other_image(ctx, op)
         say(f"Rollback von {op['image']} auf {rb} (Projekt {op['project']}) …",
             f"Rolling {op['image']} back to {rb} (project {op['project']}) …")
-        say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
-            "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
+        if major:
+            say(f"Die Datenbank kehrt mit ihren alten Daten zu PostgreSQL {op.get('from_major')} zurück.",
+                f"The database returns to PostgreSQL {op.get('from_major')} with its old data.")
+        else:
+            say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
+                "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
         if saved:
             for x in pending:
                 with open(os.path.realpath(x["path"]), "rb") as f:
@@ -1960,6 +2545,8 @@ def cmd_rollback(op_id):
     keep_log(op_id + ".rollback.log")
     ok, reason = False, None
     try:
+        if major and op.get("old_data"):
+            swap_back(op, compose_cmd(ctx))
         run(["docker", "tag", rb, op["image"]])
         rc = stream(compose_cmd(ctx) + ["up", "-d", "--no-deps", "--pull", "never", *op["services"]])
         ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["services"])
@@ -1976,6 +2563,13 @@ def cmd_rollback(op_id):
         else:
             show_logs(failed or op["containers"])
             reason = failure_reason(failed or op["containers"], compose_rc=rc)
+        # A major stopped the services that wait for the database: they start again.
+        if ok and major and op.get("stopped"):
+            rc = stream(compose_cmd(ctx) + ["start", *op["stopped"]])
+            ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["stopped"])
+            if not ok:
+                show_logs(failed or op["stopped"])
+                reason = failure_reason(failed or op["stopped"], compose_rc=rc)
     except (Exception, Interrupted) as e:
         ok, reason = False, error_reason(e)
     status = "ok" if ok else "failed"
@@ -2085,7 +2679,7 @@ def cmd_backups():
         # "running": a run that ended without its last line (killed, power
         # cut) unless its process still runs. A failed rollback may be tried again.
         o["active"] = o.get("status") == "running" and helper_alive(o.get("pid"))
-        could = (o.get("kind") in ("update", "retag") and o.get("status") in ("ok", "failed", "running")
+        could = (o.get("kind") in ("update", "retag", "dbmajor") and o.get("status") in ("ok", "failed", "running")
                  and not o["active"] and not (o.get("rolled_back") and o.get("rollback_status") != "failed"))
         o["can_rollback"] = could and norm_ref(o.get("rollback") or "") in rb_refs
         if could and o.get("rollback") and not o["can_rollback"]:
@@ -2097,6 +2691,15 @@ def cmd_backups():
                 o[k] = known[iid]
         for k in ("workdir", "files", "env_files", "old_id", "new_id", "backup_files", "pid"):
             o.pop(k, None)
+        # The data a database major keeps (kept_of), while it is there.
+        if o.get("kind") == "dbmajor":
+            kept = None if o.get("data_released") else kept_of(o)
+            if kept_ok(kept) and kept_exists(kept):
+                o["kept"] = {"where": kept_where(kept), "bytes": kept_bytes(kept),
+                             "major": o.get("to_major") if o.get("rolled_back") else o.get("from_major"),
+                             "can_release": o.get("status") == "ok" or bool(o.get("rolled_back"))}
+            for k in ("data", "old_data", "new_data"):
+                o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))
         o["rollback_log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".rollback.log"))
 
@@ -2391,7 +2994,8 @@ def main(argv):
         plan, _ = make_plan(argv[1])
         print(json.dumps(plan, ensure_ascii=False))
         return 0
-    if argv[:1] in (["update"], ["pull"], ["rollback"], ["delete-image"]) or argv[:1] == ["retag"] and "--expect" in argv:
+    if argv[:1] in (["update"], ["pull"], ["rollback"], ["delete-image"]) or \
+            argv[:1] in (["retag"], ["dbmajor"]) and "--expect" in argv:
         load_limits()
     if len(argv) in (2, 3) and argv[0] == "update" and (len(argv) == 2 or argv[2] == "--no-dump"):
         return keep_output(cmd_update, argv[1], do_dump=len(argv) == 2)
@@ -2416,6 +3020,13 @@ def main(argv):
         return 0
     if len(argv) in (5, 6) and argv[0] == "retag" and argv[3] == "--expect" and argv[5:] in ([], ["--no-dump"]):
         return keep_output(cmd_retag, argv[1], argv[2], argv[4], do_dump=len(argv) == 5)
+    if len(argv) == 4 and argv[0] == "dbmajor" and argv[3] == "--dry-run":
+        print(json.dumps(make_major(argv[1], argv[2])[0], ensure_ascii=False))
+        return 0
+    if len(argv) == 5 and argv[0] == "dbmajor" and argv[3] == "--expect":
+        return keep_output(cmd_major, argv[1], argv[2], argv[4])
+    if len(argv) == 2 and argv[0] == "delete-olddata":
+        return cmd_delete_olddata(argv[1])
     raise Abort(64, "Unbekannter Befehl: " + " ".join(argv), "Unknown command: " + " ".join(argv))
 
 
@@ -2446,7 +3057,7 @@ def entry(argv):
     if guard is not None and guard.repeats:
         say(f"{guard.repeats} weitere(s) Signal(e) während des Aufräumens nicht beachtet.",
             f"{guard.repeats} more signal(s) ignored while cleaning up.")
-    if argv[:1] in (["update"], ["pull"], ["retag"], ["rollback"], ["cleanup"]) and "--dry-run" not in argv \
+    if argv[:1] in (["update"], ["pull"], ["retag"], ["dbmajor"], ["rollback"], ["cleanup"]) and "--dry-run" not in argv \
             and code not in (64, 75, 77):
         refresh_status()
     return code

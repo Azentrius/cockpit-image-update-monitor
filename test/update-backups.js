@@ -691,5 +691,32 @@ const BASE_SCRIPT = {
                "a copy that is there: the button, no note");
     }
 
+    // A database major (stage 5, run with the helper): the history names it and the data it keeps,
+    // and its rollback says what it does with the data, not that databases are not reset.
+    const MAJOR = [{ id: "20261020-120000-glitchtip-postgres", ts: "2026-10-20T10:00:00Z", kind: "dbmajor",
+                     container: "glitchtip-postgres", image: "postgres:16-alpine", to_image: "postgres:17.6-alpine",
+                     from_tag: "16-alpine", to_tag: "17.6-alpine", services: ["postgres"], from_major: 16, to_major: 17,
+                     from_version: "16.15", to_version: "17.6", changes: [{ file: "/opt/glitchtip/docker-compose.yml", line: 4 }],
+                     rollback: "postgres:rollback-20261020-120000", dumps: ["glitchtip/x.sql.gz"], status: "ok", can_rollback: true,
+                     kept: { where: "volume glitchtip_pgdata-pg16-20261020-120000", bytes: 162529280, major: 16, can_release: true } }];
+    for (const [lang, note, kept, desc] of [
+        ["de", "Datenbank-Major: PostgreSQL 16 → 17",
+         "Die Daten von PostgreSQL 16 sind aufbewahrt: volume glitchtip_pgdata-pg16-20261020-120000 (155,00 MiB); freigeben mit diun-update.py delete-olddata.",
+         "Stoppt die Datenbank und die Dienste, die auf sie warten, bewahrt die Daten von PostgreSQL 17 auf, legt die Daten von PostgreSQL 16 zurück"],
+        ["en", "Database major: PostgreSQL 16 → 17",
+         "The data of PostgreSQL 16 is kept: volume glitchtip_pgdata-pg16-20261020-120000 (155.00 MiB); release it with diun-update.py delete-olddata.",
+         "Stops the database and the services that wait for it, keeps the data of PostgreSQL 17, moves the data of PostgreSQL 16 back"]]) {
+        const mp = boot(lang, { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: MAJOR }) } });
+        await settle();
+        mp.d.getElementById("dm-tab-btn-backups").click();
+        await settle();
+        const notes = [...mp.d.querySelectorAll("#dm-ops tr")[0].querySelectorAll(".dm-row-note")].map((x) => x.textContent);
+        console.log("database major (" + lang + "):", notes.join(" | "));
+        assert.deepStrictEqual(notes, [note, kept]);
+        mp.d.querySelector('#dm-ops button[data-op="0"]').click();
+        const d = mp.d.getElementById("dm-dialog-desc").textContent;
+        assert(d.startsWith(desc) && !/not reset|nicht zurückgesetzt/.test(d), d);
+    }
+
     console.log("\nALL CHECKS PASSED");
 })().catch((e) => { console.error("FEHLGESCHLAGEN:", e.stack || e.message); process.exit(1); });
