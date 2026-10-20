@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-16. Each stage is cut so that it is useful on its own and brings its own tests. The order
+As of 2026-10-21 (0.23.0). Each stage is cut so that it is useful on its own and brings its own tests. The order
 is the recommendation.
 
 **Guardrails for every stage** (they keep applying unchanged):
@@ -237,9 +237,9 @@ what failed, what was rolled back.
 
 ---
 
-## Stage 5 – Guided database majors
+## Stage 5 – Guided database majors (PostgreSQL ✅)
 
-In progress. Since 0.23.0 the helper does a PostgreSQL major by dump and restore (`diun-update.py
+PostgreSQL done in 0.23.0. Since 0.23.0 the helper does a PostgreSQL major by dump and restore (`diun-update.py
 dbmajor`, see [docs/INTERNALS.md](docs/INTERNALS.md#dbmajor-database-major-stage-5-since-0230)), with
 its rollback and the release of the kept data; the end-to-end test runs 16 → 17 with test data, the
 rollback and the release. The page offers it in “Change version” with two tick boxes (a backup checked

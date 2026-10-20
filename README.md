@@ -37,8 +37,9 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 |---|---|
 | **Overview** | All running containers with *Configured* (tag from compose), *Installed* (real version), *Newest version* (patch / minor / major) and status. Sorted by urgency. |
 | **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**” in the card. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
-| **Update / roll out** | One click first shows a plan (containers recreated with it, one-off jobs, compose project, databases, what the services wait for and what waits for them, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If nobody can tell how big the jump is (unknown version, tag `latest`), the plan says so and asks for an extra confirmation. If the containers do not come up, the most likely cause from their log stands next to the rollback button. |
-| **Change version** | A list of the versions the registry offers for the installed one: pin the running version, a version line such as `5`, an exact patch / minor / major version, or `latest`. The dialog shows every line of the compose file (or `.env`) before and after, then the same plan and flow as an update; the rollback puts the files back byte for byte. Database majors and Nextcloud jumps over more than one major are listed but locked. |
+| **Update / roll out** | One click first shows a plan (containers recreated with it, one-off jobs, compose project, databases, what the services wait for and what waits for them, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If nobody can tell how big the jump is (unknown version, tag `latest`), the plan says so and asks for an extra confirmation. If the containers do not come up, the most likely cause from their log stands next to the rollback button. **In two steps** if you like: download now, roll out later (e.g. in a maintenance window). The plan lists the **release notes** from GitHub between the installed and the new version, with *breaking*, *migration* and *deprecated* marked. |
+| **Change version** | A list of the versions the registry offers for the installed one: pin the running version, a version line such as `5`, an exact patch / minor / major version, or `latest`. The dialog shows every line of the compose file (or `.env`) before and after, then the same plan and flow as an update; the rollback puts the files back byte for byte. A newer PostgreSQL major runs as a **database major** (below); other database majors and Nextcloud jumps over more than one major are listed but locked. |
+| **Database majors** | PostgreSQL 16 → 17 (or another newer major) by dump and restore, from *Change version*: the services that wait for the database stop, every table is counted before and after, the old data is moved aside (not copied) and kept until you release it, a rollback moves it back. Two tick boxes first: a backup checked elsewhere, the downtime. |
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
 | **Status Board** | `diun-update.py status --lang en\|de` gives the shared status of the Azentrius add-ons, which the Status Board on a Cockpit bastion shows as a tile per host: updates available, failed updates, an outdated radar, roll-outs pending and new versions, the same rows the overview marks. It works without administrative access on the host: the radar run and every update, rollback and cleanup write it to `/var/lib/diun-radar/status.json`, readable by all, with the names of containers only. A click on the tile opens the page where the finding is: the Updates tab at the first row of that kind, or the update history. |
@@ -280,6 +281,24 @@ The update dialog and the preview of a version change list the releases between 
 - **GitHub's limit** without a login is 60 requests per hour: the radar asks only for images with something newer, one request each, at most 20 per run, and keeps an answer for 24 hours (asked sooner when a newer version turns up). On the limit it keeps the last answer and tries again on a later run.
 - **Text only:** Markdown shows as its text; images and HTML are left out, links show as their text, and each release links to its page on GitHub.
 - **When there are none,** the dialog says why: the image names no source, the repository has no releases, they are not fetched yet, GitHub's limit, or no release between the two versions. Images like postgres publish their release notes elsewhere.
+
+---
+
+## Database majors (stage 5)
+
+A newer PostgreSQL major (e.g. 16 → 17) is offered in **Change version** as “database major by dump and restore”. The preview plans it (`diun-update.py dbmajor … --dry-run`) and shows where the data lies, what stops meanwhile, the extensions in use and the space; two tick boxes (a backup of the database outside this server checked, the downtime) unlock the button. The run:
+
+1. pulls the new image and checks that it ships the extensions in use;
+2. keeps a rollback copy of the old image and stops the services that wait for the database;
+3. dumps the database and counts every table of every database;
+4. changes the tag line of the compose file (as *Change version* does, with a byte-exact copy);
+5. stops the database and moves its data aside: into a volume of its own next to a named volume, or a directory next to a bind mount (renames on the same filesystem, no second copy);
+6. starts the new major on the emptied place, restores the dump and compares the counts;
+7. starts the waiting services again.
+
+Anything that fails before the database stops leaves nothing changed. Later the history offers the rollback: it moves the old data back (what was written after the major is not in it) and keeps the new major's data. The old data stays until **Release** in the history deletes it.
+
+**Limits:** the data must lie in a named volume of the `local` driver or a bind mount that is no mount point of its own. PostgreSQL 18 keeps its data in `/var/lib/postgresql/18/docker`: add `PGDATA: /var/lib/postgresql/data` to the service's environment first (the preview says so). MariaDB/MySQL majors, pgvector's `pg17` tags and `pg_upgrade` are not supported yet.
 
 ---
 
