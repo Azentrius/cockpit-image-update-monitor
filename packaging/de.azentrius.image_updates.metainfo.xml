@@ -13,13 +13,15 @@
       For every running Docker container the page shows what the compose file asks for, which
       version actually runs and which version is the newest. Updates run right from Cockpit, with
       a database dump first, a rollback copy of the old image and a rollback at the push of a
-      button. Diun and a version radar find new versions.
+      button. Diun and a version radar find new versions; the update dialog shows the release notes
+      in between, and PostgreSQL majors run by dump and restore.
     </p>
     <p xml:lang="de">
       Die Seite zeigt für jeden laufenden Docker-Container, was die Compose-Datei vorgibt, welche
       Version wirklich läuft und welche die neueste ist. Updates laufen direkt aus Cockpit, mit
       Datenbank-Dump vorab, Rollback-Kopie des alten Images und Rollback auf Knopfdruck. Diun und
-      ein Versionsradar finden neue Versionen.
+      ein Versionsradar finden neue Versionen; der Update-Dialog zeigt die Release Notes dazwischen,
+      und PostgreSQL-Majors laufen per Dump und Restore.
     </p>
   </description>
   <extends>org.cockpit_project.cockpit</extends>

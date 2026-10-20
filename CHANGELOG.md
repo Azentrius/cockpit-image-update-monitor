@@ -5,7 +5,9 @@
 A click on a tile of the Status Board opens the page where the finding is: the tab, and there the
 first row of that kind. The menu icon warns as well when the radar reached no registry. An update can
 now be done in two steps: download now, roll out later. The update and version change dialogs show
-the release notes between the two versions, from GitHub (stage 3).
+the release notes between the two versions, from GitHub (stage 3). PostgreSQL majors run by dump and
+restore, in the helper and from Change version, with rollback and the release of the old data (stage
+5). The page's code is split into scripts by part.
 
 **Upgrading:** nothing to do. The next radar run or update writes `status.json`; `status` gives the
 links at once. The release notes come with the next radar run (the package starts one two minutes
