@@ -9,7 +9,8 @@
 //   3. German, a changed file, a missing file, the radar turning outdated;
 //   4. no answer at all: the page still starts after 3 seconds;
 //   5. the state and the tooltip equal the state and summary of
-//      `diun-update.py status` (lib/diunstatus.py) for the same facts.
+//      `diun-update.py status` (lib/diunstatus.py) for the same facts, also
+//      for a radar run that reached no registry.
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -222,6 +223,10 @@ const INFO_EN = { type: "info", title: "2 updates available, 3 roll-outs pending
                                 radar: { found: false, generated: null } }],
         ["radar time unreadable", { ...base, radar: { found: true, generated: "yesterday" } }],
         ["radar time with offset", { ...base, radar: { found: true, generated: at(23).replace("T", " ").replace("Z", " +0200") } }],
+        ["no registry reached", { ...base, radar: { found: true, generated: at(2), reached: false } }],
+        ["no registry, outdated", { ...base, radar: { found: true, generated: at(30), reached: false } }],
+        ["no registry, failed", { ...base, failed: { ops: [{ name: "a", how: "failed" }] },
+                                  radar: { found: true, generated: at(1), reached: false } }],
         ["odd values", { ...base, failed: { ops: "x" }, updates: { names: {} }, rollout: 3 }],
     ];
     const code = [

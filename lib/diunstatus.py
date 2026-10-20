@@ -15,6 +15,8 @@ The items here:
 
 updates, rollout and new-versions follow the rules of the page's status
 column (rowFor and versionCell in plugin/diun.js): the same rows, counted.
+Each item links the place on the page that shows it (LINKS): a click on the
+Status Board's tile opens that tab, at its first row of the kind.
 
 What takes time (Docker) happens before: the radar run (diun-versions.py
 --output) and, as root, every update, tag change, rollback and cleanup
@@ -53,6 +55,9 @@ EVENTS_MAX = 16 << 20          # bytes of events.jsonl read, the newest
 DISMISSED_MAX = 1 << 20
 LEVELS = ("patch", "minor", "major")
 SEVERITY = {"danger": 0, "warning": 1, "info": 2}
+# The places on the page (PLACES in plugin/diun.js): tab, then the part of it.
+LINKS = {"updates": "#/updates/update", "failed": "#/backups/history", "radar": "#/updates",
+         "rollout": "#/updates/rollout", "new-versions": "#/updates/new-versions"}
 VERSION_RE = re.compile(r'^\s*const VERSION = "([^"]{1,40})";', re.M)
 # The timestamps of Docker, Diun and the radar (builtAt in plugin/diun.js).
 TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?", re.A)
@@ -421,6 +426,7 @@ def item(id_, state, title, checked_at, value=None, detail=None):
         it["value"] = value
     if detail:
         it["detail"] = detail
+    it["link"] = LINKS[id_]
     it["checked_at"] = checked_at
     it["stale_after"] = STALE_AFTER
     return it

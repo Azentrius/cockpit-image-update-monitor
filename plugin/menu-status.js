@@ -66,13 +66,15 @@
         const ops = Array.isArray(part("failed").ops) ? part("failed").ops.filter(isObject) : [];
         const radar = part("radar");
         const generated = secondsOf(radar.generated);
-        let radarState = "ok";
+        // Outdated first, then a last run that reached no registry (radar_item).
+        let radarState = "ok", radarKey = "menu.radar";
         if (!radar.found) radarState = "none";
         else if (generated === null || now - generated > STALE_S) radarState = "warning";
+        else if (radar.reached === false) [radarState, radarKey] = ["warning", "menu.noRegistry"];
         return [
             names("updates"),
             { id: "failed", state: ops.length ? "danger" : "ok", n: ops.length },
-            { id: "radar", state: radarState, n: 0 },
+            { id: "radar", state: radarState, n: 0, key: radarKey },
             names("rollout"),
             names("new-versions"),
         ];
@@ -87,7 +89,7 @@
         const found = items.filter((it) => it.state in SEVERITY)
                 .sort((a, b) => SEVERITY[a.state] - SEVERITY[b.state]);
         if (!found.length) return null;
-        const text = found.map((it) => t(KEYS[it.id], { n: it.n })).join(", ");
+        const text = found.map((it) => t(it.key || KEYS[it.id], { n: it.n })).join(", ");
         return { type: TYPES[found[0].state], title: text.charAt(0).toUpperCase() + text.slice(1) };
     }
 
