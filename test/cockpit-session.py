@@ -22,7 +22,8 @@ containers). Playwright drives Chromium through Cockpit's own login and shell:
   5. the compose project of test/cockpit-setup.sh: "Roll out image", its
      plan, the live output, the result, the container on the new image; then
      the rollback from the history, the container on the old image again;
-     after each, the menu's status icon again;
+     after each, the menu's status icon again; then the Status Board's links
+     (cockpit.jump to a place of the loaded page: its tab, no reload);
   6. a user without administrative access (German browser): the status icon
      in German before the page is opened, then the hint, no actions.
 
@@ -231,6 +232,30 @@ def check_preloaded(page, lang, what):
     check_menu(page, lang, what)
 
 
+def check_places(page, frame):
+    """The Status Board's links: it jumps with cockpit.jump("/image-updates#/<place>"), and Cockpit
+    keeps a loaded page and only changes its location. The page shows each place's tab without
+    loading again, and a tab chosen on the page goes into the shell's address, so the link to the
+    place shown before leads there again."""
+    own = next(f for f in page.frames if f.name.endswith("/image-updates"))
+    own.evaluate("() => { window.imgupdNotReloaded = true; }")
+
+    def at(place, tab, how):
+        shown = frame.locator(f'#dm-tab-btn-{tab}[aria-selected="true"]')
+        ok = poll(page, lambda: shown.count() == 1 and page.url.endswith("/image-updates#" + place), 30)
+        note(f"Status Board link {how}: the tab {tab}, the page not loaded again",
+             bool(ok) and own.evaluate("() => window.imgupdNotReloaded === true"),
+             f"address {page.url.split('9090', 1)[-1]}")
+
+    for place, tab in (("/updates/rollout", "updates"), ("/backups/history", "backups")):
+        own.evaluate("p => cockpit.jump(p)", "/image-updates#" + place)
+        at(place, tab, "#" + place)
+    frame.locator("#dm-tab-btn-updates").click()
+    at("/updates", "updates", "(the tab chosen on the page goes into the address)")
+    own.evaluate("p => cockpit.jump(p)", "/image-updates#/backups/history")
+    at("/backups/history", "backups", "#/backups/history again")
+
+
 def radar_generated():
     try:
         return json.loads(root("cat", "/var/lib/diun-radar/versions.json")).get("generated")
@@ -387,6 +412,7 @@ def main():
         shot(page, "rolled-back")
         close_dialog(page, frame)
         check_menu(page, "en", "after the rollback")
+        check_places(page, frame)
         ctx.close()
 
         # 6. Without administrative access (a user without sudo, German browser).

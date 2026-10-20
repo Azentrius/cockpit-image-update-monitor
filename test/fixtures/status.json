@@ -13,6 +13,7 @@
    "title": "Updates available",
    "value": "2",
    "detail": "ollama, prod-mcp-1",
+   "link": "#/updates/update",
    "checked_at": "2026-10-12T02:50:00Z",
    "stale_after": 86400
   },
@@ -21,6 +22,7 @@
    "state": "ok",
    "title": "Failed updates",
    "value": "0",
+   "link": "#/backups/history",
    "checked_at": "2026-10-12T02:50:00Z",
    "stale_after": 86400
   },
@@ -29,6 +31,7 @@
    "state": "ok",
    "title": "Version radar",
    "value": "< 1 h",
+   "link": "#/updates",
    "checked_at": "2026-10-12T02:17:34Z",
    "stale_after": 86400
   },
@@ -38,6 +41,7 @@
    "title": "Roll-out pending",
    "value": "3",
    "detail": "docuseal-db, glitchtip-postgres, plausible_db",
+   "link": "#/updates/rollout",
    "checked_at": "2026-10-12T02:50:00Z",
    "stale_after": 86400
   },
@@ -47,6 +51,7 @@
    "title": "New versions",
    "value": "17",
    "detail": "actual-ai, actual_server, calcom-db, diun-socket-proxy, docuseal +12",
+   "link": "#/updates/new-versions",
    "checked_at": "2026-10-12T02:17:34Z",
    "stale_after": 86400
   }

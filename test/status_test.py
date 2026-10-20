@@ -407,6 +407,7 @@ check("overall state by the contract",
 # ------------------------------------------------------- the contract's shape
 ID_RE = re.compile(r"^[a-z0-9-]{1,40}$")
 ISO_RE = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+LINK_RE = re.compile(r"^#/[A-Za-z0-9/_-]{0,80}$")      # the Status Board's rule (LINK_RE in its src/lib/status.js)
 STATES = {"none", "ok", "info", "warning", "danger"}
 
 
@@ -423,6 +424,7 @@ def shape(doc):
         if not ID_RE.match(it.get("id", "")) or it.get("state") not in STATES or not it.get("title") \
                 or not ISO_RE.match(it.get("checked_at") or "") or not isinstance(it.get("stale_after"), int) \
                 or not all(isinstance(it[k], str) for k in ("value", "detail") if k in it) \
+                or ("link" in it and not (isinstance(it["link"], str) and LINK_RE.match(it["link"]))) \
                 or set(it) - {"id", "state", "title", "value", "detail", "link", "checked_at", "stale_after"}:
             bad.append(it)
     return bad
@@ -431,6 +433,13 @@ def shape(doc):
 check("every document has the contract's shape (schema 1)",
       [shape(S.document(f, lang, NOW, VERSION)) for f in (facts(), busy, facts(found=False, events=False))
        for lang in ("en", "de")], [[]] * 6)
+check("every item links its place on the page, in every state and language (test/places.js follows them)",
+      sorted({(it["id"], it.get("link")) for f in (facts(), busy, facts(found=False, events=False))
+              for lang in ("en", "de") for it in S.document(f, lang, NOW, VERSION)["items"]}),
+      [("failed", "#/backups/history"), ("new-versions", "#/updates/new-versions"), ("radar", "#/updates"),
+       ("rollout", "#/updates/rollout"), ("updates", "#/updates/update")])
+check("a link the Status Board would not take is caught", shape({**en, "items": [dict(en["items"][0], link="/x")]}) != [],
+      True)
 check("the version is the page's", en["version"], VERSION)
 GERMAN_RE = re.compile(r"[äöüÄÖÜß]|\b(Sie|Keine|Neue|Versionen|Fehlgeschlagene?|auszurollen|ausstehend|abgebrochen"
                        r"|Std|Tage?|Daten|nicht|noch|seinen?|Lauf|Zeitpunkt|Statusdatei)\b")

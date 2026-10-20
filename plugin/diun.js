@@ -40,7 +40,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.22.0";
+    const VERSION = "0.23.0";
     const LIB = "/usr/lib/cockpit-image-updates/";
     const EVENTS_PATH = "/var/lib/diun/events.jsonl";
     const DISMISSED_PATH = "/var/lib/diun/dismissed.json";
@@ -753,6 +753,7 @@
             $("dm-empty-title").textContent = t(fromEvents ? "empty.eventsTitle" : "empty.title");
             $("dm-empty-body").textContent = t(fromEvents ? "empty.eventsBody" : "empty.body");
             $("dm-empty").hidden = false;
+            scrollToPlace();
             return;
         }
         $("dm-empty").hidden = true;
@@ -761,6 +762,7 @@
 
         built.forEach((b) => {
             const tr = document.createElement("tr");
+            tr.dataset.kind = b.kind;
             tr.innerHTML = b.html;
             rows.appendChild(tr);
         });
@@ -775,6 +777,7 @@
         rows.querySelectorAll("button[data-retag]").forEach((btn) => {
             btn.addEventListener("click", () => startRetag(btn.dataset.retag, btn.dataset.tag || ""));
         });
+        scrollToPlace();
     }
 
     // --- Requirements (Docker, Diun, skopeo, radar) -------------------------
@@ -1650,6 +1653,7 @@
                 onDone: (o) => { if (o.ok) { dlg.result(t("del.ok"), true); return true; } return false; },
             }));
         });
+        scrollToPlace();
     }
 
     // --- Tabs ----------------------------------------------------------------
@@ -1683,7 +1687,64 @@
         else if (ev.key === "End") next = all[all.length - 1];
         if (!next) return;
         ev.preventDefault();
-        showTab(next.dataset.tab, true);
+        chooseTab(next.dataset.tab, true);
+    }
+
+    // A tab chosen on the page goes into the location as well (unless it is
+    // there already), so that a later link to the place shown before is a
+    // change of the location again.
+    function chooseTab(name, focus) {
+        showTab(name, focus);
+        if (locationPath()[0] !== name && cockpit.location && typeof cockpit.location.go === "function") {
+            cockpit.location.go([name]);
+        }
+    }
+
+    // --- Places: where the Status Board's links lead ------------------------
+    // The add-on's status links each item to a place on this page (LINKS in
+    // diunstatus.py): a tab, then a part of it.
+    //   #/updates                                    the tab (the radar's item)
+    //   #/updates/update, …/rollout, …/new-versions  its first row with that status
+    //   #/backups/history                            the update history
+    // Cockpit keeps a loaded page and, when the board jumps to it again, only
+    // changes its location (locationchanged). So every location shows its tab
+    // at once and scrolls to its part once, when the data is there and the page
+    // is shown. No place: the first tab; a path that is no place changes nothing.
+    const PLACES = { updates: { update: "update", rollout: "pulled", "new-versions": "newver" },
+                     backups: { history: "history" } };
+    const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+    let place = null;           // the part still to scroll to: {tab, part}
+
+    function locationPath() {
+        const path = cockpit.location && cockpit.location.path;
+        return Array.isArray(path) ? path : [];
+    }
+
+    function followLocation() {
+        const [tab, part] = locationPath();
+        if (tab === undefined) {
+            place = null;
+            showTab("updates", false);
+            return;
+        }
+        if (!own(PLACES, tab)) return;
+        showTab(tab, false);
+        place = own(PLACES[tab], part) ? { tab, part: PLACES[tab][part] } : null;
+        scrollToPlace();
+    }
+
+    function scrollToPlace() {
+        if (!place || cockpit.hidden) return;
+        let target;
+        if (place.tab === "updates") {
+            if (!lastRender) return;                // the rows are not there yet
+            target = $("dm-rows").querySelector(`tr[data-kind="${place.part}"]`);
+        } else {
+            if (!backups && !backupsError) return;  // the history is not there yet
+            target = backups ? $("dm-ops-title").closest(".az-card") : $("dm-bk-error");
+        }
+        place = null;
+        if (target && typeof target.scrollIntoView === "function") target.scrollIntoView({ block: "start" });
     }
 
     // --- State -------------------------------------------------------------
@@ -1809,8 +1870,14 @@
     $("dm-refresh").addEventListener("click", () => safeLoad());
     $("dm-radar").addEventListener("click", runRadar);
     $("dm-cleanup-btn").addEventListener("click", startCleanup);
-    tabButtons().forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab, false)));
+    tabButtons().forEach((b) => b.addEventListener("click", () => chooseTab(b.dataset.tab, false)));
     document.querySelector(".az-tabs").addEventListener("keydown", onTabKey);
+    // cockpit.js has both events; the tests' stand-ins for it may leave them out.
+    if (typeof cockpit.addEventListener === "function") {
+        cockpit.addEventListener("locationchanged", followLocation);
+        cockpit.addEventListener("visibilitychange", scrollToPlace);
+    }
+    followLocation();
     $("dm-dialog-confirm").addEventListener("click", () => {
         if (!dlg.running && dlg.onConfirm) dlg.onConfirm();
     });

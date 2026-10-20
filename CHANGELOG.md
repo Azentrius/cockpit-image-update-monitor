@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.23.0 – 2026-10-20
+
+A click on a tile of the Status Board opens the page where the finding is: the tab, and there the
+first row of that kind. The menu icon warns as well when the radar reached no registry.
+
+**Upgrading:** nothing to do. The next radar run or update writes `status.json`; `status` gives the
+links at once.
+
+- **Links for the Status Board.** Every item of `diun-update.py status` now carries a `link` to its
+  place on the page: “Updates available” `#/updates/update`, “Roll-out pending” `#/updates/rollout`,
+  “New versions” `#/updates/new-versions` (the Updates tab, scrolled to the first row with that
+  status), “Failed updates” `#/backups/history` (the update history on the Backups tab) and the
+  radar `#/updates`. The tile of the Status Board goes to the link of its most important item.
+- **The page follows its location.** Cockpit keeps a page that is loaded and, when the Status Board
+  jumps to it again, only changes its location. The page now listens to `locationchanged`: every new
+  location shows its tab at once and scrolls to its row once the rows are there and the page is
+  shown (also when Cockpit loaded it hidden after the login). A tab chosen on the page goes into the
+  address too, so the link to the place shown before leads there again. Without a place the page
+  shows the Updates tab as before; a path that is no place changes nothing.
+- **Fix: the menu icon and “no registry reached”.** 0.22.0 gave the Status Board the warning
+  “Version radar reached no registry”, but the icon in Cockpit's menu did not read the mark in
+  `status.json` and showed no warning for it. It now does, with the same text as the status.
+- **Tests.** `test/places.js` (new): every place opened directly and while the page stays loaded,
+  a tab chosen on the page and the link back, a reload that scrolls nowhere, no place, unknown paths,
+  no row of a status, the page loaded hidden (the location before and after the shell's hint), and
+  every link of `test/fixtures/status.json` against the Status Board's rule and the rows its item
+  counts. `test/status_test.py`: the link of every item in every state and language, and a link the
+  board would not take. `test/menu-status.js`: a radar run that reached no registry, also outdated
+  and next to a failed update, against `diunstatus.py`. The Cockpit job in CI jumps with
+  `cockpit.jump` into the loaded page (the tab, no reload) and back after a tab was chosen on it.
+
 ## 0.22.0 – 2026-10-20
 
 A radar run that reaches no registry at all tries once more and then says so, an install no longer
