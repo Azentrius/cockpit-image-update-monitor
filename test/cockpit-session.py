@@ -386,14 +386,27 @@ def main():
         # After an install the package starts the radar two minutes later, by a timer: the same apt
         # run can restart the resolver or the network (build-host, 2026-10-20). It no longer
         # restarts the running radar timer either, which started the radar at once (OnBootSec=).
+        # The radar timer starts runs of its own, too: 5 minutes after the boot (OnBootSec=; this
+        # runner booted minutes ago, and once that run began in the very second of the check) and
+        # on its calendar. Wait until neither is due and no run is going, so that a run right
+        # after configure can only come from configure.
+        def radar_quiet():
+            up = float(root("cat", "/proc/uptime").split()[0])
+            nxt = root("systemctl", "show", "-P", "NextElapseUSecRealtime", "diun-radar.timer", check=False)
+            due = root("date", "-d", nxt, "+%s", check=False) if nxt and nxt != "n/a" else ""
+            idle = root("systemctl", "is-active", "diun-radar.service", check=False) not in ("activating", "active")
+            return idle and up > 5 * 60 + 20 and (not due.isdigit() or int(due) - time.time() > 120)
+        quiet = poll(page, radar_quiet, 420)
+        uptime = root("cat", "/proc/uptime").split()[0]
         root("/var/lib/dpkg/info/cockpit-image-update-monitor.postinst", "configure", check=False)
         later = root("systemctl", "is-active", "diun-radar-after-install.timer", check=False)
         busy = root("systemctl", "is-active", "diun-radar.service", check=False)
         timer = root("systemctl", "is-active", "diun-radar.timer", check=False)
         root("systemctl", "stop", "diun-radar-after-install.timer", check=False)
         note("after an install: the radar starts two minutes later by a timer, not at once, its timer runs on",
-             later == "active" and busy not in ("activating", "active") and timer == "active",
-             f"after-install timer {later}, radar {busy}, radar timer {timer}")
+             quiet and later == "active" and busy not in ("activating", "active") and timer == "active",
+             f"after-install timer {later}, radar {busy}, radar timer {timer}; "
+             f"no timer run due or going before ({quiet}), up {uptime} s")
         check_menu(page, "en", "after the radar runs")
         shot(page, "radar")
 
