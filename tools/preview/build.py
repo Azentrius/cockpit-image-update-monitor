@@ -31,6 +31,7 @@ def main():
         "files": {
             "/var/lib/diun/events.jsonl": open(os.path.join(FIX, "events.jsonl")).read(),
             "/var/lib/diun-radar/versions.json": json.load(open(os.path.join(FIX, "versions2.json"))),
+            "/var/lib/diun-radar/releases.json": json.load(open(os.path.join(FIX, "releases.json"))),
             "/var/lib/diun/dismissed.json": None,
             "/etc/hostname": "docker-host",
         },

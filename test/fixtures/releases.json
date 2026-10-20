@@ -1,0 +1,39 @@
+{
+ "generated": "2026-10-12T02:18:10Z",
+ "repos": {
+  "ollama/ollama": {
+   "status": "ok",
+   "checked": "2026-10-12T02:18:05Z",
+   "tried": "2026-10-12T02:18:05Z",
+   "floor": "0.30.11",
+   "top": "0.40.4",
+   "more": false,
+   "releases": [
+    {"tag": "v0.40.4", "version": "0.40.4", "published": "2026-10-11T20:00:00Z", "url": "https://github.com/ollama/ollama/releases/tag/v0.40.4", "body": "Newer than the target: not shown."},
+    {"tag": "v0.40.3", "version": "0.40.3", "published": "2026-10-10T18:00:00Z", "url": "https://github.com/ollama/ollama/releases/tag/v0.40.3", "body": "## What's Changed\r\n* Fix a crash when loading [large models](https://github.com/ollama/ollama/pull/1)\r\n* `Vec<T>` and <name> stay as text\r\n\r\n\r\n\r\n![screenshot](https://example.com/s.png)\r\n<img src=\"https://example.com/x.png\" onerror=\"alert(1)\">\r\n<script>alert(1)</script>\r\nLine<br>break"},
+    {"tag": "v0.40.0", "version": "0.40.0", "name": "New engine", "published": "2026-10-01T09:00:00Z", "url": "https://github.com/ollama/ollama/releases/tag/v0.40.0", "body": "### BREAKING CHANGES\n- The API moved to /api/v2. A migration of stored models runs on the first start.\n<!-- a comment for the maintainers -->"},
+    {"tag": "v0.31.0", "version": "0.31.0", "published": "2026-09-01T09:00:00Z", "url": "https://example.com/not-github", "body": ""},
+    {"tag": "v0.30.12", "version": "0.30.12", "published": "2026-08-20T09:00:00Z", "url": "https://github.com/ollama/ollama/releases/tag/v0.30.12", "body": "The old --gpu flag is deprecated.", "cut": true},
+    {"tag": "v0.30.11", "version": "0.30.11", "published": "2026-08-01T09:00:00Z", "url": "https://github.com/ollama/ollama/releases/tag/v0.30.11", "body": "Installed already: not shown."}
+   ]
+  },
+  "plausible/analytics": {
+   "status": "ok",
+   "checked": "2026-10-12T02:18:07Z",
+   "tried": "2026-10-12T02:18:07Z",
+   "floor": "2.1.4",
+   "top": "3.2.1",
+   "more": true,
+   "releases": [
+    {"tag": "v3.2.1", "version": "3.2.1", "published": "2026-10-05T09:00:00Z", "url": "https://github.com/plausible/analytics/releases/tag/v3.2.1", "body": "Fixes."},
+    {"tag": "v3.0.0", "version": "3.0.0", "published": "2026-06-01T09:00:00Z", "url": "https://github.com/plausible/analytics/releases/tag/v3.0.0", "body": "Requires a database migration."},
+    {"tag": "v2.1.6", "version": "2.1.6", "published": "2026-03-01T09:00:00Z", "url": "https://github.com/plausible/analytics/releases/tag/v2.1.6", "body": "Security fix."}
+   ]
+  },
+  "docusealco/docuseal": {
+   "status": "limited",
+   "tried": "2026-10-12T02:18:08Z",
+   "error": "HTTP 403"
+  }
+ }
+}

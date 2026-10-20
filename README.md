@@ -272,6 +272,17 @@ If the project lies in a git repository, the dialog says so; the add-on never co
 
 ---
 
+## Release notes (stage 3)
+
+The update dialog and the preview of a version change list the releases between the installed and the target version, closed below the plan: “Release notes 1.6.74 → 1.8.8: 3 releases”, each with its date and its text. When a text mentions *breaking*, *migration* or *deprecated*, a warning label says so before you open it, and the words are marked in the text.
+
+- **Where from:** the releases on GitHub. The radar on the server fetches them into `releases.json` next to `versions.json`; the browser never asks GitHub. The image's repository comes from a short list of known images (`nextcloud` → nextcloud/server, `redis` → redis/redis, `ollama/ollama` …), from its label `org.opencontainers.image.source`, or for `ghcr.io/<owner>/<name>` from that name.
+- **GitHub's limit** without a login is 60 requests per hour: the radar asks only for images with something newer, one request each, at most 20 per run, and keeps an answer for 24 hours (asked sooner when a newer version turns up). On the limit it keeps the last answer and tries again on a later run.
+- **Text only:** Markdown shows as its text; images and HTML are left out, links show as their text, and each release links to its page on GitHub.
+- **When there are none,** the dialog says why: the image names no source, the repository has no releases, they are not fetched yet, GitHub's limit, or no release between the two versions. Images like postgres publish their release notes elsewhere.
+
+---
+
 ## Backups & dumps
 
 | What | Where | Rights |
@@ -369,6 +380,7 @@ flowchart LR
         RAD["diun-versions.py<br/>timer every 6 h"]
     end
     VJ[("versions.json<br/>/var/lib/diun-radar")]
+    RN[("releases.json<br/>/var/lib/diun-radar")]
     ST[("status.json<br/>/var/lib/diun-radar")]
     EV[("events.jsonl<br/>/var/lib/diun")]
     BK[("/var/backups/image-updates")]
@@ -378,11 +390,13 @@ flowchart LR
         SP["docker-socket-proxy<br/>read-only"]
     end
     REG[("Registries<br/>Docker Hub, ghcr.io")]
+    GH[("GitHub API<br/>release notes")]
 
     P -->|"cockpit.spawn as root"| INV
     P -->|"cockpit.spawn as root"| UPD
     P -->|"cockpit.spawn as root"| DEP
     P -->|"cockpit.file read"| VJ
+    P -->|"cockpit.file read, in a dialog"| RN
     P -->|"cockpit.file read"| EV
     P -->|"cockpit.file watch, menu icon"| ST
     INV --> DK
@@ -391,6 +405,8 @@ flowchart LR
     RAD --> DK
     RAD --> REG
     RAD --> VJ
+    RAD --> GH
+    RAD --> RN
     RAD --> ST
     UPD --> ST
     DI --> SP
@@ -403,10 +419,11 @@ flowchart LR
 |---|---|---|
 | `plugin/` | `/usr/share/cockpit/image-updates/` | user interface (vanilla JS, no build step), EN/DE |
 | `lib/diun-inventory.py` | `/usr/lib/cockpit-image-updates/` | running containers: tag, version (tag/variable), digest, compose mapping, “pulled, not rolled out” |
-| `lib/diun-versions.py` | `/usr/lib/cockpit-image-updates/` | version radar: installed version (label/digest), newer versions → `versions.json`, then `status.json` |
+| `lib/diun-versions.py` | `/usr/lib/cockpit-image-updates/` | version radar: installed version (label/digest), newer versions → `versions.json`, then `status.json` and the release notes → `releases.json` |
 | `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run, `status` for the Status Board |
 | `lib/diun-deps.sh` | `/usr/lib/cockpit-image-updates/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
 | `lib/diunlib.py` | `/usr/lib/cockpit-image-updates/` | shared functions (tag scheme, version variables, reach) |
+| `lib/diunnotes.py` | `/usr/lib/cockpit-image-updates/` | release notes: an image's repository on GitHub, its releases since the installed version, GitHub's limit |
 | `lib/diunproc.py` | `/usr/lib/cockpit-image-updates/` | docker commands and dumps with a time limit (process group stopped, never left behind), signals turned into a cleanup |
 | `lib/diunstatus.py` | `/usr/lib/cockpit-image-updates/` | the status for the Status Board: the overview's rules for the rows, failed updates, the radar's age; writes and reads `status.json` |
 | `systemd/diun-radar.service/.timer` | `/usr/lib/systemd/system/` | come with the package, off until `diun-deps.sh install radar` enables the timer; runs every 6 h (`00/6:17`), hardened (`ProtectSystem=strict` …) |
@@ -430,7 +447,8 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 - **After the login.** Cockpit loads the page hidden as soon as you log in, so that its menu entry can show the status (`preload`, as for Cockpit's own Software updates page). Until the page is opened it reads only `status.json` (`superuser: "try"`) and runs no helper; the inventory, the Diun log and the radar file load when you open it.
 - **Diun without the Docker socket.** Only the `docker-socket-proxy` sees `/var/run/docker.sock` (read-only). It exposes a filtered, read-only API (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) and publishes no port.
 - **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords are read only inside the database container from its environment, never stored or logged.
-- **No network from the browser.** No CDNs and no external fonts (the fonts ship with the add-on); Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries.
+- **No network from the browser.** No CDNs and no external fonts (the fonts ship with the add-on); Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries and, for the release notes, GitHub's API (without a login, nothing sent but the repository's name).
+- **Release notes are text.** The page shows what GitHub's releases say as text: no HTML or image from them reaches the page, and links go only to github.com.
 - **Concurrency.** `flock` for inventory and update (exit 75 for “already running”). The plugin never starts two loads in parallel.
 - **Overwrite nothing.** `diun-deps.sh` stops if target files or a Diun container exist already. The package replaces only its own files.
 
@@ -713,6 +731,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “not in a registry”, like images built on the server.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Database majors** are manual (dump, new instance, restore), see stage 5.
+- **Release notes** come only from releases on GitHub, for images whose repository is known (list, label, ghcr.io). Projects that publish them elsewhere (postgres, GitLab) get a note instead. Without a login GitHub allows 60 requests per hour per address; the radar shares that with anything else on the server.
 - **Tag changes** the add-on cannot make safely (YAML anchors, `include:`, a variable used elsewhere or built from several) stay manual; the dialog names the reason.
 - **Floating tags:** what the tag points to is resolved through the registry only when a version tag has the same digest. Builds without a version tag (e.g. from the main branch) have no version number; then the plan warns that the size of the jump is unknown. The overview calls such a build up to date when the container runs it and the registry has no release tags, or (on Docker Hub) when it was pushed after the newest release.
 - **Dependent services are not restarted:** an update recreates only the services that use the image. A database or cache restarts under the running app, which has to reconnect by itself; the add-on watches it for about 15 seconds, not longer.
@@ -730,7 +749,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
 | 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **done** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds, what is updated together, dependencies; 0.10.0: floating tags resolved; 0.23.0: update in two steps) |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | **done** (0.11.0) |
-| 3 | Release notes / changelog links per version, hints on breaking changes | idea |
+| 3 | Release notes / changelog links per version, hints on breaking changes | **done** (0.23.0) |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
 | 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | idea |
 | 6 | Distribution: packages and Cockpit's Applications page, private registries, Podman, several hosts | **in progress** (0.12.0: packages, Applications page) |

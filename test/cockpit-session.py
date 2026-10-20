@@ -374,6 +374,12 @@ def main():
         poll(page, lambda: frame.locator("#dm-radar").is_enabled(), 120)
         note("Run radar now: a new radar run, the button usable again",
              bool(second) and frame.locator("#dm-radar").is_enabled(), f"{first} -> {second}")
+        # The release notes for the dialogs: written by the hardened unit next to versions.json.
+        found = json.loads(root("cat", "/var/lib/diun-radar/releases.json", check=False) or "null")
+        owner = root("stat", "-c", "%a %U", "/var/lib/diun-radar/releases.json", check=False)
+        note("the radar wrote releases.json next to versions.json, readable for the page",
+             isinstance(found, dict) and isinstance(found.get("repos"), dict) and owner == "644 root",
+             f"{owner}; {len((found or {}).get('repos') or {})} sources")
         runs = root("journalctl", "-u", "diun-radar.service", "-o", "cat", "--no-pager", check=False)
         note("journal: the radar runs finished", runs.count("Finished") >= 2 or runs.count("Deactivated successfully") >= 2,
              f"{runs.count('Finished')} finished")

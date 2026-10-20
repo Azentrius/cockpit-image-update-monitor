@@ -219,6 +219,31 @@ dialog.dm-dialog::backdrop { background: var(--backdrop); }
 }
 .dm-list { list-style: none; margin: 0; padding: 0; max-block-size: 14rem; overflow-y: auto; font-size: 13px; }
 .dm-list li { padding: 2px 0; overflow-wrap: anywhere; }
+/* Release notes in the plan (stage 3): closed lists, one release each, its text
+   as text in a scrolling box; the words that call for care marked. */
+.dm-notes-slot:empty { display: none; }
+.dm-notes > summary, .dm-release > summary { cursor: pointer; overflow-wrap: anywhere; }
+.dm-notes > summary { font-size: 14px; font-weight: 600; }
+.dm-notes > summary .az-label { font-weight: 400; }
+.dm-notes[open] > summary { margin-block-end: var(--space-sm); }
+.dm-notes-list { display: flex; flex-direction: column; gap: var(--space-xs); margin-block-end: var(--space-sm); }
+.dm-release { padding: var(--space-xs) 0; border-block-start: 1px solid var(--line); font-size: 13px; }
+.dm-release-tag { font-family: var(--az-font-code); font-size: 12px; }
+.dm-release-body {
+    max-block-size: 16rem;
+    overflow-x: hidden;     /* the text wraps (pre-wrap, anywhere): no sideways bar */
+    overflow-y: auto;
+    margin-block: var(--space-xs);
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-small);
+    background: var(--bg-page);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.dm-flag { padding: 0 2px; border-radius: var(--radius-tiny); background: var(--tint-warning); color: var(--on-tint-warning); }
+.dm-release-link { font-size: 13px; }
 
 /* ---------- narrow screens (rows are blocks there, see az-table--stack) ---------- */
 

@@ -45,6 +45,11 @@ Database images are flagged ("db": true): the plugin shows their major
 updates as grey info, because a DB major means a migration (dump/restore,
 pg_upgrade), never a plain image swap.
 
+Release notes (diunnotes): "source" names an image's repository on GitHub;
+for the images with something newer the run fetches the releases since the
+installed version into releases.json next to the output file, for the update
+and version change dialogs.
+
 An image no registry shows gets the status "unlisted" instead of "error": it
 was built or tagged on this server (hibiscus-server:2.12.4 means
 docker.io/library/hibiscus-server, which does not exist), or it is private
@@ -60,9 +65,10 @@ Usage:
                                       (used by diun-radar.service, every 6h),
                                       then status.json next to it (diunstatus:
                                       the add-on's status for the Status Board)
+                                      and releases.json (diunnotes)
 
-Read-only towards Docker and the registries; the only writes are --output
-and its status.json.
+Read-only towards Docker, the registries and GitHub; the only writes are
+--output, its status.json and its releases.json.
 """
 
 import argparse
@@ -81,6 +87,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from diunlib import (PLAIN_RE, core, local_version, norm, nums_of,  # noqa: E402
                      qualify, reachable, scheme, split_ref, tag_digits)
+import diunnotes  # noqa: E402
 import diunstatus  # noqa: E402
 
 DB_RE = re.compile(r"(^|/)(postgres|postgis|pgvector|timescaledb|mariadb|mysql|mongo|"
@@ -646,6 +653,12 @@ def analyse(item, cache, now, tag_cache=None):
     (repo, tag), group = item
     rec = {"image": repo, "tag": tag, "containers": sorted(group["containers"]),
            "db": bool(DB_RE.search(norm(repo).lower())), "reach": reachable(tag)}
+    try:
+        source = diunnotes.source_of(repo, list(group["images"].values()))
+    except Exception:  # a label it cannot read: no source, the record as before
+        source = None
+    if source:
+        rec["source"] = source
     tags, error, unlisted = [], None, False
     try:
         tags = list_tags(repo)
@@ -894,6 +907,15 @@ def main():
             print(f"status: {diunstatus.refresh(status, versions=doc)['summary']} -> {status}")
         except Exception as e:
             print(f"status not written: {e}", file=sys.stderr)
+        # The release notes for the dialogs, after versions.json (GitHub may
+        # take a while); a problem there never fails the run either.
+        notes = os.path.join(os.path.dirname(os.path.abspath(args.output)), "releases.json")
+        try:
+            found = diunnotes.refresh(recs, diunnotes.load(notes), now)
+            write_atomic(notes, found)
+            print(f"release notes: {diunnotes.summary(found)} -> {notes}")
+        except Exception as e:
+            print(f"release notes not written: {e}", file=sys.stderr)
     elif args.table:
         table(recs)
     else:
