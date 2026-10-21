@@ -1959,7 +1959,7 @@ PGDATA_DEFAULT = "/var/lib/postgresql/data"
 PG_NEW_LAYOUT = 18          # from 18 on the image keeps its data in /var/lib/postgresql/<major>/docker
 READY_TIMEOUT = 300         # seconds for the new major to accept connections over TCP
 ANON_VOLUME_RE = re.compile(r"^[0-9a-f]{64}$")
-KEPT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,250}[.-]pg\d{1,3}-\d{8}-\d{6}$")   # move_aside's names
+KEPT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,250}[.-]pg\d{1,3}-\d{8}-\d{6}$")   # make_place's names
 # Every database, every table (also partitioned ones), counted exactly:
 # "database|schema.table|rows" per line.
 PG_COUNTS = r"""U="${POSTGRES_USER:-postgres}"
@@ -2152,25 +2152,38 @@ def cmd_major(name, new_tag, expect):
     return migrate(name, plan, ctx)
 
 
+# Moving the data of a major: every entry of a directory into another on the
+# same filesystem, by renames (nothing is copied). Each move is in the history
+# before its first entry moves and marked done after its last ("move":
+# {"step", "from", "to"}), with the signals held in between (held), so that
+# the move, the places and the history always agree. Whatever ends the helper
+# then, SIGKILL too, every entry is in one of the two places and the history
+# says which way it was going: a rollback finishes or reverses an open move
+# (swap_back). Steps: "aside" (the major: the old data into its place),
+# "new-aside" and "old-back" (the rollback: the new major's data into a place
+# of its own, then the old data back). Nothing here deletes data: a place is
+# removed only while it is empty (drop_empty).
+MOVE_STEPS = ("aside", "new-aside", "old-back")
+
+
 def move_entries(src, dst):
-    """Move everything in directory src into directory dst (renames). When one
-    entry does not move, those that did go back, and the error stands."""
-    moved = []
-    try:
-        for e in sorted(os.listdir(src)):
-            os.rename(os.path.join(src, e), os.path.join(dst, e))
-            moved.append(e)
-    except OSError:
-        for e in reversed(moved):
-            os.rename(os.path.join(dst, e), os.path.join(src, e))
-        raise
+    """Move every entry of directory src into directory dst (renames). Stops
+    before the first rename when dst has a name src has too (a rename would
+    replace it). Raises OSError at the first entry that does not move; the
+    ones before it have moved."""
+    names = sorted(os.listdir(src))
+    clash = sorted(set(names) & set(os.listdir(dst)))
+    if clash:
+        raise FileExistsError(f"{dst} has {', '.join(clash[:5])} as {src} has")
+    for e in names:
+        os.rename(os.path.join(src, e), os.path.join(dst, e))
 
 
-def move_aside(data, suffix, op_id):
-    """Move the data in a mount (data_mount) into a place of its own:
-    {"type": "volume", "name", "path"} for a volume, {"type": "bind", "path"}
-    for a directory. Raises OSError (nothing moved) unless it is the same
-    filesystem."""
+def make_place(data, suffix, op_id):
+    """An empty place for the data of a mount (data_mount), on its filesystem:
+    {"type": "volume", "name", "path"} for a volume (labelled with the
+    operation), {"type": "bind", "path"} for a directory next to it. Raises
+    OSError (the place removed again) unless it is on the data's filesystem."""
     src = data["source"]
     if data["type"] == "volume":
         name = f"{data['name']}-{suffix}"
@@ -2184,22 +2197,150 @@ def move_aside(data, suffix, op_id):
         os.chown(dst, st.st_uid, st.st_gid)
         kept = {"type": "bind", "path": dst}
     if os.stat(src).st_dev != os.stat(dst).st_dev:
-        drop_kept(kept)
+        drop_empty(kept)
         raise OSError(f"{dst} is not on the filesystem of {src}")
-    try:
-        move_entries(src, dst)      # what moved goes back if one entry does not: nothing is split
-    except OSError:
-        drop_kept(kept)
-        raise
     return kept
 
 
+def drop_empty(kept):
+    """Remove a place make_place made, only while it is empty: one with data
+    in it stays (False)."""
+    try:
+        if os.listdir(kept["path"]):
+            return False
+    except FileNotFoundError:
+        pass
+    if kept["type"] == "volume":
+        run(["docker", "volume", "rm", kept["name"]])
+    elif os.path.isdir(kept["path"]):
+        os.rmdir(kept["path"])
+    return True
+
+
+def drop_quietly(kept):
+    """drop_empty where an empty place left behind is only untidy."""
+    try:
+        drop_empty(kept)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        pass
+
+
 def drop_kept(kept):
-    """Remove a place move_aside made (its data with it)."""
+    """Release a place with its data (delete-olddata, on request only)."""
     if kept["type"] == "volume":
         run(["docker", "volume", "rm", kept["name"]])
     elif os.path.isdir(kept["path"]):
         shutil.rmtree(kept["path"])
+
+
+def split_error(e, e2, src, dst):
+    return RuntimeError(pick(
+        f"Die Daten ließen sich nicht verschieben ({e}) und nicht zurücklegen ({e2}). Sie liegen teils in {src}, "
+        f"teils in {dst}, wie der Verlauf es sagt; nichts ist gelöscht. Der Rollback legt sie zusammen.",
+        f"The data could not be moved ({e}) nor put back ({e2}). It lies partly in {src}, partly in {dst}, as "
+        f"the history says; nothing is deleted. The rollback puts it together."))
+
+
+def set_aside(op, suffix):
+    """Step 6 of a major, with the database stopped: its data (the old
+    major's) into a place of its own. The place, the entries and the move are
+    in the history before the first entry moves, the end of the move once the
+    last has; signals wait until both are done. A rename that fails puts back
+    what moved and removes the empty place; if putting back fails too,
+    everything stays where it is and in the history (the rollback puts the
+    data together)."""
+    data = op["data"]
+    src = data["source"]
+    with held():
+        kept = make_place(data, suffix, op["id"])
+        op.update(old_data=kept, data_entries=sorted(os.listdir(src)),
+                  move={"step": "aside", "from": src, "to": kept["path"]})
+        record(op, log=op["id"] + ".log")
+        try:
+            move_entries(src, kept["path"])
+        except OSError as e:
+            try:
+                move_entries(kept["path"], src)
+            except OSError as e2:
+                raise split_error(e, e2, src, kept["path"]) from e
+            drop_quietly(kept)
+            op.update(old_data=None, move=None)
+            record(op, log=op["id"] + ".log")
+            raise
+        op["move"] = None
+        record(op, log=op["id"] + ".log")
+    return kept
+
+
+def pg_version_of(op):
+    """What PG_VERSION of the database's data says now (None if unreadable)."""
+    path = os.path.join(op["data"]["source"], op.get("pg_version_file") or "PG_VERSION")
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def data_restored(op):
+    """None when the data of the database is the old major's again: the
+    entries it had when the major set it aside, and PG_VERSION of the old
+    major. Otherwise why not; a rollback starts no database on anything else
+    (on an empty directory it would set up a new, empty cluster)."""
+    src = op["data"]["source"]
+    try:
+        names = set(os.listdir(src))
+    except OSError as e:
+        return pick(f"{src} ist nicht lesbar ({e})", f"{src} cannot be read ({e})")
+    want = op.get("data_entries")
+    if want is not None and names != set(want):
+        lack, extra = ", ".join(sorted(set(want) - names)) or "–", ", ".join(sorted(names - set(want))) or "–"
+        return pick(f"In {src} fehlt {lack}, dazu kam {extra}: nicht die Daten, die der Major beiseitegelegt hat",
+                    f"{src} lacks {lack} and has {extra} too: not the data the major set aside")
+    if not names:
+        return pick(f"{src} ist leer (die Datenbank legte darin einen neuen, leeren Cluster an)",
+                    f"{src} is empty (the database would set up a new, empty cluster in it)")
+    path = os.path.join(src, op.get("pg_version_file") or "PG_VERSION")
+    if op.get("pg_version_file") or os.path.isfile(path):
+        v = pg_version_of(op)
+        if v != str(op.get("from_major")):
+            return pick(f"{path} nennt {v or 'nichts'} statt PostgreSQL {op.get('from_major')}",
+                        f"{path} says {v or 'nothing'} instead of PostgreSQL {op.get('from_major')}")
+    return None
+
+
+def unrecorded_place(op):
+    """Where a major of 0.23.0 to 0.24.0 may have moved the old data without
+    the history knowing (it recorded the place only after the move, so a
+    signal or a kill in between lost it): the place named after the
+    operation, as that version named it, with data in it. None if there is
+    none."""
+    data = op.get("data") or {}
+    if op.get("old_data") or op.get("move") or not op.get("from_major") or data.get("type") not in ("volume", "bind"):
+        return None
+    suffix = f"pg{op['from_major']}-{op['id'][:15]}"
+    if data["type"] == "volume":
+        name = f"{data.get('name')}-{suffix}"
+        try:
+            label = run(["docker", "volume", "inspect", "-f", '{{index .Labels "image-updates.op"}}', name],
+                        timeout=60).strip()
+            path = run(["docker", "volume", "inspect", "-f", "{{.Mountpoint}}", name], timeout=60).strip()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            return None
+        if label != op["id"]:
+            return None
+        place = {"type": "volume", "name": name, "path": path}
+    else:
+        place = {"type": "bind", "path": os.path.normpath(data["source"]) + "." + suffix}
+    try:
+        return place if kept_ok(place) and os.listdir(place["path"]) else None
+    except OSError:
+        return None
+
+
+def unclear(de, en):
+    return Abort(5, f"Unklarer Stand der Daten: {de} – nichts verschoben, die Datenbank startet nicht.",
+                 f"Unclear state of the data: {en} – nothing moved, the database does not start.")
 
 
 def kept_where(kept):
@@ -2277,7 +2418,12 @@ def migrate(name, plan, ctx):
     base = compose_cmd(ctx)
     old, new = mj["from_major"], mj["to_major"]
     with before_change():
-        old_id = inspect(name)["Image"]
+        c = inspect(name)
+        old_id = c["Image"]
+    # Where the old major's PG_VERSION lies in the mount: what a rollback checks
+    # before it starts the old major again (data_restored).
+    pg_version_file = os.path.normpath(os.path.join(
+        os.path.relpath(env_of(c).get("PGDATA") or PGDATA_DEFAULT, mj["data"]["destination"]), "PG_VERSION"))
     op = {"id": op_id, "ts": now_iso(), "kind": "dbmajor", "container": name, "project": project,
           "workdir": ctx["workdir"], "files": ctx["files"], "env_files": ctx["env_files"],
           "services": [service], "containers": [name], "image": ref, "old_id": old_id,
@@ -2285,6 +2431,7 @@ def migrate(name, plan, ctx):
           "to_image": new_ref, "from_tag": rt["from_tag"], "to_tag": rt["tag"],
           "changes": [{k: c[k] for k in ("file", "line", "old", "new")} for c in rt["changes"]],
           "from_major": old, "to_major": new, "data": mj["data"], "old_data": None, "stopped": [],
+          "pg_version_file": pg_version_file, "data_entries": None, "move": None,
           "rollback": None, "dumps": [], "status": "running", "pid": os.getpid()}
     say(f"Datenbank-Major {ref} → {new_ref} (PostgreSQL {old} → {new}) in Projekt {project}.",
         f"Database major {ref} to {new_ref} (PostgreSQL {old} to {new}) in project {project}.")
@@ -2338,6 +2485,12 @@ def migrate(name, plan, ctx):
         op["dumps"].append(dump_db(project, db, st))
         before = table_counts(name)
         say(f"Gezählt: {count_summary(before)}", f"Counted: {count_summary(before)}")
+        # The data the major moves must be this cluster: a rollback checks it by the same file.
+        if pg_version_of(op) != str(old):
+            raise Abort(5, f"{os.path.join(mj['data']['source'], pg_version_file)} nennt nicht PostgreSQL {old} – "
+                           f"nichts geändert.",
+                        f"{os.path.join(mj['data']['source'], pg_version_file)} does not say PostgreSQL {old} – "
+                        f"nothing changed.")
         change_files(op, ctx, rt, [service], st)
     except Interrupted as e:
         undo_early(op, base)
@@ -2352,8 +2505,7 @@ def migrate(name, plan, ctx):
     try:
         if stream(base + ["stop", service]) != 0:
             raise RuntimeError(pick("docker compose stop schlug fehl", "docker compose stop failed"))
-        op["old_data"] = move_aside(mj["data"], f"pg{old}-{st}", op_id)
-        record(op, log=op_id + ".log")
+        set_aside(op, f"pg{old}-{st}")
         say(f"Die Daten von PostgreSQL {old} liegen jetzt in {kept_where(op['old_data'])}; sie bleiben, bis sie "
             f"freigegeben werden.",
             f"The data of PostgreSQL {old} is now in {kept_where(op['old_data'])}; it stays until released.")
@@ -2422,34 +2574,87 @@ def migrate(name, plan, ctx):
 
 
 def swap_back(op, base):
-    """The rollback of a major, once the files are back: the database stopped,
-    the new major's data moved aside (kept until released), the old data moved
-    back to where it was. Returns where the new major's data is kept."""
-    kept = op.get("old_data")
-    # The services that wait for the database stop as well (the rollback starts them again).
-    if stream(base + ["stop", *(op.get("stopped") or []), *op["services"]]) != 0:
-        raise RuntimeError(pick("docker compose stop schlug fehl", "docker compose stop failed"))
-    new_kept = move_aside(op["data"], f"pg{op['to_major']}-{stamp()}", op["id"])
-    record({"id": op["id"], "new_data": new_kept, "old_data": kept})
-    try:
-        move_entries(kept["path"], op["data"]["source"])
-    except OSError:
-        # Back to where this rollback began (move_entries took back its part):
-        # the new major's data in place again; the rollback can run again.
-        move_entries(new_kept["path"], op["data"]["source"])
-        drop_kept(new_kept)
-        record({"id": op["id"], "new_data": None, "old_data": kept})
-        raise
-    try:
-        drop_kept(kept)
-    except (OSError, subprocess.CalledProcessError):
-        pass
-    record({"id": op["id"], "old_data": None})
-    say(f"Die Daten von PostgreSQL {op['from_major']} liegen wieder an ihrem Ort; die von PostgreSQL "
-        f"{op['to_major']} bleiben in {kept_where(new_kept)}, bis sie freigegeben werden.",
-        f"The data of PostgreSQL {op['from_major']} is back in its place; that of PostgreSQL {op['to_major']} stays "
-        f"in {kept_where(new_kept)} until released.")
-    return new_kept
+    """The rollback of a major, once the files are back: the data of the
+    database the old major's again, before anything starts it. With the old
+    data set aside (old_data) it stops the database and the services that wait
+    for it, then, each move in the history before it begins (see set_aside):
+      - a move aside the major left open (a signal, a kill, a failed undo):
+        the rest of the old data goes back; the new major never ran;
+      - otherwise the new major's data, if any, into a place of its own (kept
+        until released), then the old data back;
+      - a move an earlier rollback left open goes on where it stopped.
+    Then, and also when nothing had to move, the data must be the old
+    major's (data_restored), or the rollback fails with everything where it
+    is. A state that does not fit stops it before anything moves (exit 5).
+    Returns where the new major's data is kept, or None."""
+    src = op["data"]["source"]
+    found = unrecorded_place(op)
+    if found:
+        op.update(old_data=found, move={"step": "aside", "from": src, "to": found["path"]})
+        record({"id": op["id"], "old_data": found, "move": op["move"]})
+        say(f"Die alten Daten liegen in {kept_where(found)}, ohne dass der Verlauf es wusste (ein Lauf vor 0.24.1, "
+            f"beim Verschieben beendet); sie kommen zurück.",
+            f"The old data is in {kept_where(found)} without the history knowing (a run before 0.24.1 that ended "
+            f"while it moved the data); it goes back.")
+    kept, new_kept, mv = op.get("old_data"), op.get("new_data"), op.get("move")
+    step = (mv or {}).get("step")
+    if kept:
+        if mv and (step not in MOVE_STEPS or src not in (mv.get("from"), mv.get("to"))):
+            raise unclear(f"der Verlauf nennt eine Verschiebung, die nicht passt ({mv})",
+                          f"the history names a move that does not fit ({mv})")
+        if not os.path.isdir(kept["path"]) or not os.path.isdir(src):
+            raise unclear(f"{kept['path']} oder {src} fehlt", f"{kept['path']} or {src} is missing")
+        if step == "new-aside" and not (new_kept and os.path.isdir(new_kept.get("path") or "")):
+            raise unclear("der Ort für die Daten des neuen Majors fehlt", "the place for the new major's data is missing")
+        if step == "aside":
+            clash = sorted(set(os.listdir(kept["path"])) & set(os.listdir(src)))
+            if clash:
+                raise unclear(f"{src} und {kept['path']} haben beide {', '.join(clash[:5])}",
+                              f"{src} and {kept['path']} both have {', '.join(clash[:5])}")
+        # The services that wait for the database stop as well (the rollback starts them again).
+        if stream(base + ["stop", *(op.get("stopped") or []), *op["services"]]) != 0:
+            raise RuntimeError(pick("docker compose stop schlug fehl", "docker compose stop failed"))
+    with held():
+        if kept and step != "aside":
+            if step == "new-aside" or (step is None and os.listdir(src)):
+                if step != "new-aside":
+                    new_kept = make_place(op["data"], f"pg{op['to_major']}-{stamp()}", op["id"])
+                    op.update(new_data=new_kept, move={"step": "new-aside", "from": src, "to": new_kept["path"]})
+                    record({"id": op["id"], "new_data": new_kept, "move": op["move"]})
+                try:
+                    move_entries(src, new_kept["path"])
+                except OSError as e:
+                    # As it was before this rollback, if it can be: the new major's data in its place.
+                    try:
+                        move_entries(new_kept["path"], src)
+                    except OSError as e2:
+                        raise split_error(e, e2, src, new_kept["path"]) from e
+                    drop_quietly(new_kept)
+                    op.update(new_data=None, move=None)
+                    record({"id": op["id"], "new_data": None, "move": None})
+                    raise
+            op["move"] = {"step": "old-back", "from": kept["path"], "to": src}
+            record({"id": op["id"], "move": op["move"]})
+        if kept:
+            move_entries(kept["path"], src)
+        why = data_restored(op)
+        if why:
+            raise RuntimeError(pick(f"Die Daten sind nicht die alten: {why}. Die Datenbank startet nicht; alles bleibt, "
+                                    f"wo es ist.",
+                                    f"The data is not the old data: {why}. The database does not start; everything "
+                                    f"stays where it is."))
+        if kept:
+            drop_quietly(kept)
+            op.update(old_data=None, move=None)
+            record({"id": op["id"], "old_data": None, "move": None})
+    if kept:
+        say(f"Die Daten von PostgreSQL {op['from_major']} liegen wieder an ihrem Ort"
+            + (f"; die von PostgreSQL {op['to_major']} bleiben in {kept_where(op.get('new_data'))}, bis sie "
+               f"freigegeben werden." if op.get("new_data") else "."),
+            f"The data of PostgreSQL {op['from_major']} is back in its place"
+            + (f"; that of PostgreSQL {op['to_major']} stays in {kept_where(op.get('new_data'))} until released."
+               if op.get("new_data") else "."))
+    return op.get("new_data")
 
 
 def kept_of(op):
@@ -2459,7 +2664,7 @@ def kept_of(op):
 
 
 def kept_ok(kept):
-    """A place move_aside made, by its name: nothing else is ever deleted."""
+    """A place make_place made, by its name: nothing else is ever deleted."""
     if not isinstance(kept, dict):
         return False
     if kept.get("type") == "volume":
@@ -2493,6 +2698,9 @@ def cmd_delete_olddata(op_id):
     if op.get("status") != "ok" and not op.get("rolled_back"):
         raise Abort(3, "Die alten Daten sind der Weg zurück, solange der Major nicht gelungen oder zurückgerollt ist.",
                     "The old data is the way back as long as the major has not succeeded or been rolled back.")
+    if op.get("move"):
+        raise Abort(3, "Eine Verschiebung dieser Daten ist nicht zu Ende; erst zurückrollen.",
+                    "A move of this data is not finished; roll back first.")
     kept = kept_of(op)
     if not kept_ok(kept) or not kept_exists(kept):
         raise Abort(2, "Keine aufbewahrten Daten zu diesem Vorgang.", "No kept data for this operation.")
@@ -2504,8 +2712,11 @@ def cmd_delete_olddata(op_id):
 
 
 def compose_images(ctx, services):
-    """{service: image} as `docker compose config` gives it now; exit 5 if
-    compose cannot read its files."""
+    """{service: image} as `docker compose config` gives it now: its image:
+    line, or for a service with `build:` and none the name Compose v2 gives
+    the image it builds, <project>-<service>, in the project compose runs it
+    in (the config's "name", from -p); None for a service the files do not
+    define. Exit 5 if compose cannot read its files."""
     try:
         cfg = json.loads(run(compose_cmd(ctx) + ["config", "--format", "json"]))
     except (subprocess.CalledProcessError, ValueError, OSError) as e:
@@ -2513,7 +2724,17 @@ def compose_images(ctx, services):
         raise Abort(5, f"docker compose config schlägt fehl: {detail} – nichts geändert.",
                     f"docker compose config fails: {detail} – nothing changed.")
     svc = cfg.get("services") or {}
-    return {s: (svc.get(s) or {}).get("image") for s in services}
+    project = cfg.get("name") or ctx["project"]
+    out = {}
+    for s in services:
+        c = svc.get(s)
+        if not isinstance(c, dict):
+            out[s] = None
+        elif c.get("image"):
+            out[s] = c["image"]
+        else:
+            out[s] = f"{project}-{s}" if c.get("build") is not None else None
+    return out
 
 
 def other_image(ctx, op):
@@ -2627,8 +2848,12 @@ def cmd_rollback(op_id):
     keep_log(op_id + ".rollback.log")
     ok, reason = False, None
     try:
-        if major and op.get("old_data"):
-            swap_back(op, compose_cmd(ctx))
+        if major:
+            try:
+                swap_back(op, compose_cmd(ctx))
+            except Exception as e:      # the data is not back: say so (a signal is error_reason's)
+                reason = major_reason(op["container"], "data", str(e)[:REASON_MAX])
+                raise
         run(["docker", "tag", rb, op["image"]])
         rc = stream(compose_cmd(ctx) + ["up", "-d", "--no-deps", "--pull", "never", *op["services"]])
         ok, failed, _ = (False, [], {}) if rc != 0 else wait_healthy(op["project"], op["services"])
@@ -2653,7 +2878,7 @@ def cmd_rollback(op_id):
                 show_logs(failed or op["stopped"])
                 reason = failure_reason(failed or op["stopped"], compose_rc=rc)
     except (Exception, Interrupted) as e:
-        ok, reason = False, error_reason(e)
+        ok, reason = False, reason or error_reason(e)
     status = "ok" if ok else "failed"
     entry = {"id": op_id, "rolled_back": ok, "rollback_ts": now_iso(), "rollback_status": status,
              "rollback_reason": reason}
@@ -2779,11 +3004,12 @@ def cmd_backups():
             if kept_ok(kept) and kept_exists(kept):
                 o["kept"] = {"where": kept_where(kept), "bytes": kept_bytes(kept),
                              "major": o.get("to_major") if o.get("rolled_back") else o.get("from_major"),
-                             "can_release": o.get("status") == "ok" or bool(o.get("rolled_back"))}
+                             "can_release": (o.get("status") == "ok" or bool(o.get("rolled_back")))
+                             and not o.get("move")}
             # Without the old data a rollback has nothing to move back.
             if o.get("can_rollback") and not o.get("rolled_back") and o.get("old_data") and "kept" not in o:
                 o["can_rollback"] = False
-            for k in ("data", "old_data", "new_data"):
+            for k in ("data", "old_data", "new_data", "move", "data_entries", "pg_version_file"):
                 o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))
         o["rollback_log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".rollback.log"))

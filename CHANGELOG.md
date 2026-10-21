@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.24.1 – 2026-10-21
+
+Two fixes. A database major stopped while it moves the data (since 0.23.0) can no longer leave the
+data where the history does not see it, and its rollback starts PostgreSQL only on the complete old
+data. The rollback of a rebuild works for a service with `build:` and no `image:` (since 0.24.0).
+
+**Upgrading:** nothing to do. Should a major of 0.23.0 or 0.24.0 have been stopped while it moved
+the data, its rollback now finds the data by the name of its place and puts it back.
+
+- **Fix (since 0.23.0): the data of a database major when the run is stopped.** The old major's
+  data was moved aside before the history named the place, and a signal during the move was not
+  handled: after SIGTERM the data lay partly or wholly in the place with `old_data` empty, the
+  rollback skipped moving it back, and on an empty data directory the old PostgreSQL could set up a
+  new, empty cluster. A rename that failed while a move was being undone also removed the place with
+  data in it. Now every move (the major's and the rollback's two) is in the history before its first
+  entry moves and marked done after its last, with signals waiting until both agree; the rollback
+  finishes or reverses a move it finds open (also after SIGKILL); a move never replaces a file; a
+  place is removed only while empty; and the rollback starts the old major only on the entries it
+  set aside with `PG_VERSION` of the old major, otherwise it fails and changes nothing. Before the
+  data moves, the major checks that it is the old major's cluster. `delete-olddata` refuses while a
+  move is open. Places a run of 0.23.0 or 0.24.0 filled without recording them are found by their
+  name.
+- **Fix (since 0.24.0): rollback of a rebuild without `image:`.** For a service with `build:` and no
+  `image:`, `docker compose config` gives no image, so the rollback's check that the files still give
+  the service its image saw none and refused (exit 5). It now uses the name Compose gives the
+  image it builds, `<project>-<service>`, in the project compose runs it in. A changed image line or
+  a removed service is still refused.
+- **Tests.** `test/major_recovery_test.py` (new) with `test/major_child.py`: the major and its
+  rollback stopped by real SIGTERM and SIGKILL at chosen renames, failed renames and undos, the
+  state of an interrupted 0.23.0 run, empty and unclear data; every file compared with its content.
+  The old code fails 28 of its 41 checks. `test/update_test.py`: rebuild and rollback without
+  `image:`, under another project name, with `image:`, refusals; the compose stand-in now gives the
+  project's `name` and no `image` for such a service. `test/major_test.py` follows the new parts.
+  `test/e2e-server.sh`: majors stopped by SIGTERM and SIGKILL while they move the data, with real
+  PostgreSQL, each followed by the rollback (sections 17b, 17c, through `test/e2e-pause.py`), and the
+  rebuild and rollback of a build without `image:` (section 18b).
+
 ## 0.24.0 – 2026-10-21
 
 Images built on the server (compose `build:`) can be updated: once a base image is newer, the row
