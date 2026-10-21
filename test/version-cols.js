@@ -444,20 +444,27 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
     await flush();
     c = cells(row(bb, "prod-mcp-1"));
     console.log("built here, newer base:", c.slice(3, 6).map((x) => x.textContent.trim()).join(" | "));
-    assert.deepStrictEqual(c.slice(3, 6).map((x) => x.textContent.trim()), ["?", "Basis neuer: caddy:2 = 2.11.7", "Neue Version"]);
+    assert.deepStrictEqual(c.slice(3, 6).map((x) => x.textContent.trim()), ["2.11.4 Basis caddy:2", "Basis neuer: caddy:2 = 2.11.7", "Neue Version"]);
+    assert(c[3].querySelector(".dm-ver").title.startsWith("Auf diesem Server gebaut: die Version, die das Basis-Image caddy:2 mitbringt"),
+           "the installed column: the version the final base brings, with where it comes from");
     tip = c[4].querySelector(".dm-level").title.split("\n");
     console.log("  " + tip.join(" / "));
     assert.deepStrictEqual(tip, [
         "Auf diesem Server gebaut am 15.06.2026. Keine Registry zeigt das Image selbst, wohl aber die Images, auf denen sein Dockerfile aufbaut:",
         "caddy:2-builder (Build-Stufe): jetzt 2.11.7, veröffentlicht am 14.10.2026 – neuer als der Build",
         "caddy:2 (Laufzeit): jetzt 2.11.7, veröffentlicht am 14.10.2026; der Build enthält 2.11.4 – neuer als der Build",
-        "Neu bauen bringt es: docker compose build --pull prod-mcp-1, dann docker compose up -d prod-mcp-1, in /opt/prod."]);
+        "Neu bauen bringt es: docker compose build --pull prod-mcp-1, dann docker compose up -d prod-mcp-1, in /opt/prod.",
+        "„Neu bauen“ in dieser Zeile erledigt beides, mit Rollback-Kopie und den Datenbank-Dumps."]);
     assert.strictEqual(iconOf(c[4]), "info-circle");
+    const rebuildBtn = (tr) => tr.querySelector('button[data-kind="rebuild"]');
+    assert.strictEqual(rebuildBtn(row(bb, "prod-mcp-1")).textContent.trim(), "Neu bauen", "a newer base: Rebuild in the row");
+    assert.strictEqual(rebuildBtn(row(bb, "prod-mcp-1")).dataset.update, "prod-mcp-1");
     // every base older than the build: up to date, though the version is unknown
     bb = boot("de", bases(false));
     await flush();
     c = cells(row(bb, "prod-mcp-1"));
     assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["Basis aktuell", "Aktuell"]);
+    assert.strictEqual(rebuildBtn(row(bb, "prod-mcp-1")), null, "bases older than the build: nothing to rebuild");
     assert.strictEqual(iconOf(c[4]), "check-circle");
     assert(c[4].querySelector(".dm-uptodate").title.endsWith("Eigene Änderungen im Projekt prüft der Radar nicht."));
     // the registry did not answer for any base: nothing claimed
@@ -466,13 +473,20 @@ const iconOf = (el) => { const s = el.querySelector("svg.az-icon"); return s ? s
         .forEach((x) => { Object.keys(x).filter((k) => !["image", "tag", "final"].includes(k)).forEach((k) => delete x[k]); x.error = "registry down"; });
     bb = boot("de", errs);
     await flush();
-    assert.deepStrictEqual(cells(row(bb, "prod-mcp-1")).slice(4, 6).map((x) => x.textContent.trim()), ["Basis nicht geprüft", "Unbekannt"]);
+    assert.deepStrictEqual(cells(row(bb, "prod-mcp-1")).slice(3, 6).map((x) => x.textContent.trim()), ["?", "Basis nicht geprüft", "Unbekannt"]);
     bb = boot("en", bases(true, { pinned: true, newer: false }));
     await flush();
     c = cells(row(bb, "prod-mcp-1"));
     assert.deepStrictEqual(c.slice(4, 6).map((x) => x.textContent.trim()), ["base newer: caddy:2-builder = 2.11.7", "New version"],
                            "a pinned base never counts; the build stage does");
     assert(c[4].querySelector(".dm-level").title.includes("caddy:2: pinned by digest, does not move"));
+    assert.strictEqual(rebuildBtn(row(bb, "prod-mcp-1")).textContent.trim(), "Rebuild");
+    const unmanaged = inventory.replace(/("name": "prod-mcp-1".*)"managed": true/, '$1"managed": false');
+    bb = boot("de", bases(true), unmanaged);
+    await flush();
+    assert.strictEqual(rebuildBtn(row(bb, "prod-mcp-1")), null, "not run by compose: no button");
+    assert(!cells(row(bb, "prod-mcp-1"))[4].querySelector(".dm-level").title.includes("„Neu bauen“ in dieser Zeile"),
+           "and the tooltip names no button");
 
     // English
     const e = boot("en", FILES);

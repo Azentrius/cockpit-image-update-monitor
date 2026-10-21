@@ -66,6 +66,13 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 dump restored, the counts compared, the waiting
                                 services started. A rollback moves the data
                                 back (and keeps the new major's).
+  rebuild <container> --dry-run read-only: the plan of a rebuild of an image built
+                                on this server (compose `build:`)
+  rebuild <container> [--no-dump]
+                                an update for such an image: dumps, rollback tag,
+                                `docker compose build --pull` instead of the pull
+                                (a failed build stops here, exit 5), then the
+                                update steps 4 to 6
   delete-olddata <op-id>        release the data a database major kept: the
                                 old major's after a good run, the new major's
                                 after a rollback
@@ -311,6 +318,28 @@ def radar_record(ref):
     return None
 
 
+def built_version(ref, image_id):
+    """For an image built on this server: the version its final base brings,
+    from the build's variables (caddy:2 -> CADDY_VERSION=2.11.4), the base
+    named by the radar (versions.json "base"). None if unknown."""
+    for b in (radar_record(ref) or {}).get("base") or []:
+        if b.get("final") and b.get("image") and b.get("tag") and image_id:
+            try:
+                return local_version(b["image"], b["tag"], docker_json("image", "inspect", image_id)[0])[0]
+            except Exception:
+                return None
+    return None
+
+
+def built_target(ref):
+    """What a rebuild brings, as far as the radar knows: the version the final
+    base's tag points to now. None if unknown."""
+    for b in (radar_record(ref) or {}).get("base") or []:
+        if b.get("final"):
+            return b.get("now") or None
+    return None
+
+
 def same_series(rec, version):
     """True if the radar found `version` among the registry's version tags,
     so what a floating tag points to (tag_now) counts in the same numbering.
@@ -475,7 +504,9 @@ def service_containers(project, service):
 
 
 # ------------------------------------------------------------------ plan ----
-def make_plan(name):
+def make_plan(name, build=False):
+    """build: the plan of a rebuild (`rebuild`): only for services built on
+    this server, which an update refuses as "built-locally"."""
     c = inspect(name)
     ref = c["Config"]["Image"]
     plan = {"container": name, "image": ref, "updatable": False, "reason": None,
@@ -525,11 +556,14 @@ def make_plan(name):
         plan["reason"] = "service-missing"
         plan["missing"] = missing
         return plan, ctx
-    for s in services:
-        svc = (cfg.get("services") or {}).get(s) or {}
-        if svc.get("build") is not None:
-            plan["reason"] = "built-locally"
-            return plan, ctx
+    built = [s for s in services if ((cfg.get("services") or {}).get(s) or {}).get("build") is not None]
+    plan["build"] = bool(build)
+    if built and not build:
+        plan["reason"] = "built-locally"
+        return plan, ctx
+    if build and len(built) != len(services):
+        plan["reason"] = "not-built"
+        return plan, ctx
     relations(plan, cfg, members, same, services, ctx["project"])
 
     # Has the compose file changed since these containers were created?
@@ -549,14 +583,17 @@ def make_plan(name):
     # A tag that fixes no version number (latest, stable …) follows every
     # release. If the running version is unknown too, nobody can tell how big
     # the jump is: the plugin warns and asks for an extra confirmation.
-    plan["installed_version"] = version_of(ref, c["Image"])
+    plan["installed_version"] = version_of(ref, c["Image"]) or (built_version(ref, c["Image"]) if build else None)
     plan["tag_digits"] = tag_digits(split_ref(ref)[1])
-    plan["jump_unknown"] = plan["installed_version"] is None and plan["tag_digits"] == 0
+    # A rebuild builds the same Dockerfile again: no jump of a tag to warn of.
+    plan["jump_unknown"] = plan["installed_version"] is None and plan["tag_digits"] == 0 and not build
 
     # What the update brings: the image pulled already, otherwise what the
     # tag points to in the registry right now (radar, "tag_now") - if that
     # counts in the same numbering as the installed version.
-    if plan["pulled"]:
+    if build:
+        target = built_target(ref)
+    elif plan["pulled"]:
         target = version_of(ref, tagid)
     else:
         rec = radar_record(ref) or {}
@@ -1534,6 +1571,23 @@ def cmd_update(name, do_dump=True):
     return roll_out(name, plan, ctx, do_dump)
 
 
+def cmd_rebuild(name, do_dump=True):
+    """An update of an image built on this server: the image is built again
+    from its Dockerfile with fresh bases (`docker compose build --pull`)."""
+    lock()
+    with before_change():
+        plan, ctx = make_plan(name, build=True)
+    if not plan["updatable"]:
+        raise Abort(2, f"Nicht neu baubar: {plan['reason']}", f"Cannot be rebuilt: {plan['reason']}")
+    return roll_out(name, plan, ctx, do_dump, build=True)
+
+
+def tag_back(ref, image):
+    """After a failed rebuild: ref names the image it named before."""
+    if image and image_id(ref) != image:
+        run(["docker", "tag", image, ref], check=False)
+
+
 def cmd_pull(name):
     """Step one of an update in two steps: fetch the image of the plan's
     services and change nothing that runs. The row then shows "Roll-out
@@ -1677,7 +1731,7 @@ def change_files(op, ctx, retag, services, st):
     say("docker compose config: in Ordnung.", "docker compose config: OK.")
 
 
-def roll_out(name, plan, ctx, do_dump, retag=None):
+def roll_out(name, plan, ctx, do_dump, retag=None, build=False):
     """The update itself. With retag (a tag change) the configured tag is
     changed first (change_files) and the new tag is rolled out.
     The run is in the history (status "running") before the first change a
@@ -1693,9 +1747,9 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
     services, project = plan["services"], plan["project"]
     with before_change():
         old_ids = {n: inspect(n)["Image"] for n in plan["containers"]}
-        from_version = version_of(ref, old_ids[name])
+        from_version = version_of(ref, old_ids[name]) or (built_version(ref, old_ids[name]) if build else None)
     old_id = old_ids[name]
-    op = {"id": op_id, "ts": now_iso(), "kind": "retag" if retag else "update", "container": name,
+    op = {"id": op_id, "ts": now_iso(), "kind": "retag" if retag else "rebuild" if build else "update", "container": name,
           "project": project, "workdir": ctx["workdir"], "files": ctx["files"],
           "env_files": ctx["env_files"], "services": services,
           "containers": plan["containers"], "image": ref, "old_id": old_id,
@@ -1707,6 +1761,9 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
                   changes=[{k: c[k] for k in ("file", "line", "old", "new")} for c in retag["changes"]])
         say(f"Tag-Wechsel {ref} → {new_ref} in Projekt {project}: Services {', '.join(services)}",
             f"Changing {ref} to {new_ref} in project {project}: services {', '.join(services)}")
+    elif build:
+        say(f"Neubau {ref} in Projekt {project}: Services {', '.join(services)}",
+            f"Rebuilding {ref} in project {project}: services {', '.join(services)}")
     else:
         say(f"Update {ref} in Projekt {project}: Services {', '.join(services)}",
             f"Updating {ref} in project {project}: services {', '.join(services)}")
@@ -1762,8 +1819,31 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
         # registry fails, and that looked like "no newer image". A failed pull
         # goes on only with the image to roll out on the server already.
         base = compose_cmd(ctx)
+        if build:
+            # 3'. A rebuild: the Dockerfile again, with fresh bases. A build
+            # that fails changed nothing that runs; the tag goes back to the
+            # image it named, should a build of several services have moved it.
+            before = image_id(ref)
+            try:
+                rc = stream(base + ["build", "--pull", *services])
+            except Interrupted:
+                tag_back(ref, before)
+                raise
+            except Timeout as e:
+                tag_back(ref, before)
+                drop_run(op)
+                raise Abort(5, f"Der Neubau hat nach {e.seconds} s nicht geendet und wurde abgebrochen (DOCKER_TIMEOUT "
+                               f"in {CONF}) – nichts geändert.",
+                            f"The rebuild did not end within {e.seconds} s and was stopped (DOCKER_TIMEOUT in {CONF}) – "
+                            f"nothing changed.")
+            if rc != 0:
+                error = reason_line(STREAM_TAIL) or f"exit {rc}"
+                tag_back(ref, before)
+                drop_run(op)
+                raise Abort(5, f"Der Neubau ist fehlgeschlagen – nichts geändert. Build: {error}",
+                            f"The rebuild failed – nothing changed. Build: {error}")
         try:
-            pull_rc = stream(base + ["pull", *services])
+            pull_rc = 0 if build else stream(base + ["pull", *services])
         except Timeout as e:
             drop_run(op)
             raise Abort(5, f"Der Pull hat nach {e.seconds} s nicht geendet und wurde abgebrochen (DOCKER_TIMEOUT in "
@@ -1795,13 +1875,14 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
             run(["docker", "rmi", rb], check=False)
             op.update(status="nochange", rollback=None, new_id=new_id, to_version=op["from_version"])
             record(op, log=op_id + ".log")
-            say("Kein neueres Image verfügbar – nichts geändert.", "No newer image available – nothing changed.")
+            say("Der Neubau ergab dasselbe Image – nichts geändert." if build else "Kein neueres Image verfügbar – nichts geändert.",
+                "The rebuild gave the same image – nothing changed." if build else "No newer image available – nothing changed.")
             result(op=op_id, status="nochange", dumps=op["dumps"],
                    from_version=op["from_version"], to_version=op["to_version"])
             return 0
         op["new_id"] = new_id
         op["new_digests"] = repo_digests(new_id)
-        op["to_version"] = version_of(new_ref, new_id)
+        op["to_version"] = version_of(new_ref, new_id) or (built_version(ref, new_id) if build else None)
         # In the history before the containers change (see above).
         record(op, log=op_id + ".log")
     except Abort:
@@ -1854,7 +1935,8 @@ def roll_out(name, plan, ctx, do_dump, retag=None):
     if retag:
         say(f"Tag-Wechsel erfolgreich: {new_ref}", f"Tag change successful: {new_ref}")
     else:
-        say("Update erfolgreich.", "Update successful.")
+        say("Neubau erfolgreich." if build else "Update erfolgreich.",
+            "Rebuild successful." if build else "Update successful.")
 
     # 5. + 6. Never let these turn a successful update into a failure.
     try:
@@ -2472,7 +2554,7 @@ def cmd_rollback(op_id):
         raise Abort(64, f"Ungültige Vorgangs-ID: {op_id}", f"Invalid operation id: {op_id}")
     lock()
     op = load_ops().get(op_id)
-    if not op or op.get("kind") not in ("update", "retag", "dbmajor"):
+    if not op or op.get("kind") not in ("update", "retag", "dbmajor", "rebuild"):
         raise Abort(2, f"Vorgang {op_id} nicht gefunden.", f"Operation {op_id} not found.")
     # A rollback that went through is not repeated; one that failed may run
     # again (up to 0.18.0 a failed one was marked rolled_back as well).
@@ -2679,7 +2761,7 @@ def cmd_backups():
         # "running": a run that ended without its last line (killed, power
         # cut) unless its process still runs. A failed rollback may be tried again.
         o["active"] = o.get("status") == "running" and helper_alive(o.get("pid"))
-        could = (o.get("kind") in ("update", "retag", "dbmajor") and o.get("status") in ("ok", "failed", "running")
+        could = (o.get("kind") in ("update", "retag", "dbmajor", "rebuild") and o.get("status") in ("ok", "failed", "running")
                  and not o["active"] and not (o.get("rolled_back") and o.get("rollback_status") != "failed"))
         o["can_rollback"] = could and norm_ref(o.get("rollback") or "") in rb_refs
         if could and o.get("rollback") and not o["can_rollback"]:
@@ -2997,7 +3079,8 @@ def main(argv):
         plan, _ = make_plan(argv[1])
         print(json.dumps(plan, ensure_ascii=False))
         return 0
-    if argv[:1] in (["update"], ["pull"], ["rollback"], ["delete-image"]) or \
+    if argv[:1] in (["update"], ["pull"], ["rollback"], ["delete-image"]) or argv[:1] == ["rebuild"] and \
+            "--dry-run" not in argv or \
             argv[:1] in (["retag"], ["dbmajor"]) and "--expect" in argv:
         load_limits()
     if len(argv) in (2, 3) and argv[0] == "update" and (len(argv) == 2 or argv[2] == "--no-dump"):
@@ -3028,6 +3111,11 @@ def main(argv):
         return 0
     if len(argv) == 5 and argv[0] == "dbmajor" and argv[3] == "--expect":
         return keep_output(cmd_major, argv[1], argv[2], argv[4])
+    if len(argv) == 3 and argv[0] == "rebuild" and argv[2] == "--dry-run":
+        print(json.dumps(make_plan(argv[1], build=True)[0], ensure_ascii=False))
+        return 0
+    if len(argv) in (2, 3) and argv[0] == "rebuild" and argv[2:] in ([], ["--no-dump"]):
+        return keep_output(cmd_rebuild, argv[1], do_dump=len(argv) == 2)
     if len(argv) == 2 and argv[0] == "delete-olddata":
         return cmd_delete_olddata(argv[1])
     raise Abort(64, "Unbekannter Befehl: " + " ".join(argv), "Unknown command: " + " ".join(argv))
@@ -3060,7 +3148,7 @@ def entry(argv):
     if guard is not None and guard.repeats:
         say(f"{guard.repeats} weitere(s) Signal(e) während des Aufräumens nicht beachtet.",
             f"{guard.repeats} more signal(s) ignored while cleaning up.")
-    if argv[:1] in (["update"], ["pull"], ["retag"], ["dbmajor"], ["rollback"], ["cleanup"]) and "--dry-run" not in argv \
+    if argv[:1] in (["update"], ["pull"], ["retag"], ["dbmajor"], ["rebuild"], ["rollback"], ["cleanup"]) and "--dry-run" not in argv \
             and code not in (64, 75, 77):
         refresh_status()
     return code

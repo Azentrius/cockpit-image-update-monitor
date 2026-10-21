@@ -179,6 +179,7 @@
             `<td class="az-nowrap" data-label="${L("col.container")}"><span class="dm-cell">${esc(o.container || "")}</span></td>` +
             `<td data-label="${L("col.image")}"><span class="dm-cell"><span class="az-mono">${esc(o.image || "")}</span>` +
               (o.kind === "retag" ? `<span class="dm-row-note">${esc(t("op.retag", { from: o.from_tag, to: o.to_tag }))}</span>` : "") +
+              (o.kind === "rebuild" ? `<span class="dm-row-note">${esc(t("op.rebuild"))}</span>` : "") +
               (o.kind === "dbmajor" ? `<span class="dm-row-note">${esc(t("op.dbmajor", { from: o.from_major, to: o.to_major }))}</span>` +
                   (o.kept ? `<span class="dm-row-note">${esc(t("op.kept", { major: o.kept.major, where: o.kept.where,
                                                                              size: o.kept.bytes == null ? "?" : human(o.kept.bytes) }))}</span>` : "")
