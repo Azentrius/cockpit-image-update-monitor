@@ -3,14 +3,18 @@
 """Offline tests for the database major of diun-update.py (stage 5): the plan
 and every reason it refuses (make_major, with Docker and compose stood in
 for), where a new major keeps its data (PostgreSQL 18), the counts and the
-error lines of a restore, moving data aside and back (also when it breaks
-off in the middle), which kept places may ever be deleted, and the refusals
-of delete-olddata. The run itself (dump, restore, rollback, release against
-real PostgreSQL 16 and 17) is section 17 of test/e2e-server.sh."""
+error lines of a restore, the parts that move data (a place next to it,
+renames that never replace a file, a place removed only while empty), which
+kept places may ever be deleted, and the refusals of delete-olddata. A major
+and its rollback stopped half way by real signals are in
+test/major_recovery_test.py; the run itself (dump, restore, rollback, release
+against real PostgreSQL 16 and 17, also stopped while it moves the data) is
+section 17 of test/e2e-server.sh."""
 import copy
 import importlib.util
 import io
 import os
+import shutil
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -85,10 +89,13 @@ for f in ("PG_VERSION", "base", "global"):
     p = os.path.join(src, f)
     os.mkdir(p) if f != "PG_VERSION" else open(p, "w").write("16\n")
 open(os.path.join(src, "base", "1"), "w").write("data")
-kept = U.move_aside({"type": "bind", "source": src}, "pg16-20261020-120000", "20261020-120000-db")
-check("move_aside (bind): the data in the sibling directory, the directory empty, its mode kept",
-      (kept, sorted(os.listdir(kept["path"])), os.listdir(src), oct(os.stat(kept["path"]).st_mode & 0o777)),
-      ({"type": "bind", "path": src + ".pg16-20261020-120000"}, ["PG_VERSION", "base", "global"], [], "0o700"))
+kept = U.make_place({"type": "bind", "source": src}, "pg16-20261020-120000", "20261020-120000-db")
+check("make_place (bind): an empty sibling directory with the mode of the data's",
+      (kept, os.listdir(kept["path"]), oct(os.stat(kept["path"]).st_mode & 0o777)),
+      ({"type": "bind", "path": src + ".pg16-20261020-120000"}, [], "0o700"))
+U.move_entries(src, kept["path"])
+check("move_entries: the data in the place, the directory empty",
+      (sorted(os.listdir(kept["path"])), os.listdir(src)), (["PG_VERSION", "base", "global"], []))
 open(os.path.join(src, "PG_VERSION"), "w").write("17\n")      # the new major's data, set aside again
 new17 = os.path.join(TMP, "new17")
 os.mkdir(new17)
@@ -97,25 +104,45 @@ U.move_entries(kept["path"], src)
 check("move_entries back: the old data in place again",
       (open(os.path.join(src, "PG_VERSION")).read(), open(os.path.join(src, "base", "1")).read(), os.listdir(kept["path"])),
       ("16\n", "data", []))
-os.rmdir(kept["path"])
-# Breaking off in the middle: an entry that cannot move (a directory where the
-# file would go). What moved goes back; nothing is split, nothing left behind.
+check("drop_empty: an empty place goes", (U.drop_empty(kept), os.path.exists(kept["path"])), (True, False))
+# A name in both places: a rename would replace the file in the way, so
+# nothing moves at all, and nothing is deleted.
 blocker = src + ".pg16-20261020-130000"
 os.mkdir(blocker)
 os.mkdir(os.path.join(blocker, "global"))
 open(os.path.join(blocker, "global", "x"), "w").write("in the way")
-real_mkdir = U.os.mkdir
-U.os.mkdir = lambda p, *a: None if p == blocker else real_mkdir(p, *a)
 try:
-    U.move_aside({"type": "bind", "source": src}, "pg16-20261020-130000", "20261020-130000-db")
+    U.move_entries(src, blocker)
+    broke = None
+except OSError as e:
+    broke = type(e).__name__
+check("move_entries with a name in both places: refused before the first rename, both as they were",
+      (broke, sorted(os.listdir(src)), open(os.path.join(src, "base", "1")).read(), sorted(os.listdir(blocker)),
+       open(os.path.join(blocker, "global", "x")).read()),
+      ("FileExistsError", ["PG_VERSION", "base", "global"], "data", ["global"], "in the way"))
+check("drop_empty: a place with data in it stays",
+      (U.drop_empty({"type": "bind", "path": blocker}), open(os.path.join(blocker, "global", "x")).read()),
+      (False, "in the way"))
+shutil.rmtree(blocker)
+real_mkdir = U.os.mkdir
+
+
+def taken(p, *a):
+    if p == blocker:
+        raise FileExistsError(p)
+    return real_mkdir(p, *a)
+
+
+U.os.mkdir = taken
+try:
+    U.make_place({"type": "bind", "source": src}, "pg16-20261020-130000", "20261020-130000-db")
     broke = None
 except OSError as e:
     broke = type(e).__name__
 finally:
     U.os.mkdir = real_mkdir
-check("move_aside breaking off: an error, everything back in place, the place made for it gone",
-      (broke, sorted(os.listdir(src)), open(os.path.join(src, "base", "1")).read(), os.path.exists(blocker)),
-      ("OSError", ["PG_VERSION", "base", "global"], "data", False))
+check("make_place where the name is taken: an error, nothing moved", (broke, sorted(os.listdir(src))),
+      ("FileExistsError", ["PG_VERSION", "base", "global"]))
 
 # ------------------------------------------------------------- the plan ----
 def container(running=True, mounts=None, env=("PG_VERSION=16.14",), image="postgres:16-alpine"):
@@ -231,7 +258,14 @@ check("delete-olddata after a good major: the old data released, recorded",
       (rc, os.path.exists(src + ".pg16-20261020-120000"), [sorted(e) for e in recorded]),
       (0, False, [["data_released", "id"]]))
 OPS["20261020-120000-db"].update(rolled_back=True, new_data={"type": "bind", "path": "/etc"})
-check("delete-olddata after a rollback: only a place move_aside made", run_cmd(U.cmd_delete_olddata, "20261020-120000-db")[0], 2)
+check("delete-olddata after a rollback: only a place make_place made", run_cmd(U.cmd_delete_olddata, "20261020-120000-db")[0], 2)
+os.mkdir(src + ".pg16-20261020-120000")
+open(os.path.join(src + ".pg16-20261020-120000", "PG_VERSION"), "w").write("16\n")
+OPS["20261020-120000-db"].update(rolled_back=False, status="ok",
+                                 old_data={"type": "bind", "path": src + ".pg16-20261020-120000"},
+                                 move={"step": "old-back", "from": src + ".pg16-20261020-120000", "to": src})
+check("delete-olddata while a rollback's move is open: refused, the data stays",
+      (run_cmd(U.cmd_delete_olddata, "20261020-120000-db")[0], os.path.exists(src + ".pg16-20261020-120000")), (3, True))
 
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
 sys.exit(1 if fails else 0)

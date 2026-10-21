@@ -307,6 +307,8 @@ A newer PostgreSQL major (e.g. 16 â†’ 17) is offered in **Change version** as â€
 
 Anything that fails before the database stops leaves nothing changed. Later the history offers the rollback: it moves the old data back (what was written after the major is not in it) and keeps the new major's data. The old data stays until **Release** in the history deletes it.
 
+**A run that is stopped while it moves the data** (since 0.24.1): each move is in the history before its first file moves. SIGTERM, SIGHUP and Ctrl-C wait until the move and its record are done, then the run fails with its rollback. After a hard stop (SIGKILL, a power cut) the history keeps the open move, and the rollback finishes it. The rollback starts the old database only once its data is complete again (the same entries, `PG_VERSION` of the old major); otherwise it fails and leaves everything where it is, so PostgreSQL never sets up a new, empty cluster in place of the data. Nothing is deleted when a move or its undo fails. Up to 0.24.0 a signal or a kill during the move could leave the data in the kept place without the history knowing; the rollback of 0.24.1 finds such a place by its name and puts the data back.
+
 **Limits:** the data must lie in a named volume of the `local` driver or a bind mount that is no mount point of its own. PostgreSQL 18 keeps its data in `/var/lib/postgresql/18/docker`: add `PGDATA: /var/lib/postgresql/data` to the service's environment first (the preview says so). MariaDB/MySQL majors, pgvector's `pg17` tags and `pg_upgrade` are not supported yet.
 
 ---

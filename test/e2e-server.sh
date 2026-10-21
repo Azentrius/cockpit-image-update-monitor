@@ -22,9 +22,12 @@
 # record for its own image into versions.json and removes it again.
 # The database major (stage 5) runs in a project of its own, "imgupd-test-major":
 # PostgreSQL 16 (OLD_IMAGE) to 17 (PG17_IMAGE, default postgres:17-alpine) with
-# test data, the rollback and the release of the kept data.
+# test data, the rollback and the release of the kept data, and majors stopped
+# by SIGTERM and SIGKILL while they move the data (test/e2e-pause.py holds the
+# helper after a rename until the signal is sent), each followed by the rollback.
 # The rebuild of an image built on the server runs in "imgupd-test-build": a
-# Dockerfile on a base image in the local registry, which gets a newer build.
+# Dockerfile on a base image in the local registry, which gets a newer build;
+# one service names its image, one does not (compose calls it <project>-<service>).
 # Pulls that work, fail or find a newer image already here run against a local
 # registry (REGISTRY_IMAGE, default registry:2.8.3, on 127.0.0.1 at
 # E2E_REGISTRY_PORT, default 5000); the MariaDB/MySQL dumps use it too. Every
@@ -42,6 +45,7 @@
 set -u
 trap 'exit 130' INT TERM HUP
 LIB=${E2E_LIB:-/usr/lib/cockpit-image-updates}
+HERE=$(cd "$(dirname "$0")" && pwd)
 H=$LIB/diun-update.py
 INV=$LIB/diun-inventory.py
 VERSIONS=/var/lib/diun-radar/versions.json
@@ -203,7 +207,7 @@ cleanup() {
     # Docker refuses to drop the LAST tag of an image that running containers
     # use (e.g. other databases on the same build). -f then only removes our
     # tag - the image itself stays because it is in use.
-    for t in $(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E '(^|/)imgupd-test/'); do
+    for t in $(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E '(^|/)imgupd-test/|^imgupd-test-build-'); do
         if docker rmi "$t" >/dev/null 2>&1; then
             echo "untagged $t"
         elif [ -n "$(docker ps -q --filter ancestor="$(docker image inspect -f '{{.Id}}' "$t")")" ]; then
@@ -248,9 +252,9 @@ PY
         python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import diunstatus; diunstatus.refresh()' "$LIB" \
             && echo "status.json: written again without the test project"
     fi
-    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" "${D5:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz
+    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" "${D5:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz /tmp/e2e-ready /tmp/e2e-go
     echo "Left over: $(docker ps -a --format '{{.Names}}' | grep -c imgupd) containers," \
-         "$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/') tags," \
+         "$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/|^imgupd-test-build-') tags," \
          "$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' | wc -l) test dump folders," \
          "$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l) test logs," \
          "$(find "$BK_DIR/compose" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l) test file backups," \
@@ -876,6 +880,66 @@ check "dbmajor rollback: the old data back in place, the new major's kept (Postg
 python3 $H delete-olddata "$OPM" > /tmp/e2e-m3.log 2>&1; RC=$?
 check "delete-olddata after the rollback: the new major's data released" \
     '[ $RC = 0 ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_pgdata-pg17-")" ]'
+
+# Majors stopped while they move the data aside. test/e2e-pause.py runs the
+# installed helper and holds it after a rename in the data volume until the
+# signal is sent: a synchronisation point on the real data, no timing.
+pause_run() {   # $1 log, $2 the rename to stop after, $3 the signal, the rest: the helper's arguments
+    local log=$1 at=$2 sig=$3 pid
+    shift 3
+    rm -f /tmp/e2e-ready /tmp/e2e-go
+    mkfifo /tmp/e2e-ready /tmp/e2e-go
+    python3 "$HERE/e2e-pause.py" "$LIB" "$at" /volumes/imgupd-test-major_pgdata/ /tmp/e2e-ready /tmp/e2e-go "$@" > "$log" 2>&1 &
+    pid=$!
+    if [ "$(timeout 600 head -c1 /tmp/e2e-ready)" = r ]; then
+        kill -s "$sig" "$pid"
+        [ "$sig" = KILL ] || timeout 60 sh -c 'printf g > /tmp/e2e-go'
+    fi
+    wait "$pid"
+}
+op_json() { python3 -c 'import json, sys
+ops = {}
+for line in open(sys.argv[1]):
+    e = json.loads(line)
+    ops.setdefault(e["id"], {}).update(e)
+print(json.dumps(ops.get(sys.argv[2], {})))' "$OPS" "$1"; }
+last_major() { python3 -c 'import json, sys
+ids = [json.loads(line)["id"] for line in open(sys.argv[1]) if "\"kind\": \"dbmajor\"" in line]
+print(max(ids) if ids else "")' "$OPS"; }
+# The entries of a data directory (postmaster.pid only while PostgreSQL runs).
+top() { python3 -c 'import os, sys; print(" ".join(sorted(set(os.listdir(sys.argv[1])) - {"postmaster.pid"})))' "$1"; }
+VOLDIR=$(docker volume inspect -f '{{.Mountpoint}}' imgupd-test-major_pgdata)
+TOP0=$(top "$VOLDIR")
+running() { docker inspect -f '{{.State.Running}}' "$1"; }
+
+echo "=== 17b. Database major stopped by SIGTERM while it moves the data aside, then the rollback ==="
+DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
+pause_run /tmp/e2e-m7.log 1 TERM dbmajor "$MDB" "$V17" --expect "$(jget "$DRY" 'd["major"]["fingerprint"]')"; RC=$?
+sed 's/^/  | /' /tmp/e2e-m7.log | tail -n 6
+OP7=$(jget "$(result_of /tmp/e2e-m7.log)" 'd["op"]')
+J7=$(op_json "$OP7")
+K7=$(jget "$J7" '(d.get("old_data") or {}).get("name") or ""')
+check "SIGTERM while the major moves the data: the signal waited for the move and its record, exit 4, failed, no move open" \
+    '[ $RC = 4 ] && grep -q "@@SIGNAL-WHILE-HELD True" /tmp/e2e-m7.log && [ "$(jget "$J7" "(d[\"status\"], d.get(\"move\"))")" = "('"'"'failed'"'"', None)" ] && [ -n "$K7" ]'
+check "SIGTERM: all of the old data in the volume the history names, the data volume empty, the database stopped" \
+    '[ -z "$(ls -A "$VOLDIR")" ] && [ "$(top "$(docker volume inspect -f "{{.Mountpoint}}" "$K7")")" = "$TOP0" ] && [ "$(running "$MDB")" = false ]'
+python3 $H rollback "$OP7" > /tmp/e2e-m8.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-m8.log | tail -n 4
+check "SIGTERM, then the rollback: exit 0, PostgreSQL 16 on all of its data, no kept volume left, the app runs" \
+    '[ $RC = 0 ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 16 ] && [ "$(DATA)" = "$DATA0" ] && [ "$(top "$VOLDIR")" = "$TOP0" ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_pgdata-pg16-")" ] && [ "$(running imgupd-test-major-app)" = true ]'
+
+echo "=== 17c. Database major killed (SIGKILL) while it moves the data aside: the rollback finds the move ==="
+DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
+pause_run /tmp/e2e-m9.log 2 KILL dbmajor "$MDB" "$V17" --expect "$(jget "$DRY" 'd["major"]["fingerprint"]')"; RC=$?
+OP9=$(last_major)
+J9=$(op_json "$OP9")
+K9=$(jget "$J9" '(d.get("old_data") or {}).get("name") or ""')
+check "SIGKILL while the major moves the data: killed, 'running' in the history with the move open, the data split, nothing started" \
+    '[ $RC = 137 ] && [ "$OP9" != "$OP7" ] && [ "$(jget "$J9" "(d[\"status\"], (d.get(\"move\") or {}).get(\"step\"))")" = "('"'"'running'"'"', '"'"'aside'"'"')" ] && [ -n "$K9" ] && [ -n "$(ls -A "$VOLDIR")" ] && [ -n "$(ls -A "$(docker volume inspect -f "{{.Mountpoint}}" "$K9")")" ] && [ "$(running "$MDB")" = false ]'
+python3 $H rollback "$OP9" > /tmp/e2e-m10.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-m10.log | tail -n 4
+check "SIGKILL, then the rollback: it finishes the move back, exit 0, PostgreSQL 16 on all of its data, no kept volume left" \
+    '[ $RC = 0 ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 16 ] && [ "$(DATA)" = "$DATA0" ] && [ "$(top "$VOLDIR")" = "$TOP0" ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_pgdata-pg16-")" ] && [ "$(running imgupd-test-major-app)" = true ]'
 DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
 python3 $H dbmajor "$MDB" "$V17" --expect "$(jget "$DRY" 'd["major"]["fingerprint"]')" > /tmp/e2e-m4.log 2>&1; RC=$?
 OPM2=$(jget "$(result_of /tmp/e2e-m4.log)" 'd["op"]')
@@ -904,6 +968,11 @@ services:
     build: .
     image: imgupd-test/built:1
     container_name: imgupd-test-build
+    entrypoint: ["sh", "-c"]
+    command: ["sleep infinity"]
+  plain:
+    build: .
+    container_name: imgupd-test-plain
     entrypoint: ["sh", "-c"]
     command: ["sleep infinity"]
 EOF
@@ -962,6 +1031,23 @@ check "backups: the rebuild can be rolled back" '[ "$CRB" = "[True]" ]'
 python3 $H rollback "$OPB" > /tmp/e2e-b3.log 2>&1; RC=$?
 sed 's/^/  | /' /tmp/e2e-b3.log | tail -n 4
 check "rebuild rolled back: exit 0, the old build runs again" '[ $RC = 0 ] && [ "$(img_of imgupd-test-build)" = "$B1" ]'
+
+echo "=== 18b. Rebuild and rollback of a build without image: (compose names it imgupd-test-build-plain) ==="
+CFG5=$(docker compose -p "$P5" -f "$D5/docker-compose.yml" config --format json)
+check "compose config gives the service no image, compose runs it as imgupd-test-build-plain" \
+    '[ "$(jget "$CFG5" "\"image\" in d[\"services\"][\"plain\"]")" = False ] && [ "$(cfg_image imgupd-test-plain)" = imgupd-test-build-plain ]'
+C1=$(img_of imgupd-test-plain)
+python3 $H rebuild imgupd-test-plain --no-dump > /tmp/e2e-b4.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-b4.log | tail -n 4
+RP=$(result_of /tmp/e2e-b4.log)
+OPP=$(jget "$RP" 'd["op"]')
+C2=$(img_of imgupd-test-plain)
+check "rebuild without image: exit 0, ok, the container on a new build on the base NEW" \
+    '[ $RC = 0 ] && [ "$(jget "$RP" "d[\"status\"]")" = ok ] && [ "$C2" != "$C1" ] && [ "$(pg_version "$C2")" = "$(pg_version "$NEW")" ]'
+python3 $H rollback "$OPP" > /tmp/e2e-b5.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-b5.log | tail -n 4
+check "rollback without image: exit 0, the container on the original image ID again" \
+    '[ $RC = 0 ] && [ "$(img_of imgupd-test-plain)" = "$C1" ] && [ "$(docker image inspect -f "{{.Id}}" imgupd-test-build-plain)" = "$C1" ]'
 
 echo
 if [ "$FAIL" = 0 ]; then echo "E2E: ALL CHECKS PASSED"; else echo "E2E: FAILURES"; fi

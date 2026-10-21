@@ -260,8 +260,11 @@ class Docker:
         raise AssertionError(cmd)
 
     def config_of(self, cmd):
-        """As compose: the services of the files given with -f (those of the
-        containers started from them) besides what the test set in cfg."""
+        """As compose: the project's name (-p) and the services of the files
+        given with -f (those of the containers started from them, with their
+        image: line) besides what the test set in cfg. A service the test sets
+        is given as it is: a `build:` without `image:` has no "image" key, as
+        `docker compose config --format json` prints it (Compose v2.39.4)."""
         files = ",".join(cmd[i + 1] for i, a in enumerate(cmd) if a == "-f")
         svcs = dict(self.cfg.get("services") or {})
         for c in self.containers.values():
@@ -271,7 +274,8 @@ class Docker:
                 svcs[svc] = {"image": c["Config"]["Image"]}
         for svc in self.undefined:
             svcs.pop(svc, None)
-        return {**self.cfg, "services": svcs}
+        name = cmd[cmd.index("-p") + 1] if "-p" in cmd else None
+        return {**self.cfg, "name": name, "services": svcs}
 
     def run(self, cmd, check=True, capture=True, timeout=600):
         self.calls.append(list(cmd))
@@ -1393,6 +1397,60 @@ check("rebuild that does not end: exit 5, nothing changed",
       (rc, "The rebuild did not end within 1800 s" in out, sorted(r for r in D.tags if "rollback" in r)),
       (5, True, rb_tags))
 D.build_raises = None
+
+
+# A service with `build:` and no `image:`: compose names the image after the
+# project it runs in and the service (caddy-caddy), and `docker compose
+# config` gives no "image" for it. The rollback must still find that the
+# files give the service its image, and start the build it kept.
+def rebuild_then_rollback(project, service, ref, cfg_service, change=None):
+    """Rebuild the container of (project, service) on ref, then roll it back
+    (change(): what happens to the compose files in between). Returns the
+    exit codes, the image ID the container runs after each, and the output."""
+    reset_fs()
+    fresh_docker()
+    U.systemctl = Systemctl()
+    D.add(ctn("web-1", ref, "sha256:k1", project=project, service=service))
+    D.cfg = {"services": {service: cfg_service}}
+    D.tags = {U.norm_ref(ref): "sha256:k1"}
+    D.images = {"sha256:k1": {"Id": "sha256:k1", "Config": {"Env": []}},
+                "sha256:k2": {"Id": "sha256:k2", "Config": {"Env": []}}}
+    D.build_to = (ref, "sha256:k2")
+    with as_uid(0):
+        rc, out = quiet(U.main, ["rebuild", "web-1", "--no-dump"])
+    release_lock()
+    res = last_result(out)
+    after = D.containers["web-1"]["Image"]
+    if change:
+        change()
+    with as_uid(0):
+        rc2, out2 = quiet(U.main, ["rollback", res["op"]])
+    release_lock()
+    return rc, after, rc2, D.containers["web-1"]["Image"], out2
+
+
+check("rebuild and rollback of a build without image: (compose's name caddy-caddy)",
+      rebuild_then_rollback("caddy", "caddy", "caddy-caddy", {"build": {"context": "."}})[:4],
+      (0, "sha256:k2", 0, "sha256:k1"))
+check("rebuild and rollback without image: in a project started under another name (-p edge: edge-caddy)",
+      rebuild_then_rollback("edge", "caddy", "edge-caddy", {"build": {"context": "."}})[:4],
+      (0, "sha256:k2", 0, "sha256:k1"))
+check("rebuild and rollback with image: as before",
+      rebuild_then_rollback("caddy", "caddy", "acme/caddy:custom", {"build": {"context": "."},
+                                                                   "image": "acme/caddy:custom"})[:4],
+      (0, "sha256:k2", 0, "sha256:k1"))
+r = rebuild_then_rollback("caddy", "caddy", "caddy-caddy", {"build": {"context": "."}},
+                          change=lambda: D.cfg["services"]["caddy"].update(image="acme/caddy:2"))
+check("rollback refused when the files give the built service another image since: exit 5, the rebuild runs on",
+      (r[2], r[3], "The compose files now give caddy: acme/caddy:2 instead of caddy-caddy" in r[4]), (5, "sha256:k2", True))
+r = rebuild_then_rollback("caddy", "caddy", "caddy-caddy", {"build": {"context": "."}},
+                          change=lambda: D.undefined.add("caddy"))
+check("rollback refused when the files no longer define the built service: exit 5, the rebuild runs on",
+      (r[2], r[3], "The compose files now give caddy: – instead of caddy-caddy" in r[4]), (5, "sha256:k2", True))
+r = rebuild_then_rollback("caddy", "caddy", "caddy-caddy", {"build": {"context": "."}},
+                          change=lambda: D.cfg["services"].update(caddy={"image": "caddy-caddy"}))
+check("rollback of a build whose service now pulls the same name: allowed (the files give that image)",
+      r[2:4], (0, "sha256:k1"))
 D.cfg = {"services": {}}
 
 # ------------------------------------------------------------ cleanup rules
