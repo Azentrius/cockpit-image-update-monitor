@@ -106,6 +106,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -1978,6 +1979,15 @@ PG_DROP_FIRST = r"""U="${POSTGRES_USER:-postgres}"; D="${POSTGRES_DB:-$U}"
   psql -X -q -v ON_ERROR_STOP=1 -v d="$D" -U "$U" -d postgres"""
 PG_RESTORE = 'exec psql -X -q -v ON_ERROR_STOP=0 -U "${POSTGRES_USER:-postgres}" -d postgres -o /dev/null'
 PG_ANALYZE = 'exec vacuumdb -U "${POSTGRES_USER:-postgres}" --all --analyze-only --quiet'
+# Roles that log in with an MD5 password hash: the images of PostgreSQL 14 and
+# newer let clients in over the network with scram-sha-256 only.
+PG_MD5_ROLES = ('psql -X -U "${POSTGRES_USER:-postgres}" -d postgres -At -c '
+                '"select rolname from pg_authid where rolcanlogin and rolpassword like \'md5%\' order by 1"')
+# After the restore: the user of the environment logs in over TCP with its
+# password, as the services that wait for the database do.
+PG_LOGIN = ('[ -n "$POSTGRES_PASSWORD" ] || { echo skipped; exit 0; }; PGPASSWORD="$POSTGRES_PASSWORD" exec psql -X '
+            '-h 127.0.0.1 -p "${PGPORT:-5432}" -U "${POSTGRES_USER:-postgres}" -d postgres -Atc "select 1"')
+PROBE_LABEL = "image-updates.probe"     # the throwaway containers of a major's trial run
 
 
 def major_of(version):
@@ -2122,16 +2132,105 @@ def make_major(name, new_tag):
                   if any((inspect(n)["State"] or {}).get("Running") for n in d["containers"])]
     try:
         mj["extensions"] = sorted(set(pg_lines(name, PG_EXTENSIONS, timeout=120)) - {"plpgsql"})
+        md5 = pg_lines(name, PG_MD5_ROLES, timeout=120)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
         return refuse("major-unreadable", (getattr(e, "stderr", None) or str(e)).strip()[-300:])
+    # The dump keeps the password hashes: an MD5 one would not let its role in
+    # any more, unless the compose file keeps MD5 for the network.
+    auth = str((env.get("POSTGRES_HOST_AUTH_METHOD") if isinstance(env, dict) else None) or "").lower()
+    if md5 and auth not in ("md5", "password", "trust"):
+        return refuse("major-md5", ", ".join(md5[:10]))
     mj["data_bytes"] = next((d["size"] for d in plan["dbs"] if d["name"] == name), None)
     mj["data_free"] = shutil.disk_usage(src).free
     if mj["data_bytes"] is not None and mj["data_free"] < mj["data_bytes"] + FREE_MARGIN:
         return refuse("major-space", f"{human(mj['data_free'])} | {human(mj['data_bytes'] + FREE_MARGIN)}")
+    # The trial run (probe_restore) keeps a copy in Docker's directory for a while.
+    root = docker_root()
+    if root and mj["data_bytes"] is not None and not same_fs(root, src):
+        free = shutil.disk_usage(root).free
+        if free < mj["data_bytes"] + FREE_MARGIN:
+            return refuse("major-probe-space", f"{human(free)} | {human(mj['data_bytes'] + FREE_MARGIN)} | {root}")
     mj["fingerprint"] = hashlib.sha256(json.dumps([rt["fingerprint"], mount, pgdata, mj["stop"]],
                                                   sort_keys=True).encode()).hexdigest()
     mj["possible"] = True
     return plan, ctx
+
+
+def same_fs(a, b):
+    return os.stat(a).st_dev == os.stat(b).st_dev
+
+
+def docker_root():
+    """Docker's own directory (anonymous volumes live there), or None."""
+    try:
+        root = run(["docker", "info", "-f", "{{.DockerRootDir}}"], timeout=60).strip()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return None
+    return root if root.startswith("/") and os.path.isdir(root) else None
+
+
+def drop_probes():
+    """Containers of a trial run that a killed run left behind (PROBE_LABEL),
+    with their anonymous volumes."""
+    try:
+        ids = run(["docker", "ps", "-aq", "--filter", "label=" + PROBE_LABEL], timeout=60).split()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return
+    for i in ids:
+        run(["docker", "rm", "-f", "-v", i], check=False, timeout=120)
+
+
+def probe_restore(name, plan, op, before):
+    """Before anything changes (the old database runs on its data): the dump
+    restored into a throwaway container of the new major, without network, on
+    an anonymous volume, removed afterwards, and counted as the run counts it.
+    A dump the new major does not take, or other counts, stop the major here
+    (exit 5)."""
+    mj, new_ref, new = plan["major"], plan["retag"]["image"], plan["major"]["to_major"]
+    env = env_of(inspect(name))
+    probe = f"{name}-probe-{op['id'][:15]}"
+    drop_probes()
+    cmd = ["docker", "run", "-d", "--rm", "--name", probe, "--network", "none",
+           "--label", f"{PROBE_LABEL}={op['id']}", "-e", "POSTGRES_PASSWORD=" + secrets.token_hex(16)]
+    for k in ("POSTGRES_USER", "POSTGRES_DB"):
+        if env.get(k):
+            cmd += ["-e", f"{k}={env[k]}"]
+    if mj.get("pgdata"):
+        cmd += ["-e", "PGDATA=" + mj["pgdata"]]
+    say(f"Probelauf: der Dump in einen Wegwerf-Container von PostgreSQL {new}, ohne Netz …",
+        f"Trial run: the dump into a throwaway container of PostgreSQL {new}, without network …")
+    why = None
+    try:
+        run(cmd + [new_ref], timeout=300)
+        try:
+            ready = wait_postgres(probe)
+        except Abort:
+            ready = False           # it ended and --rm removed it
+        if not ready:
+            why = pick("PostgreSQL startete nicht", "PostgreSQL did not start")
+        else:
+            errors = restore_into(probe, op["dumps"][0])
+            if errors:
+                for ln in errors[:20]:
+                    print(ln)
+                why = pick(f"Einspielen: {errors[0]}", f"restore: {errors[0]}")
+            else:
+                diff = compare_counts(before, table_counts(probe))
+                if diff:
+                    why = pick(f"Zeilen weichen ab: {diff[0]}", f"rows differ: {diff[0]}")
+    except subprocess.CalledProcessError as e:
+        why = ((e.stderr or "") if isinstance(e.stderr, str) else str(e)).strip()[-300:] or str(e)
+    except subprocess.TimeoutExpired:
+        why = pick("Zeitlimit überschritten", "time limit exceeded")
+    finally:
+        run(["docker", "rm", "-f", "-v", probe], check=False, timeout=120)
+    if why:
+        raise Abort(5, f"Probelauf in PostgreSQL {new} gescheitert ({why}) – nichts geändert, die Datenbank läuft "
+                       f"mit ihren Daten weiter.",
+                    f"Trial run in PostgreSQL {new} failed ({why}) – nothing changed, the database runs on with "
+                    f"its data.")
+    say(f"Probelauf: in PostgreSQL {new} eingespielt und gezählt – gleich.",
+        f"Trial run: restored into PostgreSQL {new} and counted – the same.")
 
 
 def cmd_major(name, new_tag, expect):
@@ -2196,7 +2295,7 @@ def make_place(data, suffix, op_id):
         os.mkdir(dst, st.st_mode & 0o7777)
         os.chown(dst, st.st_uid, st.st_gid)
         kept = {"type": "bind", "path": dst}
-    if os.stat(src).st_dev != os.stat(dst).st_dev:
+    if not same_fs(src, dst):
         drop_empty(kept)
         raise OSError(f"{dst} is not on the filesystem of {src}")
     return kept
@@ -2491,6 +2590,8 @@ def migrate(name, plan, ctx):
                            f"nichts geändert.",
                         f"{os.path.join(mj['data']['source'], pg_version_file)} does not say PostgreSQL {old} – "
                         f"nothing changed.")
+        # 4b. The trial run: does the new major take the dump, are the counts the same?
+        probe_restore(name, plan, op, before)
         change_files(op, ctx, rt, [service], st)
     except Interrupted as e:
         undo_early(op, base)
@@ -2532,6 +2633,17 @@ def migrate(name, plan, ctx):
             raise RuntimeError("counts")
         say(f"Gezählt nach dem Einspielen: {count_summary(after)} – gleich.",
             f"Counted after the restore: {count_summary(after)} – the same.")
+        # The services that wait for the database log in over the network with a password.
+        try:
+            out = run(["docker", "exec", name, "sh", "-c", PG_LOGIN], timeout=60).strip()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            line = (getattr(e, "stderr", None) or str(e) or "").strip().splitlines()
+            reason = major_reason(name, "login", pick("Anmeldung über TCP gescheitert: ", "Login over TCP failed: ")
+                                  + (line[-1] if line else "?")[:REASON_MAX - 40])
+            raise RuntimeError("login")
+        if out != "skipped":
+            say("Anmeldung über TCP mit dem Passwort aus der Umgebung: in Ordnung.",
+                "Login over TCP with the password from the environment: OK.")
         try:
             run(["docker", "exec", name, "sh", "-c", PG_ANALYZE], timeout=LIMITS["dump"])
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):

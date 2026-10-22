@@ -866,6 +866,13 @@ with os.fdopen(fd, "w") as f:
 os.chmod(tmp, 0o644)
 os.replace(tmp, p)
 PY
+# A role with an MD5 password would not get in after the major (the new image
+# allows scram-sha-256 over the network only): the plan refuses until it is set again.
+q appdb "set password_encryption = 'md5'; create role legacy login password 'old-only'" > /dev/null
+DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
+check "dbmajor --dry-run with a role that has an MD5 password: refused, the role named" \
+    '[ "$(jget "$DRY" "(d[\"major\"][\"possible\"], d[\"major\"][\"reason\"], d[\"major\"][\"detail\"])")" = "(False, '"'"'major-md5'"'"', '"'"'legacy'"'"')" ]'
+q appdb "set password_encryption = 'scram-sha-256'; alter role legacy password 'new-only'" > /dev/null
 # The image's name ends in "postgres": the helper reads the installed version from PG_VERSION.
 DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
 echo "  | plan: $(jget "$DRY" '(d["installed_version"], d["retag"]["reason"], d["major"]["possible"], d["major"]["reason"], d["major"]["detail"])')"
@@ -886,6 +893,9 @@ check "dbmajor: exit 0, ok, PostgreSQL 17 runs with the same data (counts, check
     '[ $RC = 0 ] && [ "$SM" = "('"'"'ok'"'"', '"'"'imgupd-test/postgres:'"$V17"''"'"')" ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 17 ] && [ "$(DATA)" = "$DATA0" ]'
 check "dbmajor: the tag line changed, the old data kept in a volume of its own (PostgreSQL 16)" \
     '[ "$(grep -c "image: imgupd-test/postgres:$V17$" "$D4/docker-compose.yml")" = 1 ] && [ -n "$KEPT16" ] && [ "$(cat "$(docker volume inspect -f "{{.Mountpoint}}" "$KEPT16")/PG_VERSION")" = 16 ]'
+# The trial run comes before the data moves (its line before "… is now in …").
+check "dbmajor: the trial run restored the dump into PostgreSQL 17 first, the login over TCP checked, no probe left" \
+    'grep -q "Trial run: restored into PostgreSQL 17 and counted – the same." /tmp/e2e-m1.log && grep -q "Login over TCP with the password from the environment: OK." /tmp/e2e-m1.log && [ "$(grep -n "Trial run: restored" /tmp/e2e-m1.log | cut -d: -f1)" -lt "$(grep -n "is now in" /tmp/e2e-m1.log | head -n1 | cut -d: -f1)" ] && [ -z "$(docker ps -aq --filter label=image-updates.probe)" ]'
 check "dbmajor: the app runs again, the extension is there, the history knows the run" \
     '[ "$(docker inspect -f "{{.State.Running}}" imgupd-test-major-app)" = true ] && [ "$(q shop "select extversion is not null from pg_extension where extname = '"'"'pgcrypto'"'"'")" = t ] && grep -q "\"id\": \"$OPM\".*\"kind\": \"dbmajor\"" "$OPS"'
 BKM=$(python3 $H backups)

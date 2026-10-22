@@ -83,9 +83,10 @@ class Scene:
             else os.path.join(self.dir, "srv", "pg")
         write_tree(self.src, ORIGINAL)
 
-    def run(self, action, op=None, stop_at=None, sig=None, fail=()):
+    def run(self, action, op=None, stop_at=None, sig=None, fail=(), probe_fail=False):
         """The child: (exit code, output, whether it reached stop_at)."""
-        cfg = {"action": action, "op": op, "type": self.typ, "src": self.src, "fail": list(fail)}
+        cfg = {"action": action, "op": op, "type": self.typ, "src": self.src, "fail": list(fail),
+               "probe_fail": probe_fail}
         ready_r, ready_w = os.pipe()
         go_r, go_w = os.pipe()
         if stop_at:
@@ -122,6 +123,10 @@ class Scene:
         ops = [o for o in self.ops().values() if o.get("kind") == "dbmajor"]
         assert len(ops) == 1, ops
         return ops[0]
+
+    def calls(self):
+        path = os.path.join(self.dir, "calls.jsonl")
+        return [json.loads(line)["cmd"] for line in open(path)] if os.path.exists(path) else []
 
     def ups(self):
         """The data directory as it was at each start of the database."""
@@ -270,6 +275,21 @@ for typ in ("bind", "volume"):
     check(f"rollback ({typ}) without a break: exit 0, the old database on all of its data, the new major's kept",
           (rc, sc.ups()[-1], tree(sc.src), list(sc.places().values()), op.get("old_data"), op.get("rolled_back")),
           (0, ORIGINAL, ORIGINAL, [NEW17], None, True))
+
+# ------------------------------------------------ the trial run fails ----
+# Before the database changes, the dump goes into a throwaway container of the
+# new major: if that fails, the major stops there with nothing changed.
+sc = Scene()
+rc, out, _ = sc.run("migrate", probe_fail=True)
+calls = sc.calls()
+probe_run = [c for c in calls if c[:2] == ["docker", "run"]]
+check("major, the trial run's restore fails: exit 5, said so, nothing in the history, the data untouched",
+      (rc, "Trial run in PostgreSQL 17 failed (restore: psql:<stdin>:9: ERROR:  stand-in error)" in out,
+       sc.ops(), tree(sc.src), sc.places()), (5, True, {}, ORIGINAL, {}))
+check("major, the trial run fails: the database never stopped nor started, the waiting service started again, "
+      "the probe removed", ([c for c in calls if c[-2:] == ["stop", "db"]], sc.ups(), calls[-1][-2:] == ["start", "web"],
+                            len(probe_run), ["docker", "rm", "-f", "-v", probe_run[0][probe_run[0].index("--name") + 1]] in calls),
+      ([], [], True, 1, True))
 
 # ------------------------------------ states that start no database ----
 # A 0.23.0 run stopped while it moved: its data in the place it made, the

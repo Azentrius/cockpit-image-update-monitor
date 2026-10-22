@@ -13,6 +13,7 @@ point, no timing).
       type         "bind" or "volume": where the data lies
       stop_at      the rename after which the child waits (with ready_fd, go_fd)
       fail         renames (by attempt) that fail with an OSError
+      probe_fail   the trial run's restore gives an error
 
 What happened goes to <dir>/calls.jsonl: every docker command, and for each
 `up` of the database the files of its data directory at that moment."""
@@ -135,7 +136,8 @@ U.dump_db = lambda project, db, st: f"{project}/{st}_{db['name']}.sql.gz"
 U.table_counts = lambda name: {"postgres": {"public.t": 3}}
 U.change_files = lambda op, ctx, rt, services, st: U.record(op, log=op["id"] + ".log")
 U.wait_postgres = lambda name: True
-U.restore_into = lambda name, rel: []
+U.restore_into = lambda name, rel: (['psql:<stdin>:9: ERROR:  stand-in error'] if CFG.get("probe_fail") and "-probe-" in name
+                                    else [])
 U.version_of = lambda ref, iid: "17.6" if iid == "sha256:new" else "16.14"
 U.wait_healthy = lambda project, services: (True, [], {})
 U.start_radar = lambda: None

@@ -110,8 +110,8 @@
     function majorReason(plan) {
         const mj = plan.major || {};
         if (!String(mj.reason || "").startsWith("major-")) return retagReason(plan);
-        const [a, b] = String(mj.detail || "").split(" | ");
-        const text = t("reason." + mj.reason, { detail: mj.detail || "", a: a || "", b: b || "" });
+        const [a, b, c] = String(mj.detail || "").split(" | ");
+        const text = t("reason." + mj.reason, { detail: mj.detail || "", a: a || "", b: b || "", c: c || "" });
         return text.charAt(0).toUpperCase() + text.slice(1);
     }
 
