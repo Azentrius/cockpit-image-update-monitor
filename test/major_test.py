@@ -3,7 +3,8 @@
 """Offline tests for the database major of diun-update.py (stage 5): the plan
 and every reason it refuses (make_major, with Docker and compose stood in
 for), where a new major keeps its data (PostgreSQL 18), the counts and the
-error lines of a restore, the parts that move data (a place next to it,
+error lines of a restore, roles with MD5 passwords, the trial run in a
+throwaway container (probe_restore), the parts that move data (a place next to it,
 renames that never replace a file, a place removed only while empty), which
 kept places may ever be deleted, and the refusals of delete-olddata. A major
 and its rollback stopped half way by real signals are in
@@ -165,7 +166,11 @@ def plan_of(target="17.6", services=("db",), env=None, size=10 << 20):
 STATE = {}
 
 
-def stand_in(plan_ctx=None, c=None, kind="postgres", lines=("pgcrypto", "plpgsql"), free=50 << 30):
+def stand_in(plan_ctx=None, c=None, kind="postgres", lines=("pgcrypto", "plpgsql"), free=50 << 30, md5=(),
+             root=None, root_free=None):
+    """make_major's "major" with Docker, compose and psql stood in for: lines
+    the extensions, md5 the roles with an MD5 password, root Docker's own
+    directory (on another filesystem than the data, with root_free free)."""
     plan, ctx = plan_ctx or plan_of()
     U.make_retag = lambda name, tag, db_major=False: (copy.deepcopy(plan), copy.deepcopy(ctx))
     cs = {"db": c or container(), "app": container(running=True), "cron": container(running=False)}
@@ -176,8 +181,10 @@ def stand_in(plan_ctx=None, c=None, kind="postgres", lines=("pgcrypto", "plpgsql
             raise lines
         U.pg_lines = boom
     else:
-        U.pg_lines = lambda name, script, timeout=None: list(lines)
-    U.shutil.disk_usage = lambda p: type("du", (), {"free": free})()
+        U.pg_lines = lambda name, script, timeout=None: list(md5 if script == U.PG_MD5_ROLES else lines)
+    U.docker_root = lambda: root
+    U.same_fs = lambda a, b: root is None
+    U.shutil.disk_usage = lambda p: type("du", (), {"free": root_free if p == root else free})()
     return U.make_major("db", "17.6")[0]["major"]
 
 
@@ -207,8 +214,17 @@ for label, kw, reason in (
          "major-pgdata"),
         ("the extensions unreadable", {"lines": U.subprocess.CalledProcessError(2, ["psql"], "", "no psql")},
          "major-unreadable"),
-        ("too little space next to the data", {"free": 100 << 20}, "major-space")):
+        ("too little space next to the data", {"free": 100 << 20}, "major-space"),
+        ("roles with an MD5 password (the new image lets them in with scram-sha-256 only)",
+         {"md5": ("legacy", "oldapp")}, "major-md5"),
+        ("too little space for the trial run in Docker's directory on another filesystem",
+         {"root": "/var/lib/docker", "root_free": 100 << 20}, "major-probe-space")):
     check(f"plan refused: {label}", stand_in(**kw)["reason"], reason)
+check("plan refused: the MD5 roles named", stand_in(md5=("legacy", "oldapp"))["detail"], "legacy, oldapp")
+check("plan: MD5 roles, but the compose file keeps MD5 for the network (POSTGRES_HOST_AUTH_METHOD): possible",
+      stand_in(plan_of(env={"POSTGRES_PASSWORD": "x", "POSTGRES_HOST_AUTH_METHOD": "md5"}), md5=("legacy",))["possible"], True)
+check("plan: Docker's directory on another filesystem with room for the trial run: possible",
+      stand_in(root="/var/lib/docker", root_free=50 << 30)["possible"], True)
 check("plan: PostgreSQL 18 with PGDATA in the compose file: possible",
       (lambda m: (m["possible"], m["pgdata"]))(stand_in(plan_of(target="18.1", env={"PGDATA": "/var/lib/postgresql/data"}))),
       (True, "/var/lib/postgresql/data"))
@@ -227,6 +243,63 @@ check("plan: the fingerprint follows the stop list and the mount",
                                                                  "Destination": "/var/lib/postgresql/data"}]))["fingerprint"],
       True)
 U.make_retag = nope
+
+
+# ------------------------------------------------------- the trial run ----
+class Probe:
+    """docker run / rm / ps for probe_restore; ready, errors, counts: what the
+    probe's PostgreSQL does."""
+    def __init__(self, ready=True, errors=(), counts=None, left=()):
+        self.ready, self.errors, self.counts, self.left, self.calls = ready, list(errors), counts, list(left), []
+
+    def run(self, cmd, check=True, capture=True, timeout=600):
+        self.calls.append(list(cmd))
+        if cmd[:3] == ["docker", "ps", "-aq"]:
+            return "".join(i + "\n" for i in self.left)
+        return ""
+
+
+def probe(**kw):
+    p = Probe(**kw)
+    U.run = p.run
+    U.inspect = lambda n: container(env=("PG_VERSION=16.14", "POSTGRES_USER=owner", "POSTGRES_DB=appdb",
+                                         "POSTGRES_PASSWORD=the-real-secret"))
+    U.wait_postgres = lambda n: p.ready
+    U.restore_into = lambda n, rel: list(p.errors)
+    U.table_counts = lambda n: p.counts if p.counts is not None else copy.deepcopy(BEFORE)
+    plan = {"retag": {"image": "postgres:17.6-alpine"}, "major": {"to_major": 17, "pgdata": "/var/lib/postgresql/data"}}
+    op = {"id": "20261022-210000-db", "dumps": ["app/20261022-210000_db.sql.gz"]}
+    try:
+        with redirect_stdout(io.StringIO()) as out:
+            U.probe_restore("db", plan, op, BEFORE)
+        return p, None, out.getvalue()
+    except U.Abort as e:
+        return p, (e.code, str(e)), ""
+
+
+p, err, out = probe(left=("abc123",))
+run_cmd_ = next(c for c in p.calls if c[:2] == ["docker", "run"])
+check("probe: the earlier probe of a killed run removed first, then the new one started",
+      ([c for c in p.calls if c[:3] == ["docker", "rm", "-f"]][0], run_cmd_[:3]), (["docker", "rm", "-f", "-v", "abc123"], ["docker", "run", "-d"]))
+check("probe: no network, labelled with the operation, the user, database and PGDATA of the real one, the new image",
+      ("--network" in run_cmd_ and run_cmd_[run_cmd_.index("--network") + 1], "image-updates.probe=20261022-210000-db" in run_cmd_,
+       "POSTGRES_USER=owner" in run_cmd_, "POSTGRES_DB=appdb" in run_cmd_, "PGDATA=/var/lib/postgresql/data" in run_cmd_,
+       run_cmd_[-1]), ("none", True, True, True, True, "postgres:17.6-alpine"))
+check("probe: the database's own password never on the command line (a random one for the probe)",
+      (any("the-real-secret" in a for c in p.calls for a in c),
+       len([a for a in run_cmd_ if a.startswith("POSTGRES_PASSWORD=")][0]) - len("POSTGRES_PASSWORD=")), (False, 32))
+check("probe without a difference: no error, said so, the probe removed",
+      (err, "the same" in out, p.calls[-1]), (None, True, ["docker", "rm", "-f", "-v", "db-probe-20261022-210000"]))
+for label, kw, want in (("the restore fails", {"errors": ['psql:<stdin>:7: ERROR:  type "x" does not exist']},
+                         'restore: psql:<stdin>:7: ERROR:  type "x" does not exist'),
+                        ("the counts differ", {"counts": {"appdb": {"public.notes": 299, "public.empty": 0},
+                                                          "shop": {"public.items": 5000}}},
+                         "rows differ: appdb: public.notes 300 -> 299"),
+                        ("PostgreSQL does not start", {"ready": False}, "PostgreSQL did not start")):
+    p, err, _ = probe(**kw)
+    check(f"probe: {label}: exit 5, nothing changed, the cause named, the probe removed",
+          (err[0], want in err[1], "nothing changed" in err[1], p.calls[-1]),
+          (5, True, True, ["docker", "rm", "-f", "-v", "db-probe-20261022-210000"]))
 
 
 # --------------------------------------------------- delete-olddata ----

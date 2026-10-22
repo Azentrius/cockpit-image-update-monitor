@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.25.0 – 2026-10-22
+
+A database major tries the dump in a throwaway container of the new major before it touches the
+database, and refuses roles that the new major would lock out.
+
+**Upgrading:** nothing to do. A major now needs room for the trial run in Docker's directory too,
+when that lies on another filesystem than the data.
+
+- **Trial run before the data changes.** After the dump and the counts, the major restores the dump
+  into a throwaway container of the new image (no network, an anonymous volume, removed afterwards,
+  a random password, never the real one) and counts again. A restore error, other counts or a
+  probe that does not start stop the major there with nothing changed: the database runs on with
+  its data, the waiting services start again. Probes a killed run left behind go before a new one.
+- **Roles with an MD5 password.** The images of PostgreSQL 14 and newer let clients in over the
+  network with `scram-sha-256` only, and the dump keeps each role's password hash. The plan now
+  refuses a major while roles log in with an MD5 hash (`major-md5`, the roles named), unless the
+  compose file keeps `POSTGRES_HOST_AUTH_METHOD: md5`.
+- **Login check after the restore.** The user of the environment logs in over TCP with
+  `POSTGRES_PASSWORD`, as the waiting services do; a refused login fails the run with its rollback.
+- **Room for the trial run.** When Docker's directory lies on another filesystem than the data,
+  the plan checks the room there too (`major-probe-space`).
+- **Tests.** `test/major_test.py`: the MD5 refusal and its exception, the room for the trial run,
+  the trial run itself (no network, label, user, database and PGDATA of the real one, never its
+  password, an earlier probe removed first, removed afterwards; restore errors, other counts and a
+  probe that does not start). `test/major_recovery_test.py`: a failed trial run changes nothing
+  (the database never stopped, nothing moved, no history). `test/db-major.js`: the new refusals in
+  both languages. `test/e2e-server.sh` section 17: a role with an MD5 password refused until it is
+  set again, the trial run before the data moves, the login check, no probe left.
+
 ## 0.24.1 – 2026-10-21
 
 Two fixes. A database major stopped while it moves the data (since 0.23.0) can no longer leave the

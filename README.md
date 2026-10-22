@@ -300,14 +300,17 @@ A newer PostgreSQL major (e.g. 16 â†’ 17) is offered in **Change version** as â€
 1. pulls the new image and checks that it ships the extensions in use;
 2. keeps a rollback copy of the old image and stops the services that wait for the database;
 3. dumps the database and counts every table of every database;
-4. changes the tag line of the compose file (as *Change version* does, with a byte-exact copy);
-5. stops the database and moves its data aside: into a volume of its own next to a named volume, or a directory next to a bind mount (renames on the same filesystem, no second copy);
-6. starts the new major on the emptied place, restores the dump and compares the counts;
-7. starts the waiting services again.
+4. **trial run** (since 0.25.0): restores the dump into a throwaway container of the new major, without network, and counts again. Only if everything matches does it go on; otherwise it stops here with nothing changed, and the database runs on with its data;
+5. changes the tag line of the compose file (as *Change version* does, with a byte-exact copy);
+6. stops the database and moves its data aside: into a volume of its own next to a named volume, or a directory next to a bind mount (renames on the same filesystem, no second copy);
+7. starts the new major on the emptied place, restores the dump, compares the counts and checks that the user of the environment can log in over the network with its password;
+8. starts the waiting services again.
 
 Anything that fails before the database stops leaves nothing changed. Later the history offers the rollback: it moves the old data back (what was written after the major is not in it) and keeps the new major's data. The old data stays until **Release** in the history deletes it.
 
 **A run that is stopped while it moves the data** (since 0.24.1): each move is in the history before its first file moves. SIGTERM, SIGHUP and Ctrl-C wait until the move and its record are done, then the run fails with its rollback. After a hard stop (SIGKILL, a power cut) the history keeps the open move, and the rollback finishes it. The rollback starts the old database only once its data is complete again (the same entries, `PG_VERSION` of the old major); otherwise it fails and leaves everything where it is, so PostgreSQL never sets up a new, empty cluster in place of the data. Nothing is deleted when a move or its undo fails. Up to 0.24.0 a signal or a kill during the move could leave the data in the kept place without the history knowing; the rollback of 0.24.1 finds such a place by its name and puts the data back.
+
+**Roles with an MD5 password:** the images of PostgreSQL 14 and newer let clients in over the network with `scram-sha-256` only, and the dump keeps each role's password hash. The preview therefore refuses a major while roles still log in with an MD5 hash and names them: set their passwords again after `SET password_encryption = 'scram-sha-256'`, or keep `POSTGRES_HOST_AUTH_METHOD: md5` in the compose file.
 
 **Limits:** the data must lie in a named volume of the `local` driver or a bind mount that is no mount point of its own. PostgreSQL 18 keeps its data in `/var/lib/postgresql/18/docker`: add `PGDATA: /var/lib/postgresql/data` to the service's environment first (the preview says so). MariaDB/MySQL majors, pgvector's `pg17` tags and `pg_upgrade` are not supported yet.
 

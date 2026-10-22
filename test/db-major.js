@@ -141,6 +141,26 @@ const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => t
         assert.strictEqual(x.$("dm-dialog-result").textContent, ok);
         x.$("dm-dialog-cancel").click();
     }
+    // Refusals of 0.25.0: roles with an MD5 password (the new image lets them in
+    // with scram-sha-256 only), too little room for the trial run.
+    for (const [lang, major, want] of [
+        ["en", { possible: false, reason: "major-md5", detail: "legacy, oldapp" },
+         "Roles log in with an MD5 password (legacy, oldapp); the image of the new major lets clients in over the network with scram-sha-256 only."],
+        ["de", { possible: false, reason: "major-probe-space", detail: "100 MiB | 1.11 GiB | /var/lib/docker" },
+         "Zu wenig Platz für den Probelauf in Dockers Verzeichnis /var/lib/docker: 100 MiB frei, 1.11 GiB nötig."]]) {
+        const r = boot(lang, { ...BASE, "diun-update.py dbmajor": (cmd) => ({ out: JSON.stringify(plan(cmd[3], major)) }) });
+        await settle();
+        rowOf(r.d, "glitchtip-postgres").querySelector("button[data-retag]").click();
+        await settle();
+        const sel = r.$("dm-retag-select");
+        sel.value = "17.11-alpine";
+        sel.dispatchEvent(new r.w.Event("change"));
+        await settle();
+        const why = r.$("dm-retag-preview").textContent;
+        console.log(`${major.reason} (${lang}):`, why);
+        assert(why.includes(want), why);
+        assert(r.$("dm-dialog-confirm").disabled);
+    }
     // The history: the kept data released for good, after a confirmation.
     const b = boot("de", BASE);
     await settle();
