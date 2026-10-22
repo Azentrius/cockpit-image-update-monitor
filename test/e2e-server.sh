@@ -208,10 +208,8 @@ cleanup() {
     done
     # Docker refuses to drop the LAST tag of an image that running containers
     # use (e.g. other databases on the same build). -f then only removes our
-    # tag - the image itself stays because it is in use. An image a build
-    # pulled keeps its repository by digest once its tag has moved on
-    # (localhost:5000/imgupd-test/postgres:<none>): that reference goes by digest.
-    for t in $(docker image ls --format '{{if eq .Tag "<none>"}}{{.Repository}}@{{.Digest}}{{else}}{{.Repository}}:{{.Tag}}{{end}}' |
+    # tag - the image itself stays because it is in use.
+    for t in $(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -v ':<none>$' |
                grep -E '(^|/)imgupd-test/|^imgupd-test-build-'); do
         if docker rmi "$t" >/dev/null 2>&1; then
             echo "untagged $t"
@@ -219,6 +217,18 @@ cleanup() {
             docker rmi -f "$t" >/dev/null && echo "untagged $t (last tag, image still running)"
         else
             echo "WARNING: $t not removed"
+        fi
+    done
+    # An image a build pulled keeps its repository by digest once its tag has
+    # moved on (listed as localhost:5000/imgupd-test/postgres:<none>; the list
+    # does not give that digest). Those references come from the images' own
+    # RepoDigests and go one by one, the image itself only with its last one.
+    for r in $(docker image ls -aq | sort -u | xargs -r docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' |
+               grep -E '(^|/)imgupd-test/|^imgupd-test-build-' | sort -u); do
+        if docker rmi "$r" >/dev/null 2>&1; then
+            echo "removed $r"
+        else
+            echo "WARNING: $r not removed"
         fi
     done
     rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${DUMPS:?}/${P4:?}" "${DUMPS:?}/${P5:?}" "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}"
