@@ -190,6 +190,8 @@ PY
 }
 
 cleanup() {
+    local rc=$?     # the test's own result: anything it leaves behind turns a pass into a failure
+    local n_c n_t n_d n_l n_b n_v
     trap '' INT TERM HUP
     echo "=== Cleanup ==="
     [ -n "${HOLDER:-}" ] && kill "$HOLDER" 2>/dev/null
@@ -206,8 +208,11 @@ cleanup() {
     done
     # Docker refuses to drop the LAST tag of an image that running containers
     # use (e.g. other databases on the same build). -f then only removes our
-    # tag - the image itself stays because it is in use.
-    for t in $(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E '(^|/)imgupd-test/|^imgupd-test-build-'); do
+    # tag - the image itself stays because it is in use. An image a build
+    # pulled keeps its repository by digest once its tag has moved on
+    # (localhost:5000/imgupd-test/postgres:<none>): that reference goes by digest.
+    for t in $(docker image ls --format '{{if eq .Tag "<none>"}}{{.Repository}}@{{.Digest}}{{else}}{{.Repository}}:{{.Tag}}{{end}}' |
+               grep -E '(^|/)imgupd-test/|^imgupd-test-build-'); do
         if docker rmi "$t" >/dev/null 2>&1; then
             echo "untagged $t"
         elif [ -n "$(docker ps -q --filter ancestor="$(docker image inspect -f '{{.Id}}' "$t")")" ]; then
@@ -253,12 +258,18 @@ PY
             && echo "status.json: written again without the test project"
     fi
     rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" "${D5:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz /tmp/e2e-ready /tmp/e2e-go
-    echo "Left over: $(docker ps -a --format '{{.Names}}' | grep -c imgupd) containers," \
-         "$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/|^imgupd-test-build-') tags," \
-         "$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' | wc -l) test dump folders," \
-         "$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l) test logs," \
-         "$(find "$BK_DIR/compose" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l) test file backups," \
-         "$(docker volume ls -q --filter name='^imgupd-test-major_' | wc -l) test volumes"
+    n_c=$(docker ps -a --format '{{.Names}}' | grep -c imgupd)
+    n_t=$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/|^imgupd-test-build-')
+    n_d=$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l)
+    n_l=$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l)
+    n_b=$(find "$BK_DIR/compose" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l)
+    n_v=$(docker volume ls -q --filter name='^imgupd-test-major_' | wc -l)
+    echo "Left over: $n_c containers, $n_t tags, $n_d test dump folders, $n_l test logs, $n_b test file backups," \
+         "$n_v test volumes"
+    if [ "$rc" = 0 ] && [ $((n_c + n_t + n_d + n_l + n_b + n_v)) != 0 ]; then
+        echo "E2E: FAILURES (the test left something behind)"
+        exit 1
+    fi
 }
 trap cleanup EXIT
 
