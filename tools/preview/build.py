@@ -26,22 +26,31 @@ if (_l && _l !== "en") cockpit.locale({"": {"language": _l, "language-direction"
 
 
 def main():
-    preview = json.load(open(os.path.join(FIX, "preview.json")))
+    preview = json.load(open(os.path.join(FIX, "preview.json"), encoding="utf-8"))
+    # An image built on this server with a newer base (Rebuild in its row):
+    # only in the preview, the tests keep the fixtures as they are.
+    built = preview["built"]
+    radar = json.load(open(os.path.join(FIX, "versions2.json"), encoding="utf-8"))
+    radar["images"].extend(built["radar"])
+    inventory = open(os.path.join(FIX, "inventory3.jsonl"), encoding="utf-8").read()
+    inventory += "".join(json.dumps(c) + "\n" for c in built["inventory"])
     fixtures = {
         "files": {
             "/var/lib/diun/events.jsonl": open(os.path.join(FIX, "events.jsonl")).read(),
-            "/var/lib/diun-radar/versions.json": json.load(open(os.path.join(FIX, "versions2.json"))),
+            "/var/lib/diun-radar/versions.json": radar,
             "/var/lib/diun-radar/releases.json": json.load(open(os.path.join(FIX, "releases.json"))),
             "/var/lib/diun/dismissed.json": None,
             "/etc/hostname": "docker-host",
         },
-        "inventory": open(os.path.join(FIX, "inventory3.jsonl")).read(),
+        "inventory": inventory,
         "deps": {"root": True, "docker": {"state": "ok", "compose": True},
                  "diun": {"state": "running", "events": True}, "skopeo": {"state": "ok"},
                  "radar": {"state": "active", "running": False},
                  "cleanup": {"state": "active", "can_install": True}},
         "plans": preview["plans"],
         "retag": preview["retag"],
+        "rebuild": preview["rebuild"],
+        "majors": preview["majors"],
         "backups": preview["backups"],
         "log": preview["log"],
         "retagLog": preview["retag_log"],

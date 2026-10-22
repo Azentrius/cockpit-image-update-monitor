@@ -54,6 +54,27 @@ def main():
         pg.wait_for_timeout(400)
         pg.screenshot(path=os.path.join(OUT, "version-dialog.png"))
 
+        # Change version to a database major: the plan of `dbmajor … --dry-run`
+        pg = page(1440, 900, "en")
+        pg.click('td.az-cell-actions button[data-retag="glitchtip-postgres"]')
+        pg.select_option("#dm-retag-select", "17-alpine")
+        pg.wait_for_selector("#dm-mj-backup")
+        pg.wait_for_timeout(300)
+        pg.screenshot(path=os.path.join(OUT, "major-dialog.png"))
+
+        # An image built on this server with a newer base: Rebuild in its row
+        # (on a phone, scrolled to it) and the plan of the rebuild
+        pg = page(1440, 900, "en")
+        pg.click('button[data-kind="rebuild"]')
+        pg.wait_for_selector("#dm-dialog-body .dm-kv")
+        pg.wait_for_timeout(300)
+        pg.screenshot(path=os.path.join(OUT, "rebuild-dialog.png"))
+        pg = page(390, 844, "en")
+        pg.evaluate("() => document.querySelector('button[data-kind=\"rebuild\"]')"
+                    ".closest('tr').scrollIntoView({ block: 'center' })")
+        pg.wait_for_timeout(200)
+        pg.screenshot(path=os.path.join(OUT, "rebuild-phone.png"))
+
         pg = page(1440, 900, "en", "dark")
         pg.screenshot(path=os.path.join(OUT, "updates-dark.png"))
         pg.click('button[data-update="ollama"]')

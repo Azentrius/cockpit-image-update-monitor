@@ -48,6 +48,18 @@
                           git: null, fingerprint: "f".repeat(64) } };
     }
 
+    // `dbmajor <container> <tag> --dry-run`: the tag change of retagPlan plus
+    // "major" from the fixture; a target major the fixture lists as refused
+    // (PostgreSQL 18 without PGDATA) is refused as the helper does it.
+    function majorPlan(name, tag) {
+        const plan = retagPlan(name, tag);
+        const fx = FX.majors[name];
+        const to = parseInt(plan.target_version, 10);
+        const no = !fx ? { reason: "major-not-supported", detail: plan.image || name } : (fx.refused || {})[to];
+        return { ...plan, major: no ? { possible: false, ...no }
+                                    : { ...fx.major, to_major: to, fingerprint: "e".repeat(64) } };
+    }
+
     window.cockpit = {
         language: "en",
         hidden: false,
@@ -76,6 +88,13 @@
                 return fakeProcess(JSON.stringify(retagPlan(argv[2], argv[3])), []);
             }
             if (tool === "diun-update.py" && verb === "retag") return fakeProcess("", FX.retagLog);
+            if (tool === "diun-update.py" && verb === "dbmajor" && argv[4] === "--dry-run") {
+                return fakeProcess(JSON.stringify(majorPlan(argv[2], argv[3])), []);
+            }
+            if (tool === "diun-update.py" && verb === "rebuild" && argv[3] === "--dry-run") {
+                return fakeProcess(JSON.stringify(FX.rebuild[argv[2]] ||
+                    { container: argv[2], updatable: false, reason: "not-built" }), []);
+            }
             if (tool === "diun-update.py" && verb.indexOf("delete-") === 0) return fakeProcess("", ["Deleted.\n"]);
             if (tool === "diun-update.py" && verb === "radar") return fakeProcess("", ["Version radar running …\n", "Version radar finished.\n"]);
             if (tool === "diun-update.py" && verb === "cleanup") {
