@@ -168,6 +168,10 @@ an update, also for a service with `build:` and no `image:` line (since 0.24.1: 
 `<project>-<service>`, and the rollback checks that name). The Dockerfile itself is never changed: a
 version pinned there (`FROM caddy:2.11.4`) stays.
 
+| Rebuild in the row (phone) | The plan of a rebuild |
+|---|---|
+| ![An image built on the server with a newer base: Rebuild in its row, on a phone](docs/img/rebuild-phone.png) | ![Rebuild caddy: the base images, newer than the build, then the plan](docs/img/rebuild-dialog.png) |
+
 ```mermaid
 sequenceDiagram
     participant U as Cockpit (browser)
@@ -312,6 +316,8 @@ A newer PostgreSQL major (e.g. 16 → 17) or, since 0.25.0, MariaDB major (e.g. 
 8. starts the waiting services again.
 
 Anything that fails before the database stops leaves nothing changed. Later the history offers the rollback: it moves the old data back (what was written after the major is not in it) and keeps the new major's data. The old data stays until **Release** in the history deletes it.
+
+![Change version with a database major, PostgreSQL 16 → 17: where the data lies, what stops meanwhile, the extensions, the space and the two tick boxes](docs/img/major-dialog.png)
 
 **A run that is stopped while it moves the data** (since 0.24.1): each move is in the history before its first file moves. SIGTERM, SIGHUP and Ctrl-C wait until the move and its record are done, then the run fails with its rollback. After a hard stop (SIGKILL, a power cut) the history keeps the open move, and the rollback finishes it. The rollback starts the old database only once its data is complete again (the same entries, `PG_VERSION` of the old major, for MariaDB its `mysql_upgrade_info` when there was one); otherwise it fails and leaves everything where it is, so PostgreSQL never sets up a new, empty cluster in place of the data. Nothing is deleted when a move or its undo fails. Up to 0.24.0 a signal or a kill during the move could leave the data in the kept place without the history knowing; the rollback of 0.24.1 finds such a place by its name and puts the data back.
 
