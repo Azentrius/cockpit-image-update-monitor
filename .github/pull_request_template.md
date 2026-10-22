@@ -19,7 +19,7 @@ Security problems: do not open a pull request, see SECURITY.md.
 ## Checklist
 
 - [ ] Every new or changed text exists in English and German (`I18N.en` and `I18N.de`, `say(de, en)` / `msg de en`)
-- [ ] Changed formats (inventory, `versions.json`, `plan`, `backups`, `@@RESULT`) are changed together with the plugin, `test/fixtures/`, the tests and `docs/INTERNALS.md`
-- [ ] Entry under `## Unreleased` in `CHANGELOG.md` for user-visible changes
+- [ ] Changed formats (inventory, `versions.json`, `releases.json`, `plan`, `backups`, `@@RESULT`, `status`) are changed together with the plugin, `test/fixtures/`, the tests and `docs/INTERNALS.md`
+- [ ] User-visible changes are described above (the maintainer adds them to the version's section in `CHANGELOG.md`)
 - [ ] No secrets, tokens or real server data (host names, IP addresses, credentials) in code, tests, fixtures or this description
 - [ ] SPDX header on every new source file

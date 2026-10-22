@@ -71,8 +71,10 @@ The helpers in `lib/` run as root. Reports are particularly welcome for:
 - ways to make the plugin run commands or arguments other than the fixed helper verbs,
 - path or container-name handling that escapes the intended scope,
 - anything that lets the Diun container or `/var/lib/diun` influence code that runs as root,
-- data from registries, Diun events or compose files that reaches the page as markup or script (the
-  Cockpit session can act as root),
+- data from registries, Diun events, compose files or the release notes fetched from GitHub that
+  reaches the page as markup or script (the Cockpit session can act as root),
+- a database major or its rollback that moves, exposes or deletes data other than the places it set
+  aside (`delete-olddata`), or puts a database password on the host's command line or into a log,
 - dumps, logs or file copies under `/var/backups/image-updates` that others than root can read,
 - the package `cockpit-image-update-monitor` (its install and removal scripts) or `make install`
   overwriting or exposing files it should not touch.

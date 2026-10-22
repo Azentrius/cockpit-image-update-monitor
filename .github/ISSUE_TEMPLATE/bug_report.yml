@@ -18,7 +18,7 @@ body:
       description: >-
         Shown in the page footer ("Image Update Monitor X.Y.Z"), or the output of
         `dpkg -s cockpit-image-update-monitor` or `rpm -q cockpit-image-update-monitor`.
-      placeholder: "0.18.1"
+      placeholder: "0.25.0"
     validations:
       required: true
   - type: input

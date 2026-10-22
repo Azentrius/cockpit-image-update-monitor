@@ -8,7 +8,7 @@ together.
 
 | Path | Content | Owner / mode |
 |---|---|---|
-| `/usr/share/cockpit/image-updates/` | plugin (package `cockpit-image-updates`) | root, 644 |
+| `/usr/share/cockpit/image-updates/` | plugin (package `cockpit-image-update-monitor`, up to 0.12 `cockpit-image-updates`) | root, 644 |
 | `/usr/lib/cockpit-image-updates/` | helpers (`*.py`, `*.sh` 755; `diunlib.py`, `diunnotes.py`, `diunproc.py`, `diunstatus.py` 644) | root |
 | `/var/lib/diun-radar/versions.json` | result of the version radar | root, 644 (StateDirectory) |
 | `/var/lib/diun-radar/releases.json` | release notes from GitHub for the update and version change dialogs (since 0.23.0, see [`releases.json`](#releasesjson-radar-since-0230)) | root, 644 |
@@ -48,7 +48,7 @@ All through `cockpit.spawn(argv, { superuser, err, environ: ["DIUN_LANG=de|en"] 
 | | `radar` | action, no dialog | text; waits for the radar run (`systemctl start diun-radar.service`) |
 | | `retag <container> <tag> --dry-run` | read (since 0.11.0; the preview in “Change version”) | one JSON object: the `plan` plus `retag`, see below |
 | | `retag <container> <tag> --expect <fingerprint> [--no-dump]` | action (since 0.11.0) | text + `@@RESULT {…}` |
-| | `dbmajor <container> <tag> --dry-run` | read (since 0.23.0; stage 5, PostgreSQL) | one JSON object: the `retag` plan plus `major`, see below |
+| | `dbmajor <container> <tag> --dry-run` | read (since 0.23.0; stage 5, PostgreSQL, since 0.25.0 also MariaDB) | one JSON object: the `retag` plan plus `major`, see below |
 | | `dbmajor <container> <tag> --expect <fingerprint>` | action (since 0.23.0) | text + `@@RESULT {…}` |
 | | `delete-olddata <op-id>` | action (since 0.23.0) | text: releases the data a database major kept |
 | | `status --lang en\|de` | read (since 0.20.0; the Status Board, also **without root**) | one JSON object, schema 1, see [`status`](#status-diun-updatepy-since-0200) |
@@ -62,8 +62,8 @@ Inputs are checked by regex:
 | operation ID | `^\d{8}-\d{6}-<name>$` |
 | dump path | `^<name>/\d{8}-\d{6}_<name>\.sql\.gz$` + `realpath` check |
 | rollback tag | `^rollback-\d{8}-\d{6}$` |
-| target tag (`retag`) | `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`, and it must be one of the radar's `choices` |
-| fingerprint (`retag --expect`) | `^[0-9a-f]{64}$` |
+| target tag (`retag`, `dbmajor`) | `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`, and it must be one of the radar's `choices` |
+| fingerprint (`retag --expect`, `dbmajor --expect`) | `^[0-9a-f]{64}$` |
 | language (`status --lang`) | `^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})?$`; `de…` is German, every other one English |
 
 `DIUN_LANG` only selects the language of the text output.
@@ -551,9 +551,9 @@ directory PostgreSQL would set up a new, empty cluster) and leaves everything wh
 
 Takes the update lock. Before anything changes (otherwise exit 2 / 3 / 5, nothing touched):
 
-- the operation is an `update` or `retag` that is not rolled back yet, or whose rollback failed: a
-  failed rollback may be tried again (since 0.18.1; up to 0.18.0 it was marked `rolled_back` too and
-  refused with exit 3);
+- the operation is an `update`, `retag`, `dbmajor` (since 0.23.0) or `rebuild` (since 0.24.0) that
+  is not rolled back yet, or whose rollback failed: a failed rollback may be tried again (since
+  0.18.1; up to 0.18.0 it was marked `rolled_back` too and refused with exit 3);
 - the rollback image exists;
 - the files of a tag change (above);
 - since 0.18.1 `docker compose config` gives every service of the operation its `image`, for a tag

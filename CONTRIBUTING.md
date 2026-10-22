@@ -45,10 +45,12 @@ sudo bash test/e2e-server.sh                      # helpers installed in /usr/li
 sudo E2E_LIB="$PWD/lib" bash test/e2e-server.sh   # the helpers of this checkout, not installed
 ```
 
-It works in its own compose projects `imgupd-test`, `imgupd-test-my` and `imgupd-test-reg` (with a
-local registry on port 5000, `E2E_REGISTRY_PORT`), touches nothing else and cleans up on exit. CI
-runs it on a GitHub runner on every push and before every release. A new flow in the helpers gets a
-section there.
+It works in its own compose projects `imgupd-test`, `imgupd-test-my`, `imgupd-test-reg` (with a
+local registry on port 5000, `E2E_REGISTRY_PORT`), `imgupd-test-major` and `imgupd-test-mdb` (the
+database majors) and `imgupd-test-build` (the rebuild), touches nothing else and cleans up on exit; a
+run that passed fails if anything of it is left behind. `E2E_MYSQL=0` skips the MariaDB and MySQL
+parts. CI runs it on a GitHub runner on every push and before every release. A new flow in the
+helpers gets a section there.
 
 ## The page in a real Cockpit
 
@@ -70,13 +72,15 @@ Cockpit gets a step there.
   `@@RESULT`. Anything that can fail stops before the change (exit 5); locks use `flock` (exit 75).
 - **Overwrite nothing** the user created. Where it cannot be avoided, a byte-exact backup comes first
   and is restored on rollback.
-- **Formats are contracts.** The inventory, `versions.json`, `plan`, `backups` and `@@RESULT` change
-  together with the plugin, the fixtures in `test/fixtures/`, the tests and `docs/INTERNALS.md`. Code
-  tolerates data one version older: the radar data can come from the previous release.
+- **Formats are contracts.** The inventory, `versions.json`, `releases.json`, `plan`, `backups`,
+  `@@RESULT` and the `status` for the Status Board change together with the plugin, the fixtures in
+  `test/fixtures/`, the tests and `docs/INTERNALS.md`. Code tolerates data one version older: the
+  radar data can come from the previous release.
 - **No build step, no runtime dependencies.** Python standard library, POSIX `sh` or `bash`,
   JavaScript without a framework. `node_modules` is for the tests only.
 - **Browser without network.** No CDNs, external fonts or images; the fonts ship with the add-on and
-  Cockpit's strict CSP stays. Only the radar on the server talks to registries.
+  Cockpit's strict CSP stays. Only the radar on the server talks to registries and, for the release
+  notes, to GitHub.
 - **Shared design files** (`plugin/azentrius.*`, `plugin/icons.js`, the fonts) are byte-identical
   copies from another Azentrius add-on, pinned in `tools/design-files.sha256`. Do not edit them here.
 
@@ -91,8 +95,9 @@ Interfaces, formats and exit codes are described in [docs/INTERNALS.md](docs/INT
   English; the only German is the translation and the tests that check it.
 - **Tests** for new behaviour; `make check` and `make lint` green.
 - **SPDX header** `SPDX-License-Identifier: Apache-2.0` in every new source file.
-- **Changelog.** User-visible changes get an entry under `## Unreleased` in `CHANGELOG.md`. Versions
-  and releases are made by the maintainer.
+- **Versions and changelog** are the maintainer's: the pull request that raises the version adds its
+  section to `CHANGELOG.md`, and later pull requests before the release add to that section. Describe
+  user-visible changes in your pull request.
 - **No private data.** No secrets, tokens, passwords, registry credentials, host names, IP addresses
   or other real server data in issues, pull requests, tests or fixtures.
 
