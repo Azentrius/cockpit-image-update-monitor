@@ -151,7 +151,8 @@ U.inspect = lambda name: {"Name": "/" + name, "Image": "sha256:old", "Config": {
                           "State": {"Running": True, "Status": "running"}}
 U.image_id = lambda ref: ("sha256:new" if ref == NEW_IMAGE else "sha256:old") if ref else ""
 U.missing_extensions = lambda ref, used: []
-U.dump_db = lambda project, db, st: f"{project}/{st}_{db['name']}.sql.gz"
+U.dump_db = lambda project, db, st, script=None: (log_call(["dump_db", "major dump" if script == U.MY_MAJOR_DUMP else "update dump"]),
+                                                  f"{project}/{st}_{db['name']}.sql.gz")[1]
 U.table_counts = lambda name, engine="postgres": {"postgres": {"public.t": 3}}
 U.change_files = lambda op, ctx, rt, services, st: U.record(op, log=op["id"] + ".log")
 U.wait_ready = lambda name, engine="postgres": True

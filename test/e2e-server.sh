@@ -1036,7 +1036,7 @@ docker compose -p "$P6" -f "$D6/docker-compose.yml" up -d --wait 2>&1 | tail -n 
 MYDB=imgupd-test-mdb-db
 my() { docker exec -e MYSQL_PWD=test-only "$MYDB" mariadb -uroot -N -B "$@"; }
 login() { docker exec -e MYSQL_PWD="$2" "$MYDB" mariadb --protocol=tcp -h 127.0.0.1 -u"$1" -N -B -e "select 1"; }
-my -e "create table appdb.notes(id int primary key, t text); insert into appdb.notes select seq, md5(seq) from seq_1_to_300;
+my -e "use appdb; create table appdb.notes(id int primary key, t text); insert into appdb.notes select seq, md5(seq) from seq_1_to_300;
        create database shop; create table shop.items(id int auto_increment primary key, name text, h text);
        insert into shop.items(name, h) select concat('item ', seq), sha2(seq, 256) from seq_1_to_5000;
        create table shop.empty_one(x int);

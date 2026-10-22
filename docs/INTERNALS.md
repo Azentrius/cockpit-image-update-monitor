@@ -492,7 +492,13 @@ logs in as root with the password of its environment through `MYSQL_PWD`, never 
 the trial run gets that password through the environment of `docker run -e MARIADB_ROOT_PASSWORD`,
 because the dump brings the old users with it.
 
-- Dump: `mariadb-dump --all-databases --single-transaction --routines --events`, as an update does.
+- Dump: not the dump of an update. The system tables of the old major (the `mysql` database) do not
+  load into a newer one (`mysql.proc` has another column count, found by the trial run), so the major
+  dumps the users' databases (`--databases`, all but `mysql`, `information_schema`,
+  `performance_schema`, `sys`; `--single-transaction --routines --events --triggers`) and after
+  them every user but the roles, `mariadb.sys` and `healthcheck` (the image sets up its own, with the password in the data directory) as `CREATE OR REPLACE USER` (from
+  `SHOW CREATE USER`) with its grants (`SHOW GRANTS`), then `FLUSH PRIVILEGES`. Database names with
+  spaces are not supported.
 - Counts: every base table of every database but `mysql`, `information_schema`, `performance_schema`
   and `sys`, `count(*)` each (`"db<TAB>table<TAB>rows"`).
 - Before anything changes the server must say the old major (`select version()`), and so must

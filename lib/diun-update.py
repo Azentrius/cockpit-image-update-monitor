@@ -1124,7 +1124,7 @@ MY_DUMP = ('P="${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}"; '
 DUMP_DONE = {"postgres": b"database cluster dump complete", "mysql": b"-- Dump completed"}
 
 
-def dump_db(project, db, st):
+def dump_db(project, db, st, script=None):
     say(f"Datenbank-Dump von {db['name']} ({db['kind']}) …",
         f"Dumping database {db['name']} ({db['kind']}) …")
     if not db["running"]:
@@ -1134,7 +1134,7 @@ def dump_db(project, db, st):
     os.makedirs(pdir, mode=0o700, exist_ok=True)
     final = os.path.join(pdir, f"{st}_{db['name']}.sql.gz")
     tmp = final + ".part"
-    script = PG_DUMP if db["kind"] == "postgres" else MY_DUMP
+    script = script or (PG_DUMP if db["kind"] == "postgres" else MY_DUMP)
     seen = {"tail": b""}
     t0 = time.time()
 
@@ -2008,6 +2008,24 @@ MY_SH = ('export MYSQL_PWD="${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}"; '
 MY_COUNTS = MY_SH + r"""q=$("$C" -uroot -N -B -e "select concat('select ', quote(table_schema), ', ', quote(table_name), ', count(*) from \`', replace(table_schema, '\`', '\`\`'), '\`.\`', replace(table_name, '\`', '\`\`'), '\`;') from information_schema.tables where table_type = 'BASE TABLE' and table_schema not in ('mysql', 'information_schema', 'performance_schema', 'sys') order by table_schema, table_name") || exit 1
 [ -z "$q" ] || printf '%s\n' "$q" | "$C" -uroot -N -B"""
 MY_SERVER_VERSION = MY_SH + '"$C" -uroot -N -B -e "select version()"'
+# The dump of a MariaDB major: the system tables of the old major (the mysql
+# database) do not load into a newer one (mysql.proc has another column count),
+# so the dump holds the users' databases and, after them, every user (not the
+# roles, mariadb.sys and the image's own healthcheck user) as CREATE OR
+# REPLACE USER with its grants, taken from the server
+# itself. The end marker comes last.
+MY_MAJOR_DUMP = MY_SH + r"""dbs=$("$C" -uroot -N -B -e "select schema_name from information_schema.schemata where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys') order by 1") || exit 1
+if command -v mariadb-dump >/dev/null 2>&1; then D=mariadb-dump; else D=mysqldump; fi
+if [ -n "$dbs" ]; then "$D" -uroot --single-transaction --routines --events --triggers --databases $dbs || exit 1; fi
+users=$("$C" -uroot -N -B -e "select concat(quote(user), '@', quote(host)) from mysql.user where is_role = 'N' and user not in ('mariadb.sys', 'healthcheck') order by 1") || exit 1
+echo "-- Users and their grants"
+for u in $users; do
+  "$C" -uroot -N -B -r -e "show create user $u" | sed 's/^CREATE USER /CREATE OR REPLACE USER /; s/$/;/' || exit 1
+  "$C" -uroot -N -B -r -e "show grants for $u" | sed 's/$/;/' || exit 1
+done
+echo "FLUSH PRIVILEGES;"
+echo "-- Dump completed"
+"""
 MY_READY = MY_SH + '"$A" ping --protocol=tcp -h 127.0.0.1 -uroot --silent'
 MY_RESTORE = MY_SH + 'exec "$C" -uroot'
 # A restore leaves the system tables of the dump's version while the data
@@ -2739,7 +2757,7 @@ def migrate(name, plan, ctx):
                 raise Abort(5, "Die wartenden Dienste ließen sich nicht stoppen – nichts geändert.",
                             "The waiting services could not be stopped – nothing changed.")
         db = next(d for d in plan["dbs"] if d["name"] == name)
-        op["dumps"].append(dump_db(project, db, st))
+        op["dumps"].append(dump_db(project, db, st, MY_MAJOR_DUMP if engine == "mariadb" else None))
         before = table_counts(name, engine)
         say(f"Gezählt: {count_summary(before)}", f"Counted: {count_summary(before)}")
         # The data the major moves must be this server's: a rollback checks it by the same file.

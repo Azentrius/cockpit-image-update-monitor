@@ -305,6 +305,8 @@ for typ in ("volume", "bind"):
                                                                   ["after_restore", "db", "mariadb"]],
            any(c[-2:] == ["restart", "db"] for c in sc.calls())),
           (["MARIADB_ROOT_PASSWORD"], False, True, True, True))
+    check(f"MariaDB major ({typ}): the dump of the users' databases and users, not the update's dump with the system tables",
+          [c for c in sc.calls() if c[0] == "dump_db"], [["dump_db", "major dump"]])
     rc, out, _ = sc.run("rollback", op=op["id"])
     op = sc.op()
     check(f"MariaDB rollback ({typ}): exit 0, MariaDB 11 on all of its data, the data of 12 kept",

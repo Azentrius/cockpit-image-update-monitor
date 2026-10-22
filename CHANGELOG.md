@@ -28,7 +28,9 @@ when that lies on another filesystem than the data.
   for PostgreSQL. The root password comes from the container's environment through `MYSQL_PWD`,
   never on a command line; the plan refuses MariaDB without one (`major-root-password`). MySQL stays
   refused (`major-not-supported`, up to 0.24.x `major-not-postgres`). The history and its rollback
-  name the engine.
+  name the engine. Its dump holds the users' databases and the users with their grants as
+  statements, not the system tables of the old major, which a newer major does not take (the trial
+  run in the end-to-end test found that).
 - **Tests.** `test/major_test.py`: the MD5 refusal and its exception, the room for the trial run,
   the trial run itself (no network, label, user, database and PGDATA of the real one, never its
   password, an earlier probe removed first, removed afterwards; restore errors, other counts and a
