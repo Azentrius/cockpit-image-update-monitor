@@ -432,14 +432,27 @@ def main():
         # The radar timer starts runs of its own, too: 5 minutes after the boot (OnBootSec=; this
         # runner booted minutes ago, and once that run began in the very second of the check) and
         # on its calendar. Wait until neither is due and no run is going, so that a run right
-        # after configure can only come from configure.
+        # after configure can only come from configure. RandomizedDelaySec=10min holds for the
+        # boot run too: it comes anywhere from 5 to 15 minutes after the boot (its time is in
+        # NextElapseUSecMonotonic, the calendar's in NextElapseUSecRealtime).
+        def boot_run_in(up):
+            """Seconds until the timer's run after the boot, or None if it has none left."""
+            mono = root("systemctl", "show", "-P", "NextElapseUSecMonotonic", "diun-radar.timer", check=False).strip()
+            if not mono or mono in ("infinity", "0"):
+                return None
+            span = root("systemd-analyze", "timespan", mono, check=False)
+            m = re.search(r"s:\s*(\d+)\s*$", span, re.M)
+            return int(m.group(1)) / 1e6 - up if m else 0
+
         def radar_quiet():
             up = float(root("cat", "/proc/uptime").split()[0])
             nxt = root("systemctl", "show", "-P", "NextElapseUSecRealtime", "diun-radar.timer", check=False)
             due = root("date", "-d", nxt, "+%s", check=False) if nxt and nxt != "n/a" else ""
             idle = root("systemctl", "is-active", "diun-radar.service", check=False) not in ("activating", "active")
-            return idle and up > 5 * 60 + 20 and (not due.isdigit() or int(due) - time.time() > 120)
-        quiet = poll(page, radar_quiet, 420)
+            boot = boot_run_in(up)
+            return idle and up > 5 * 60 + 20 and (not due.isdigit() or int(due) - time.time() > 120) \
+                and (boot is None or boot > 120)
+        quiet = poll(page, radar_quiet, 1020)
         uptime = root("cat", "/proc/uptime").split()[0]
         root("/var/lib/dpkg/info/cockpit-image-update-monitor.postinst", "configure", check=False)
         later = root("systemctl", "is-active", "diun-radar-after-install.timer", check=False)
