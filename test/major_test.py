@@ -146,16 +146,16 @@ check("make_place where the name is taken: an error, nothing moved", (broke, sor
       ("FileExistsError", ["PG_VERSION", "base", "global"]))
 
 # ------------------------------------------------------------- the plan ----
-def container(running=True, mounts=None, env=("PG_VERSION=16.14",), image="postgres:16-alpine"):
-    return {"Name": "/db", "Image": "sha256:old", "Config": {"Image": image, "Env": list(env), "Labels": {}},
+def container(running=True, mounts=None, env=("PG_VERSION=16.14",), image="postgres:16-alpine", cmd=None):
+    return {"Name": "/db", "Image": "sha256:old", "Config": {"Image": image, "Env": list(env), "Labels": {}, "Cmd": cmd},
             "State": {"Running": running, "Status": "running" if running else "exited"},
             "Mounts": [{"Type": "volume", "Name": "app_pgdata", "Driver": "local", "Source": src,
                         "Destination": "/var/lib/postgresql/data"}] if mounts is None else mounts}
 
 
-def plan_of(target="17.6", services=("db",), env=None, size=10 << 20):
-    plan = {"container": "db", "image": "postgres:16-alpine", "services": list(services), "containers": ["db"],
-            "installed_version": "16.14", "target_version": target,
+def plan_of(target="17.6", services=("db",), env=None, size=10 << 20, installed="16.14", image="postgres:16-alpine"):
+    plan = {"container": "db", "image": image, "services": list(services), "containers": ["db"],
+            "installed_version": installed, "target_version": target,
             "dependents": [{"service": "app", "containers": ["app"]}, {"service": "cron", "containers": ["cron"]}],
             "dbs": [{"name": "db", "kind": "postgres", "running": True, "size": size}],
             "retag": {"possible": True, "reason": None, "detail": None, "fingerprint": "f" * 64, "changes": []}}
@@ -198,7 +198,7 @@ for label, kw, reason in (
         ("the tag change refused", {"plan_ctx": (lambda p: (dict(p[0], retag=dict(p[0]["retag"], possible=False,
                                                                                   reason="anchors")), p[1]))(plan_of())},
          "anchors"),
-        ("not PostgreSQL", {"kind": "mysql"}, "major-not-postgres"),
+        ("MySQL (only PostgreSQL and MariaDB)", {"kind": "mysql"}, "major-not-supported"),
         ("two services on the image", {"plan_ctx": plan_of(services=("db", "db2"))}, "major-several"),
         ("not running", {"c": container(running=False)}, "major-stopped"),
         ("not a newer major", {"plan_ctx": plan_of(target="16.20")}, "major-not-newer"),
@@ -242,7 +242,48 @@ check("plan: the fingerprint follows the stop list and the mount",
       stand_in()["fingerprint"] != stand_in(c=container(mounts=[{"Type": "bind", "Source": src,
                                                                  "Destination": "/var/lib/postgresql/data"}]))["fingerprint"],
       True)
+
+# MariaDB (since 0.25.0): the data in /var/lib/mysql (or --datadir), no
+# extensions and no MD5 check (no psql at all), the size from du, the root
+# password of the environment required; MySQL is no MariaDB.
+MY_MOUNT = [{"Type": "volume", "Name": "app_mdb", "Driver": "local", "Source": src, "Destination": "/var/lib/mysql"}]
+MY_ENV = ("MARIADB_VERSION=1:11.8.9+maria~ubu2404", "MARIADB_ROOT_PASSWORD=x")
+
+
+def mariadb(**kw):
+    args = dict(plan_ctx=plan_of(target="12.3.3", installed="11.8.9", image="mariadb:11"), kind="mysql",
+                lines=RuntimeError("no psql for MariaDB"),
+                c=container(image="mariadb:11", env=MY_ENV, mounts=MY_MOUNT))
+    args.update(kw)
+    return stand_in(**args)
+
+
+m = mariadb()
+check("plan (MariaDB 11 to 12): possible, the engine, the data in /var/lib/mysql, no PGDATA, no extensions, the size",
+      (m["possible"], m["engine"], m["from_major"], m["to_major"], m["data"]["name"], m["datadir"], m["pgdata"],
+       m["extensions"], isinstance(m["data_bytes"], int) and m["data_bytes"] > 0),
+      (True, "mariadb", 11, 12, "app_mdb", "/var/lib/mysql", None, [], True))
+check("plan (MariaDB): recognised by its version variable alone (a renamed image)",
+      mariadb(c=container(image="acme/db:11", env=MY_ENV, mounts=MY_MOUNT))["engine"], "mariadb")
+check("plan (MariaDB): --datadir in the command decides where the data is",
+      mariadb(c=container(image="mariadb:11", env=MY_ENV, cmd=["--datadir=/srv/db"],
+                          mounts=[dict(MY_MOUNT[0], Destination="/srv/db")]))["datadir"], "/srv/db")
+check("plan refused: MariaDB without a root password in the environment",
+      mariadb(c=container(image="mariadb:11", env=MY_ENV[:1], mounts=MY_MOUNT))["reason"], "major-root-password")
+check("plan refused: MySQL is no MariaDB (only PostgreSQL and MariaDB)",
+      (lambda r: (r["reason"], r["detail"]))(mariadb(c=container(image="mysql:8.4", env=("MYSQL_MAJOR=8.4",
+                                                                                           "MYSQL_ROOT_PASSWORD=x"),
+                                                                 mounts=MY_MOUNT))),
+      ("major-not-supported", "mysql:8.4"))
+check("plan: the fingerprint of a MariaDB major differs from that of the same plan for PostgreSQL",
+      m["fingerprint"] != stand_in()["fingerprint"], True)
 U.make_retag = nope
+U.pg_lines = lambda name, script, timeout=None: (["appdb\tnotes\t300", "appdb\tempty\t0", "shop\titems\t5000",
+                                                  "a line without a count"] if script == U.MY_COUNTS else [])
+check("table_counts (MariaDB): database, table and rows from the tab-separated lines",
+      U.table_counts("db", "mariadb"), {"appdb": {"notes": 300, "empty": 0}, "shop": {"items": 5000}})
+check("lead_major", [U.lead_major(v) for v in ("11.8.9-MariaDB-ubu2404", "16", " 12.3.3-MariaDB\n", "", None, "x1")],
+      [11, 16, 12, None, None, None])
 
 
 # ------------------------------------------------------- the trial run ----
@@ -264,9 +305,10 @@ def probe(**kw):
     U.run = p.run
     U.inspect = lambda n: container(env=("PG_VERSION=16.14", "POSTGRES_USER=owner", "POSTGRES_DB=appdb",
                                          "POSTGRES_PASSWORD=the-real-secret"))
-    U.wait_postgres = lambda n: p.ready
-    U.restore_into = lambda n, rel: list(p.errors)
-    U.table_counts = lambda n: p.counts if p.counts is not None else copy.deepcopy(BEFORE)
+    U.run_env = lambda cmd, env, timeout=300: p.run(cmd)
+    U.wait_ready = lambda n, engine="postgres": p.ready
+    U.restore_into = lambda n, rel, engine="postgres": list(p.errors)
+    U.table_counts = lambda n, engine="postgres": p.counts if p.counts is not None else copy.deepcopy(BEFORE)
     plan = {"retag": {"image": "postgres:17.6-alpine"}, "major": {"to_major": 17, "pgdata": "/var/lib/postgresql/data"}}
     op = {"id": "20261022-210000-db", "dumps": ["app/20261022-210000_db.sql.gz"]}
     try:

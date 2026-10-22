@@ -47,6 +47,12 @@ ORIGINAL = {"PG_VERSION": "16\n", "base": "/", "base/1": "/", "base/1/1259": "th
             "pg_wal": "/", "pg_wal/000000010000000000000007": "wal 16", "postgresql.conf": "max_connections = 200\n"}
 NEW17 = {"PG_VERSION": "17\n", "base": "/", "base/5": "/", "base/5/16384": "rows of the new major",
          "global": "/", "global/pg_control": "control 17", "pg_wal": "/", "pg_wal/000000010000000000000001": "wal 17"}
+# The same for MariaDB 11 and 12.
+ORIGINAL_MY = {"mysql_upgrade_info": "11.8.9-MariaDB", "ibdata1": "innodb 11", "ib_logfile0": "redo 11",
+               "mysql": "/", "mysql/global_priv.MAD": "the old users", "appdb": "/", "appdb/notes.ibd": "the old rows",
+               "appdb/db.opt": "default-character-set=utf8mb4\n"}
+NEW12 = {"mysql_upgrade_info": "12.3.3-MariaDB", "ibdata1": "innodb 12", "mysql": "/",
+         "mysql/global_priv.MAD": "users 12", "appdb": "/", "appdb/notes.ibd": "rows of the new major"}
 TOP, TOP_NEW = 6, 4
 
 
@@ -76,17 +82,17 @@ def write_tree(path, files):
 class Scene:
     """One temporary host: the data of the database, the history, the calls."""
 
-    def __init__(self, typ="bind"):
+    def __init__(self, typ="bind", engine="postgres"):
         self.dir = tempfile.mkdtemp(dir=TMP)
-        self.typ = typ
+        self.typ, self.engine = typ, engine
         self.src = os.path.join(self.dir, "volumes", "app_pgdata", "_data") if typ == "volume" \
             else os.path.join(self.dir, "srv", "pg")
-        write_tree(self.src, ORIGINAL)
+        write_tree(self.src, ORIGINAL_MY if engine == "mariadb" else ORIGINAL)
 
     def run(self, action, op=None, stop_at=None, sig=None, fail=(), probe_fail=False):
         """The child: (exit code, output, whether it reached stop_at)."""
         cfg = {"action": action, "op": op, "type": self.typ, "src": self.src, "fail": list(fail),
-               "probe_fail": probe_fail}
+               "probe_fail": probe_fail, "engine": self.engine}
         ready_r, ready_w = os.pipe()
         go_r, go_w = os.pipe()
         if stop_at:
@@ -124,9 +130,10 @@ class Scene:
         assert len(ops) == 1, ops
         return ops[0]
 
-    def calls(self):
+    def calls(self, full=False):
         path = os.path.join(self.dir, "calls.jsonl")
-        return [json.loads(line)["cmd"] for line in open(path)] if os.path.exists(path) else []
+        calls = [json.loads(line) for line in open(path)] if os.path.exists(path) else []
+        return calls if full else [c["cmd"] for c in calls]
 
     def ups(self):
         """The data directory as it was at each start of the database."""
@@ -275,6 +282,47 @@ for typ in ("bind", "volume"):
     check(f"rollback ({typ}) without a break: exit 0, the old database on all of its data, the new major's kept",
           (rc, sc.ups()[-1], tree(sc.src), list(sc.places().values()), op.get("old_data"), op.get("rolled_back")),
           (0, ORIGINAL, ORIGINAL, [NEW17], None, True))
+
+# ------------------------------------------------------------- MariaDB ----
+# The same moves for MariaDB 11 to 12: the place named mariadb11, the version
+# in mysql_upgrade_info, the root password for the trial run through the
+# environment of docker run only.
+for typ in ("volume", "bind"):
+    sc = Scene(typ, engine="mariadb")
+    rc, out, _ = sc.run("migrate")
+    op = sc.op()
+    kept = path_of(op.get("old_data"))
+    probe_call = [c for c in sc.calls(full=True) if c["cmd"][:2] == ["docker", "run"]]
+    check(f"MariaDB major ({typ}): exit 0, MariaDB 12 on an empty directory, the old data kept whole in a place named "
+          f"mariadb11, its version file recorded",
+          (rc, op.get("engine"), sc.ups(), tree(sc.src), sc.places().get(kept), "mariadb11-" in (kept or "")
+           or "mariadb11-" in ((op.get("old_data") or {}).get("name") or ""), op.get("version_file")),
+          (0, "mariadb", [{}], NEW12, ORIGINAL_MY, True, "mysql_upgrade_info"))
+    check(f"MariaDB major ({typ}): the trial run got the root password through the environment only, the privileges "
+          f"and mariadb-upgrade after the restore, a restart before the counts",
+          (probe_call[0]["env"], probe_call[0]["secret_in_cmd"], "MARIADB_ROOT_PASSWORD" in probe_call[0]["cmd"],
+           [c for c in sc.calls() if c[0] == "after_restore"] == [["after_restore", "db-probe-" + op["id"][:15], "mariadb"],
+                                                                  ["after_restore", "db", "mariadb"]],
+           any(c[-2:] == ["restart", "db"] for c in sc.calls())),
+          (["MARIADB_ROOT_PASSWORD"], False, True, True, True))
+    check(f"MariaDB major ({typ}): the dump of the users' databases and users, not the update's dump with the system tables",
+          [c for c in sc.calls() if c[0] == "dump_db"], [["dump_db", "major dump"]])
+    rc, out, _ = sc.run("rollback", op=op["id"])
+    op = sc.op()
+    check(f"MariaDB rollback ({typ}): exit 0, MariaDB 11 on all of its data, the data of 12 kept",
+          (rc, sc.ups()[-1], tree(sc.src), list(sc.places().values()), op.get("rolled_back")),
+          (0, ORIGINAL_MY, ORIGINAL_MY, [NEW12], True))
+# A version file that does not name the old major: no MariaDB on that data.
+sc = Scene(engine="mariadb")
+sc.run("migrate")
+op = sc.op()
+kept = path_of(op["old_data"])
+with open(os.path.join(kept, "mysql_upgrade_info"), "w") as f:
+    f.write("10.11.9-MariaDB")
+rc, out, _ = sc.run("rollback", op=op["id"])
+check("MariaDB rollback with a version file of another major in the kept data: no database started, nothing lost",
+      (rc, len(sc.ups()), sc.op().get("rollback_status"), "says 10.11.9-MariaDB instead of MariaDB 11" in out),
+      (4, 1, "failed", True))
 
 # ------------------------------------------------ the trial run fails ----
 # Before the database changes, the dump goes into a throwaway container of the

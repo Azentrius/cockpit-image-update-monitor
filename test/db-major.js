@@ -161,6 +161,86 @@ const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => t
         assert(why.includes(want), why);
         assert(r.$("dm-dialog-confirm").disabled);
     }
+    // MariaDB (since 0.25.0): a MariaDB row offers its majors as PostgreSQL's do;
+    // the plan names the engine and the data directory, shows no extensions and
+    // says that mariadb-upgrade runs. MySQL stays locked.
+    const MY_INV = inventory + [
+        { name: "shop-db", image: "mariadb", tag: "11", digest: "", imgid: "sha256:my11", tagid: "sha256:my11", pulled: false,
+          project: "shop", service: "db", managed: true, version: "11.8.9", version_src: "env:MARIADB_VERSION",
+          files: ["/opt/shop/compose.yml"], ci_job: false, created: "2026-10-01T00:00:00Z", revision: "" },
+        { name: "legacy-db", image: "mysql", tag: "8.4", digest: "", imgid: "sha256:my84", tagid: "sha256:my84", pulled: false,
+          project: "legacy", service: "db", managed: true, version: "8.4.6", version_src: "env:MYSQL_VERSION",
+          files: ["/opt/legacy/compose.yml"], ci_job: false, created: "2026-10-01T00:00:00Z", revision: "" }]
+        .map((c) => JSON.stringify(c) + "\n").join("");
+    const myRec = (image, tag, v, major, lines, newer) => ({ image, tag, containers: [], db: true, reach: [],
+        installed: {}, versions: { [v]: { patch: null, minor: null, major, status: "major", as_tag: tag,
+                                         choices: { pin: v, lines, newer, floating: ["latest"] } } },
+        newest: major, checked: "2026-10-22T02:00:00Z", by_tag: { major, status: "major" }, status: "major" });
+    const radar = JSON.parse(JSON.stringify(FILES["/var/lib/diun-radar/versions.json"]));
+    radar.images.push(myRec("mariadb", "11", "11.8.9", "13.0.2", [{ tag: "11", newest: "11.8.9" }, { tag: "12", newest: "12.3.3" }],
+                            [{ tag: "12.3.3", level: "major" }, { tag: "13.0.2", level: "major" }]),
+                      myRec("mysql", "8.4", "8.4.6", "9.4.0", [{ tag: "8.4", newest: "8.4.6" }], [{ tag: "9.4.0", level: "major" }]));
+    const MY_MAJOR = { possible: true, reason: null, detail: null, engine: "mariadb", from_major: 11, to_major: 12,
+        data: { type: "volume", name: "shop_dbdata", driver: "local", source: "/var/lib/docker/volumes/shop_dbdata/_data",
+                destination: "/var/lib/mysql" }, pgdata: null, datadir: "/var/lib/mysql", stop: ["web"], extensions: [],
+        data_bytes: 80000000, data_free: 40 * 2 ** 30, fingerprint: "c".repeat(64) };
+    const myPlan = (tag) => ({ ...plan(tag, MY_MAJOR), container: "shop-db", image: "mariadb:11", project: "shop",
+                               services: ["db"], containers: ["shop-db"], installed_version: "11.8.9", target_version: tag,
+                               dbs: [{ name: "shop-db", kind: "mysql", running: true, size: null }],
+                               retag: { ...plan(tag, MY_MAJOR).retag, image: "mariadb:" + tag, from_tag: "11" } });
+    const realRadar = FILES["/var/lib/diun-radar/versions.json"];
+    FILES["/var/lib/diun-radar/versions.json"] = radar;
+    for (const [lang, title, body, button] of [
+        ["en", "Database major: MariaDB 11 → 12", "runs mariadb-upgrade", "Run database major"],
+        ["de", "Datenbank-Major: MariaDB 11 → 12", "lässt mariadb-upgrade laufen", "Datenbank-Major ausführen"]]) {
+        const m = boot(lang, { ...BASE, "diun-inventory.py": { out: MY_INV },
+            "diun-update.py dbmajor": (cmd) => cmd[4] === "--dry-run" ? { out: JSON.stringify(myPlan(cmd[3])) }
+                : { chunks: ["…\n", "@@RESULT " + JSON.stringify({ op: "20261022-030000-shop-db", status: "ok", dumps: [],
+                                                                 from_version: "11.8.9", to_version: "12.3.3" }) + "\n"] } });
+        await settle();
+        assert(!rowOf(m.d, "legacy-db").querySelector("button[data-retag]") ||
+               (() => { rowOf(m.d, "legacy-db").querySelector("button[data-retag]").click(); return true; })());
+        if (m.$("dm-retag-select")) {
+            const locked = [...m.$("dm-retag-select").querySelectorAll("option")].filter((o) => o.value.startsWith("9"));
+            assert(locked.every((o) => o.disabled && !o.dataset.major), "a MySQL major stays locked");
+            m.$("dm-dialog-cancel").click();
+        }
+        rowOf(m.d, "shop-db").querySelector("button[data-retag]").click();
+        await settle();
+        const sel = m.$("dm-retag-select");
+        const majors = [...sel.querySelectorAll("option[data-major]")].map((o) => o.value);
+        assert.deepStrictEqual(majors.sort(), ["12", "12.3.3", "13.0.2"].sort(), "the MariaDB majors with a target");
+        sel.value = "12.3.3";
+        sel.dispatchEvent(new m.w.Event("change"));
+        await settle();
+        const pv = m.$("dm-retag-preview");
+        assert.strictEqual(pv.querySelector(".az-alert__title").textContent, title);
+        assert(pv.querySelector(".az-alert__body").textContent.includes(body), pv.querySelector(".az-alert__body").textContent);
+        const kv = [...pv.querySelectorAll(".dm-kv")[0].querySelectorAll("li")].map((li) => li.textContent);
+        console.log(`MariaDB (${lang}):`, kv.join(" | "));
+        assert(kv[0].includes("shop_dbdata") && kv[1].includes("/var/lib/mysql") && kv[2].includes("web"), kv.join(" | "));
+        assert(!kv.some((x) => /Extensions|Erweiterungen/.test(x)), "no extensions for MariaDB");
+        const gates = [...pv.querySelectorAll(".dm-gate")];
+        gates.forEach((g) => { g.checked = true; g.dispatchEvent(new m.w.Event("change")); });
+        const confirm = m.$("dm-dialog-confirm");
+        assert(!confirm.disabled && confirm.textContent.trim() === button, confirm.textContent);
+        confirm.click();
+        await settle();
+        assert.deepStrictEqual(m.calls.find((c) => c[1] === "dbmajor" && c[4] === "--expect").slice(1),
+                               ["dbmajor", "shop-db", "12.3.3", "--expect", "c".repeat(64)]);
+    }
+    FILES["/var/lib/diun-radar/versions.json"] = realRadar;
+    // The history of a MariaDB major names the engine.
+    const hm = boot("en", { ...BASE, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: [{ ...OP,
+        id: "20261022-030000-shop-db", container: "shop-db", image: "mariadb:11", engine: "mariadb", from_major: 11, to_major: 12,
+        kept: { where: "Volume shop_dbdata-mariadb11-20261022-030000", bytes: 80000000, major: 11, can_release: true } }] }) } });
+    await settle();
+    hm.$("dm-tab-btn-backups").click();
+    await settle();
+    const notes = [...hm.d.querySelectorAll("#dm-ops .dm-row-note")].map((x) => x.textContent);
+    console.log("MariaDB history:", notes.join(" | "));
+    assert.deepStrictEqual(notes, ["Database major: MariaDB 11 → 12",
+                                   "The data of MariaDB 11 is kept: Volume shop_dbdata-mariadb11-20261022-030000 (76.29 MiB)."]);
     // The history: the kept data released for good, after a confirmation.
     const b = boot("de", BASE);
     await settle();

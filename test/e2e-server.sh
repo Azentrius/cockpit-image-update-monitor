@@ -25,6 +25,9 @@
 # test data, the rollback and the release of the kept data, and majors stopped
 # by SIGTERM and SIGKILL while they move the data (test/e2e-pause.py holds the
 # helper after a rename until the signal is sent), each followed by the rollback.
+# The MariaDB major (MariaDB 11 to 12, MARIADB12_IMAGE, default mariadb:12) runs
+# in "imgupd-test-mdb", its volume named imgupd-test-major_mdbdata; E2E_MYSQL=0
+# skips it with the other MariaDB/MySQL parts.
 # The rebuild of an image built on the server runs in "imgupd-test-build": a
 # Dockerfile on a base image in the local registry, which gets a newer build;
 # one service names its image, one does not (compose calls it <project>-<service>).
@@ -54,11 +57,13 @@ P=imgupd-test
 P2=imgupd-test-my
 P3=imgupd-test-reg
 P4=imgupd-test-major
+P6=imgupd-test-mdb
 P5=imgupd-test-build
 D=${E2E_DIR:-/root/imgupd-test}
 D2=$D-my
 D3=$D-reg
 D4=$D-major
+D6=$D-mdb
 D5=$D-build
 REG_PORT=${E2E_REGISTRY_PORT:-5000}
 REG=localhost:$REG_PORT
@@ -72,7 +77,7 @@ export DIUN_LANG=en
 
 [ "$(id -u)" = 0 ] || { echo "ABORT: run as root"; exit 1; }
 [ -x "$H" ] || { echo "ABORT: $H missing (install first)"; exit 1; }
-for p in "$P" "$P2" "$P3" "$P4" "$P5"; do
+for p in "$P" "$P2" "$P3" "$P4" "$P5" "$P6"; do
     if [ -n "$(docker ps -aq --filter label=com.docker.compose.project="$p")" ]; then
         echo "ABORT: compose project $p exists already"; exit 1
     fi
@@ -85,9 +90,10 @@ NEW_IMAGE=${NEW_IMAGE:-postgres:16.15-alpine}
 MARIADB_IMAGE=${MARIADB_IMAGE:-mariadb:11}
 MYSQL_IMAGE=${MYSQL_IMAGE:-mysql:8}
 PG17_IMAGE=${PG17_IMAGE:-postgres:17-alpine}
+MARIADB12_IMAGE=${MARIADB12_IMAGE:-mariadb:12}
 E2E_MYSQL=${E2E_MYSQL:-1}
 IMAGES="$OLD_IMAGE $NEW_IMAGE $REGISTRY_IMAGE $PG17_IMAGE"
-[ "$E2E_MYSQL" = 1 ] && IMAGES="$IMAGES $MARIADB_IMAGE $MYSQL_IMAGE"
+[ "$E2E_MYSQL" = 1 ] && IMAGES="$IMAGES $MARIADB_IMAGE $MYSQL_IMAGE $MARIADB12_IMAGE"
 for i in $IMAGES; do
     docker image inspect "$i" >/dev/null 2>&1 || docker pull -q "$i" >/dev/null || { echo "ABORT: $i not available"; exit 1; }
 done
@@ -200,6 +206,7 @@ cleanup() {
     docker compose -p "$P3" -f "$D3/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P4" -f "$D4/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P5" -f "$D5/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
+    docker compose -p "$P6" -f "$D6/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     for v in $(docker volume ls -q --filter name='^imgupd-test-major_'); do
         docker volume rm "$v" >/dev/null 2>&1 && echo "removed volume $v"
     done
@@ -231,7 +238,8 @@ cleanup() {
             echo "WARNING: $r not removed"
         fi
     done
-    rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${DUMPS:?}/${P4:?}" "${DUMPS:?}/${P5:?}" "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}"
+    rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${DUMPS:?}/${P4:?}" "${DUMPS:?}/${P5:?}" "${DUMPS:?}/${P6:?}" \
+           "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}" "${BK_DIR:?}/compose/${P6:?}"
     rmdir "$BK_DIR/compose" 2>/dev/null
     rm -f "${LOGS:?}"/[0-9]*-imgupd-test-*.log
     if [ -f "$VERSIONS" ]; then
@@ -267,7 +275,7 @@ PY
         python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import diunstatus; diunstatus.refresh()' "$LIB" \
             && echo "status.json: written again without the test project"
     fi
-    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" "${D5:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz /tmp/e2e-ready /tmp/e2e-go
+    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" "${D5:?}" "${D6:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz /tmp/e2e-ready /tmp/e2e-go
     n_c=$(docker ps -a --format '{{.Names}}' | grep -c imgupd)
     n_t=$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/|^imgupd-test-build-')
     n_d=$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l)
@@ -981,6 +989,113 @@ python3 $H delete-olddata "$OPM2" > /tmp/e2e-m6.log 2>&1; RC=$?
 check "delete-olddata twice: exit 2, nothing kept any more" '[ $RC = 2 ]'
 CR=$(jget "$(python3 $H backups)" '[(o["can_rollback"], "kept" in o) for o in d["ops"] if o["id"] == "'"$OPM2"'"]')
 check "backups after the release: no rollback offered any more, nothing kept" '[ "$CR" = "[(False, False)]" ]'
+
+if [ "$E2E_MYSQL" = 1 ]; then
+echo "=== 17d. Database major: MariaDB 11 to 12 by dump and restore, rollback, release ==="
+# The same flow as for PostgreSQL: a database with an app that waits for it,
+# test data in two databases with a view, a procedure and users; the major
+# with its trial run, mariadb-upgrade and the login of the app user over TCP;
+# the rollback; the release of the kept data.
+my_version() { docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" | sed -n 's/^MARIADB_VERSION=\([0-9]*:\)\{0,1\}\([0-9.]*\).*/\2/p'; }
+V11=$(my_version "$MARIADB_IMAGE")
+V12=$(my_version "$MARIADB12_IMAGE")
+docker tag "$MARIADB_IMAGE" imgupd-test/mariadb:11
+docker tag "$MARIADB12_IMAGE" "imgupd-test/mariadb:$V12"
+docker tag "$MARIADB_IMAGE" imgupd-test/mdb-app:1
+mkdir -p "$D6"
+cat > "$D6/docker-compose.yml" <<EOF
+name: $P6
+services:
+  db:
+    image: imgupd-test/mariadb:11
+    container_name: imgupd-test-mdb-db
+    environment:
+      MARIADB_ROOT_PASSWORD: test-only
+      MARIADB_DATABASE: appdb
+      MARIADB_USER: app
+      MARIADB_PASSWORD: app-only
+    volumes:
+      - mdbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      retries: 90
+  app:
+    image: imgupd-test/mdb-app:1
+    container_name: imgupd-test-mdb-app
+    entrypoint: ["sh", "-c"]
+    command: ["sleep infinity"]
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  mdbdata:
+    name: imgupd-test-major_mdbdata
+EOF
+docker compose -p "$P6" -f "$D6/docker-compose.yml" up -d --wait 2>&1 | tail -n 2
+MYDB=imgupd-test-mdb-db
+my() { docker exec -e MYSQL_PWD=test-only "$MYDB" mariadb -uroot -N -B "$@"; }
+login() { docker exec -e MYSQL_PWD="$2" "$MYDB" mariadb --protocol=tcp -h 127.0.0.1 -u"$1" -N -B -e "select 1"; }
+my -e "use appdb; create table appdb.notes(id int primary key, t text); insert into appdb.notes select seq, md5(seq) from seq_1_to_300;
+       create database shop; create table shop.items(id int auto_increment primary key, name text, h text);
+       insert into shop.items(name, h) select concat('item ', seq), sha2(seq, 256) from seq_1_to_5000;
+       create table shop.empty_one(x int);
+       create view shop.expensive as select name from shop.items where id > 4990;
+       create procedure shop.item_count() select count(*) from shop.items;
+       create user 'reader'@'%' identified by 'read-only'; grant select on shop.* to 'reader'@'%';"
+MDATA() { my -e "select count(*), md5(group_concat(t order by id)) from appdb.notes;
+                 select count(*), md5(group_concat(h order by id)) from shop.items;
+                 select count(*) from information_schema.views where table_schema = 'shop';
+                 select count(*) from information_schema.routines where routine_schema = 'shop';
+                 select count(*) from mysql.global_priv where user = 'reader';" | tr '\n\t' '/ '; }
+MDATA0=$(MDATA)
+SUM6=$(sum_of "$D6/docker-compose.yml")
+MYVOL=$(docker volume inspect -f '{{.Mountpoint}}' imgupd-test-major_mdbdata)
+python3 - "$VERSIONS" "$V11" "$V12" <<'PY'
+import json, os, sys, tempfile
+p, version, target = sys.argv[1:4]
+try:
+    d = json.load(open(p))
+except (OSError, ValueError):
+    d = {"images": []}
+d["images"] = [r for r in d.get("images") or [] if r.get("image") != "imgupd-test/mariadb"]
+d["images"].append({"image": "imgupd-test/mariadb", "tag": "11", "db": True, "containers": ["imgupd-test-mdb-db"],
+                    "versions": {version: {"status": "major", "choices": {
+                        "pin": None, "lines": [], "newer": [{"tag": target, "level": "major"}], "floating": []}}}})
+os.makedirs(os.path.dirname(p), exist_ok=True)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p))
+with os.fdopen(fd, "w") as f:
+    json.dump(d, f, ensure_ascii=False, indent=1)
+os.chmod(tmp, 0o644)
+os.replace(tmp, p)
+PY
+DRY=$(python3 $H dbmajor "$MYDB" "$V12" --dry-run)
+echo "  | plan: $(jget "$DRY" '(d["installed_version"], d["retag"]["reason"], d["major"]["possible"], d["major"]["reason"], d["major"]["detail"])')"
+check "MariaDB dbmajor --dry-run: possible, MariaDB 11 to 12, the named volume, /var/lib/mysql, the app stopped meanwhile" \
+    '[ "$(jget "$DRY" "(d[\"major\"][\"possible\"], d[\"major\"][\"engine\"], d[\"major\"][\"from_major\"], d[\"major\"][\"to_major\"], d[\"major\"][\"data\"][\"name\"], d[\"major\"][\"datadir\"], d[\"major\"][\"stop\"])")" = "(True, '"'"'mariadb'"'"', 11, 12, '"'"'imgupd-test-major_mdbdata'"'"', '"'"'/var/lib/mysql'"'"', ['"'"'app'"'"'])" ]'
+python3 $H dbmajor "$MYDB" "$V12" --expect "$(jget "$DRY" 'd["major"]["fingerprint"]')" > /tmp/e2e-y1.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-y1.log
+OPY=$(jget "$(result_of /tmp/e2e-y1.log)" 'd["op"]')
+KEPT11=$(docker volume ls -q --filter name='^imgupd-test-major_mdbdata-mariadb11-')
+check "MariaDB major: exit 0, MariaDB 12 runs with the same data (rows, checksums, view, procedure, users)" \
+    '[ $RC = 0 ] && [ "$(my -e "select version()" | cut -d. -f1)" = 12 ] && [ "$(MDATA)" = "$MDATA0" ]'
+check "MariaDB major: the trial run first, mariadb-upgrade and a restart, the login over TCP, no probe left" \
+    'grep -q "Trial run: restored into MariaDB 12 and counted – the same." /tmp/e2e-y1.log && grep -q "mariadb-upgrade done; MariaDB restarts" /tmp/e2e-y1.log && grep -q "Login over TCP with the password from the environment: OK." /tmp/e2e-y1.log && [ -z "$(docker ps -aq --filter label=image-updates.probe)" ]'
+check "MariaDB major: the app user and the reader log in over TCP, the app runs again" \
+    '[ "$(login app app-only)" = 1 ] && [ "$(login reader read-only)" = 1 ] && [ "$(docker inspect -f "{{.State.Running}}" imgupd-test-mdb-app)" = true ]'
+check "MariaDB major: the tag line changed, the old data kept in a volume of its own, the history knows the engine" \
+    '[ "$(grep -c "image: imgupd-test/mariadb:$V12$" "$D6/docker-compose.yml")" = 1 ] && [ -n "$KEPT11" ] && [ -n "$(ls -A "$(docker volume inspect -f "{{.Mountpoint}}" "$KEPT11")")" ] && grep -q "\"id\": \"$OPY\".*\"engine\": \"mariadb\"" "$OPS"'
+python3 $H rollback "$OPY" > /tmp/e2e-y2.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-y2.log | tail -n 6
+KEPT12=$(docker volume ls -q --filter name='^imgupd-test-major_mdbdata-mariadb12-')
+check "MariaDB rollback: exit 0, MariaDB 11 with the old data, the file byte-identical, the app user logs in, the app runs" \
+    '[ $RC = 0 ] && [ "$(my -e "select version()" | cut -d. -f1)" = 11 ] && [ "$(MDATA)" = "$MDATA0" ] && [ "$(sum_of "$D6/docker-compose.yml")" = "$SUM6" ] && [ "$(login app app-only)" = 1 ] && [ "$(docker inspect -f "{{.State.Running}}" imgupd-test-mdb-app)" = true ]'
+check "MariaDB rollback: the old data back in its volume, the data of MariaDB 12 kept" \
+    '[ -z "$(docker volume ls -q --filter name="^$KEPT11\$")" ] && [ -n "$KEPT12" ] && [ -n "$(ls -A "$MYVOL")" ]'
+python3 $H delete-olddata "$OPY" > /tmp/e2e-y3.log 2>&1; RC=$?
+check "MariaDB delete-olddata after the rollback: the data of MariaDB 12 released" \
+    '[ $RC = 0 ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_mdbdata-mariadb12-")" ]'
+fi
 
 echo "=== 18. Rebuild of an image built on the server: a newer base from the registry, rollback ==="
 # The base is OLD in the local registry; the build on it runs. Then the registry

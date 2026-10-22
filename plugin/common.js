@@ -171,10 +171,14 @@
 
     const LEVELS = [["patch", "Patch"], ["minor", "Minor"], ["major", "Major"]];
     const LEVEL_NAMES = { patch: "Patch", minor: "Minor", major: "Major" };
+    // The engines a database major runs for (stage 5); an operation of 0.23.0 or
+    // 0.24.x names none and is PostgreSQL.
+    const ENGINES = { postgres: "PostgreSQL", mariadb: "MariaDB" };
+    const engineName = (e) => ENGINES[e || "postgres"] || e;
 
     Object.assign(P, { LIB, EVENTS_PATH, DISMISSED_PATH, VERSIONS_PATH, RELEASES_PATH, INVENTORY_CMD,
                        DEPS_CMD, UPDATE_CMD, FILE_OPTS, LANG, LOCALE, t, icon, $, tagSplit, repoKey,
                        verKey, evKey, shortDigest, esc, rich, human, fmtDay, fmtDate, ago, ciJobText,
                        spawnHelper, isNoAdmin, label, alertInner, alertBox, errorText, textButton,
-                       iconButton, iconSlot, LEVELS, LEVEL_NAMES });
+                       iconButton, iconSlot, LEVELS, LEVEL_NAMES, engineName });
 })();
