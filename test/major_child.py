@@ -14,6 +14,7 @@ point, no timing).
       stop_at      the rename after which the child waits (with ready_fd, go_fd)
       fail         renames (by attempt) that fail with an OSError
       probe_fail   the trial run's restore gives an error
+      engine       "postgres" (default) or "mariadb"
 
 What happened goes to <dir>/calls.jsonl: every docker command, and for each
 `up` of the database the files of its data directory at that moment."""
@@ -77,11 +78,17 @@ def write_tree(path, files):
                 f.write(content)
 
 
-# What PostgreSQL writes into an empty data directory on its first start.
+ENGINE = CFG.get("engine") or "postgres"
+# What the server writes into an empty data directory on its first start: the
+# new major's cluster (migrate) or a fresh, empty one of the old major (rollback).
 NEW_CLUSTER = {"17": {"PG_VERSION": "17\n", "base": "/", "base/5": "/", "base/5/16384": "rows of the new major",
                       "global": "/", "global/pg_control": "control 17", "pg_wal": "/",
                       "pg_wal/000000010000000000000001": "wal 17"},
-               "16": {"PG_VERSION": "16\n", "base": "/", "global": "/", "global/pg_control": "a fresh, empty cluster"}}
+               "16": {"PG_VERSION": "16\n", "base": "/", "global": "/", "global/pg_control": "a fresh, empty cluster"},
+               "12": {"mysql_upgrade_info": "12.3.3-MariaDB", "ibdata1": "innodb 12", "mysql": "/",
+                      "mysql/global_priv.MAD": "users 12", "appdb": "/", "appdb/notes.ibd": "rows of the new major"},
+               "11": {"mysql_upgrade_info": "11.8.9-MariaDB", "ibdata1": "a fresh, empty server", "mysql": "/"}}
+NEW_MAJOR, OLD_MAJOR = ("12", "11") if ENGINE == "mariadb" else ("17", "16")
 
 
 def stream(cmd):
@@ -89,7 +96,7 @@ def stream(cmd):
         # The image starts on the data directory; an empty one gets a new cluster (initdb).
         before = tree(SRC)
         if not before:
-            write_tree(SRC, NEW_CLUSTER["17" if CFG["action"] == "migrate" else "16"])
+            write_tree(SRC, NEW_CLUSTER[NEW_MAJOR if CFG["action"] == "migrate" else OLD_MAJOR])
         log_call(cmd, data=before)
     else:
         log_call(cmd)
@@ -119,26 +126,40 @@ def run(cmd, check=True, capture=True, timeout=600, **kw):
         U.shutil.rmtree(os.path.join(VOLUMES, cmd[-1]))
         return cmd[-1] + "\n"
     if cmd[:2] == ["docker", "compose"] and "config" in cmd:
-        return json.dumps({"name": "app", "services": {"db": {"image": "postgres:16-alpine"},
-                                                      "web": {"image": "acme/web:1"}}})
+        return json.dumps({"name": "app", "services": {"db": {"image": OLD_IMAGE}, "web": {"image": "acme/web:1"}}})
+    if cmd[:2] == ["docker", "exec"] and "select version()" in cmd[-1]:
+        return "11.8.9-MariaDB-ubu2404\n"
     if cmd[:2] == ["du", "-sb"]:
         return "1\t" + cmd[2] + "\n"
     return ""
 
 
+OLD_IMAGE, NEW_IMAGE = ("mariadb:11", "mariadb:12") if ENGINE == "mariadb" else ("postgres:16-alpine", "postgres:17.6-alpine")
+ENV = ["MARIADB_ROOT_PASSWORD=the-root-secret"] if ENGINE == "mariadb" else []
+
+
+def run_env(cmd, env, timeout=300):
+    """docker run with values in its environment: the names are logged, never the values."""
+    log_call(cmd, env=sorted(env), secret_in_cmd=any(v and v in a for v in env.values() for a in cmd))
+    return ""
+
+
 U.run = run
+U.run_env = run_env
 U.stream = stream
-U.inspect = lambda name: {"Name": "/" + name, "Image": "sha256:old", "Config": {"Image": "postgres:16-alpine", "Env": []},
+U.inspect = lambda name: {"Name": "/" + name, "Image": "sha256:old", "Config": {"Image": OLD_IMAGE, "Env": list(ENV)},
                           "State": {"Running": True, "Status": "running"}}
-U.image_id = lambda ref: ("sha256:new" if ref == "postgres:17.6-alpine" else "sha256:old") if ref else ""
+U.image_id = lambda ref: ("sha256:new" if ref == NEW_IMAGE else "sha256:old") if ref else ""
 U.missing_extensions = lambda ref, used: []
 U.dump_db = lambda project, db, st: f"{project}/{st}_{db['name']}.sql.gz"
-U.table_counts = lambda name: {"postgres": {"public.t": 3}}
+U.table_counts = lambda name, engine="postgres": {"postgres": {"public.t": 3}}
 U.change_files = lambda op, ctx, rt, services, st: U.record(op, log=op["id"] + ".log")
-U.wait_postgres = lambda name: True
-U.restore_into = lambda name, rel: (['psql:<stdin>:9: ERROR:  stand-in error'] if CFG.get("probe_fail") and "-probe-" in name
-                                    else [])
-U.version_of = lambda ref, iid: "17.6" if iid == "sha256:new" else "16.14"
+U.wait_ready = lambda name, engine="postgres": True
+U.after_restore = lambda name, engine: log_call(["after_restore", name, engine])
+U.restore_into = lambda name, rel, engine="postgres": (['psql:<stdin>:9: ERROR:  stand-in error']
+                                                       if CFG.get("probe_fail") and "-probe-" in name else [])
+U.version_of = lambda ref, iid: ("12.3.3" if ENGINE == "mariadb" else "17.6") if iid == "sha256:new" else \
+    ("11.8.9" if ENGINE == "mariadb" else "16.14")
 U.wait_healthy = lambda project, services: (True, [], {})
 U.start_radar = lambda: None
 U.show_logs = lambda names: None
@@ -164,17 +185,18 @@ def rename(a, b):
 
 os.rename = rename
 
+DEST = "/var/lib/mysql" if ENGINE == "mariadb" else "/var/lib/postgresql/data"
 if CFG["type"] == "volume":
-    mount = {"type": "volume", "name": "app_pgdata", "driver": "local", "source": SRC,
-             "destination": "/var/lib/postgresql/data"}
+    mount = {"type": "volume", "name": "app_pgdata", "driver": "local", "source": SRC, "destination": DEST}
 else:
-    mount = {"type": "bind", "name": None, "driver": None, "source": SRC, "destination": "/var/lib/postgresql/data"}
-PLAN = {"container": "db", "image": "postgres:16-alpine", "services": ["db"], "containers": ["db"], "project": "app",
-        "installed_version": "16.14", "free_bytes": 50 << 30,
-        "dbs": [{"name": "db", "kind": "postgres", "running": True, "size": 1}],
+    mount = {"type": "bind", "name": None, "driver": None, "source": SRC, "destination": DEST}
+PLAN = {"container": "db", "image": OLD_IMAGE, "services": ["db"], "containers": ["db"], "project": "app",
+        "installed_version": "11.8.9" if ENGINE == "mariadb" else "16.14", "free_bytes": 50 << 30,
+        "dbs": [{"name": "db", "kind": "mysql" if ENGINE == "mariadb" else "postgres", "running": True, "size": 1}],
         "dependents": [{"service": "web", "containers": ["web"]}],
-        "retag": {"image": "postgres:17.6-alpine", "from_tag": "16-alpine", "tag": "17.6-alpine", "changes": []},
-        "major": {"from_major": 16, "to_major": 17, "data": mount, "pgdata": "/var/lib/postgresql/data",
+        "retag": {"image": NEW_IMAGE, "from_tag": OLD_IMAGE.split(":")[1], "tag": NEW_IMAGE.split(":")[1], "changes": []},
+        "major": {"engine": ENGINE, "from_major": int(OLD_MAJOR), "to_major": int(NEW_MAJOR), "data": mount,
+                  "pgdata": None if ENGINE == "mariadb" else DEST, "datadir": DEST if ENGINE == "mariadb" else None,
                   "stop": ["web"], "extensions": [], "data_bytes": 1}}
 CTX = {"project": "app", "workdir": DIR, "files": [os.path.join(DIR, "compose.yml")], "env_files": []}
 

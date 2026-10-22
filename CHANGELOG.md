@@ -3,7 +3,7 @@
 ## 0.25.0 – 2026-10-22
 
 A database major tries the dump in a throwaway container of the new major before it touches the
-database, and refuses roles that the new major would lock out.
+database, refuses roles that the new major would lock out, and runs for MariaDB too.
 
 **Upgrading:** nothing to do. A major now needs room for the trial run in Docker's directory too,
 when that lies on another filesystem than the data.
@@ -21,13 +21,24 @@ when that lies on another filesystem than the data.
   `POSTGRES_PASSWORD`, as the waiting services do; a refused login fails the run with its rollback.
 - **Room for the trial run.** When Docker's directory lies on another filesystem than the data,
   the plan checks the room there too (`major-probe-space`).
+- **MariaDB majors.** MariaDB 11 → 12 (or another newer major) runs like a PostgreSQL major, from
+  *Change version*: the dump, the trial run, the data moved aside (`<volume>-mariadb11-<stamp>`), the
+  new major on the emptied place, the restore, then `FLUSH PRIVILEGES` and `mariadb-upgrade --force`
+  and a restart, the counts and the login of the app user over TCP; the rollback and the release as
+  for PostgreSQL. The root password comes from the container's environment through `MYSQL_PWD`,
+  never on a command line; the plan refuses MariaDB without one (`major-root-password`). MySQL stays
+  refused (`major-not-supported`, up to 0.24.x `major-not-postgres`). The history and its rollback
+  name the engine.
 - **Tests.** `test/major_test.py`: the MD5 refusal and its exception, the room for the trial run,
   the trial run itself (no network, label, user, database and PGDATA of the real one, never its
   password, an earlier probe removed first, removed afterwards; restore errors, other counts and a
   probe that does not start). `test/major_recovery_test.py`: a failed trial run changes nothing
   (the database never stopped, nothing moved, no history). `test/db-major.js`: the new refusals in
   both languages. `test/e2e-server.sh` section 17: a role with an MD5 password refused until it is
-  set again, the trial run before the data moves, the login check, no probe left.
+  set again, the trial run before the data moves, the login check, no probe left. MariaDB:
+  `test/major_test.py` (the plan, the counts), `test/major_recovery_test.py` (moves, version file,
+  trial run, rollback for MariaDB), `test/db-major.js` (the page), and `test/e2e-server.sh` section
+  17d: MariaDB 11 → 12 with test data, users and the app, the rollback and the release.
 
 ## 0.24.1 – 2026-10-21
 

@@ -1960,7 +1960,7 @@ PGDATA_DEFAULT = "/var/lib/postgresql/data"
 PG_NEW_LAYOUT = 18          # from 18 on the image keeps its data in /var/lib/postgresql/<major>/docker
 READY_TIMEOUT = 300         # seconds for the new major to accept connections over TCP
 ANON_VOLUME_RE = re.compile(r"^[0-9a-f]{64}$")
-KEPT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,250}[.-]pg\d{1,3}-\d{8}-\d{6}$")   # make_place's names
+KEPT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,250}[.-](pg|mariadb)\d{1,3}-\d{8}-\d{6}$")   # make_place's names
 # Every database, every table (also partitioned ones), counted exactly:
 # "database|schema.table|rows" per line.
 PG_COUNTS = r"""U="${POSTGRES_USER:-postgres}"
@@ -1988,6 +1988,66 @@ PG_MD5_ROLES = ('psql -X -U "${POSTGRES_USER:-postgres}" -d postgres -At -c '
 PG_LOGIN = ('[ -n "$POSTGRES_PASSWORD" ] || { echo skipped; exit 0; }; PGPASSWORD="$POSTGRES_PASSWORD" exec psql -X '
             '-h 127.0.0.1 -p "${PGPORT:-5432}" -U "${POSTGRES_USER:-postgres}" -d postgres -Atc "select 1"')
 PROBE_LABEL = "image-updates.probe"     # the throwaway containers of a major's trial run
+
+# Since 0.25.0 a major runs for MariaDB too, the same way: what differs per
+# engine is where the data lies, how the server says it is ready, how rows are
+# counted, how a dump is restored and what follows the restore.
+ENGINES = {"postgres": "PostgreSQL", "mariadb": "MariaDB"}
+PLACE_PREFIX = {"postgres": "pg", "mariadb": "mariadb"}     # <volume>-pg16-<stamp>, <volume>-mariadb11-<stamp>
+MARIADB_RE = re.compile(r"(^|/)mariadb$")
+MARIADB_ENV = ("MARIADB_VERSION=", "MARIADB_MAJOR=")
+MY_DATADIR = "/var/lib/mysql"
+MY_VERSION_FILE = "mysql_upgrade_info"      # the version mariadb-upgrade last ran for, in the data directory
+LEAD_MAJOR_RE = re.compile(r"^\s*(\d+)")
+# The root password from the container's environment goes through MYSQL_PWD,
+# never onto a command line.
+MY_SH = ('export MYSQL_PWD="${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}"; '
+         'if command -v mariadb >/dev/null 2>&1; then C=mariadb A=mariadb-admin U=mariadb-upgrade; '
+         'else C=mysql A=mysqladmin U=mysql_upgrade; fi; ')
+# Every table of every database but the system ones, counted exactly: "db<TAB>table<TAB>rows".
+MY_COUNTS = MY_SH + r"""q=$("$C" -uroot -N -B -e "select concat('select ', quote(table_schema), ', ', quote(table_name), ', count(*) from \`', replace(table_schema, '\`', '\`\`'), '\`.\`', replace(table_name, '\`', '\`\`'), '\`;') from information_schema.tables where table_type = 'BASE TABLE' and table_schema not in ('mysql', 'information_schema', 'performance_schema', 'sys') order by table_schema, table_name") || exit 1
+[ -z "$q" ] || printf '%s\n' "$q" | "$C" -uroot -N -B"""
+MY_SERVER_VERSION = MY_SH + '"$C" -uroot -N -B -e "select version()"'
+MY_READY = MY_SH + '"$A" ping --protocol=tcp -h 127.0.0.1 -uroot --silent'
+MY_RESTORE = MY_SH + 'exec "$C" -uroot'
+# A restore leaves the system tables of the dump's version while the data
+# directory already says the new one: mariadb-upgrade --force brings them up.
+MY_AFTER = MY_SH + '"$C" -uroot -e "flush privileges" && "$U" --force -uroot'
+MY_LOGIN = MY_SH + ('u="${MARIADB_USER:-$MYSQL_USER}"; p="${MARIADB_PASSWORD:-$MYSQL_PASSWORD}"; '
+                    '[ -n "$u" ] || { u=root; p="$MYSQL_PWD"; }; '
+                    'MYSQL_PWD="$p" exec "$C" --protocol=tcp -h 127.0.0.1 -u"$u" -N -B -e "select 1"')
+
+
+def engine_of(x):
+    """The engine of a plan's "major" or an operation; before 0.25.0 always PostgreSQL."""
+    return (x or {}).get("engine") or "postgres"
+
+
+def ename(x):
+    return ENGINES.get(engine_of(x), engine_of(x))
+
+
+def lead_major(text):
+    """11 of "11.8.9-MariaDB-ubu2404", 16 of "16"; None if it names no number."""
+    m = LEAD_MAJOR_RE.match(text or "")
+    return int(m.group(1)) if m else None
+
+
+def run_env(cmd, env, timeout=300):
+    """run() with variables put into the environment of the command: values a
+    command line must not show (`docker run -e NAME` takes them from there)."""
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env={**os.environ, **env})
+    if p.returncode != 0:
+        raise subprocess.CalledProcessError(p.returncode, cmd, p.stdout, p.stderr)
+    return p.stdout
+
+
+def my_datadir(c):
+    """The data directory of a MariaDB container: --datadir in its command, else /var/lib/mysql."""
+    for a in (c["Config"].get("Cmd") or []):
+        if str(a).startswith("--datadir="):
+            return str(a).split("=", 1)[1] or MY_DATADIR
+    return MY_DATADIR
 
 
 def major_of(version):
@@ -2029,9 +2089,16 @@ def pg_lines(name, script, timeout=None):
     return [ln for ln in out.splitlines() if ln.strip()]
 
 
-def table_counts(name):
-    """{database: {schema.table: rows}} of every table, counted exactly."""
+def table_counts(name, engine="postgres"):
+    """{database: {schema.table: rows}} of every table, counted exactly
+    (MariaDB: {database: {table: rows}}, the system databases left out)."""
     counts = {}
+    if engine == "mariadb":
+        for ln in pg_lines(name, MY_COUNTS):
+            parts = ln.split("\t")
+            if len(parts) == 3 and parts[2].strip().isdigit():
+                counts.setdefault(parts[0], {})[parts[1]] = int(parts[2])
+        return counts
     for ln in pg_lines(name, PG_COUNTS):
         db, _, rest = ln.partition("|")
         table, _, n = rest.rpartition("|")
@@ -2084,9 +2151,9 @@ def make_major(name, new_tag):
     stopped meanwhile, the extensions in use, the space; or why not."""
     plan, ctx = make_retag(name, new_tag, db_major=True)
     rt = plan["retag"]
-    mj = plan["major"] = {"possible": False, "reason": None, "detail": None, "from_major": None,
-                          "to_major": None, "data": None, "pgdata": None, "stop": [], "extensions": [],
-                          "data_bytes": None, "data_free": None, "fingerprint": None}
+    mj = plan["major"] = {"possible": False, "reason": None, "detail": None, "engine": None, "from_major": None,
+                          "to_major": None, "data": None, "pgdata": None, "datadir": None, "stop": [],
+                          "extensions": [], "data_bytes": None, "data_free": None, "fingerprint": None}
 
     def refuse(reason, detail=None):
         mj["reason"], mj["detail"] = reason, detail
@@ -2095,8 +2162,16 @@ def make_major(name, new_tag):
     if not rt["possible"]:
         return refuse(rt["reason"], rt.get("detail"))
     c = inspect(name)
-    if kind_of(c) != "postgres":
-        return refuse("major-not-postgres")
+    kind = kind_of(c)
+    image_env = c["Config"].get("Env") or []
+    if kind == "postgres":
+        engine = "postgres"
+    elif kind == "mysql" and (MARIADB_RE.search(split_ref(c["Config"]["Image"])[0].lower())
+                              or any(e.startswith(MARIADB_ENV) for e in image_env)):
+        engine = "mariadb"
+    else:
+        return refuse("major-not-supported", c["Config"]["Image"])
+    mj["engine"] = engine
     if len(plan["services"]) != 1 or len(plan["containers"]) != 1:
         return refuse("major-several", ", ".join(plan["containers"]))
     if not c["State"].get("Running"):
@@ -2105,9 +2180,10 @@ def make_major(name, new_tag):
     if old is None or new is None or new <= old:
         return refuse("major-not-newer", plan["target_version"])
     mj["from_major"], mj["to_major"] = old, new
-    mount = data_mount(c, env_of(c).get("PGDATA") or PGDATA_DEFAULT)
+    datadir = (env_of(c).get("PGDATA") or PGDATA_DEFAULT) if engine == "postgres" else my_datadir(c)
+    mount = data_mount(c, datadir)
     if not mount or mount["type"] not in ("volume", "bind") or not mount["source"]:
-        return refuse("major-no-volume", env_of(c).get("PGDATA") or PGDATA_DEFAULT)
+        return refuse("major-no-volume", datadir)
     if mount["type"] == "volume" and (mount["driver"] or "local") != "local":
         return refuse("major-volume-driver", mount["driver"])
     if mount["type"] == "volume" and ANON_VOLUME_RE.match(mount["name"] or ""):
@@ -2119,28 +2195,38 @@ def make_major(name, new_tag):
             os.path.normpath(src))).st_dev):
         return refuse("major-bind-mountpoint", src)
     mj["data"] = mount
-    # Where the new major keeps its data must lie in that mount: from 18 on the
-    # image uses /var/lib/postgresql/18/docker unless the compose file sets PGDATA.
     service = plan["services"][0]
     env = (((ctx.get("cfg") or {}).get("services") or {}).get(service) or {}).get("environment") or {}
-    pgdata = (env.get("PGDATA") if isinstance(env, dict) else None) or \
-        (f"/var/lib/postgresql/{new}/docker" if new >= PG_NEW_LAYOUT else PGDATA_DEFAULT)
-    if not inside(pgdata, mount["destination"]):
-        return refuse("major-pgdata", f"{pgdata} | {mount['destination']}")
-    mj["pgdata"] = pgdata
+    pgdata = None
+    if engine == "postgres":
+        # Where the new major keeps its data must lie in that mount: from 18 on the
+        # image uses /var/lib/postgresql/18/docker unless the compose file sets PGDATA.
+        pgdata = (env.get("PGDATA") if isinstance(env, dict) else None) or \
+            (f"/var/lib/postgresql/{new}/docker" if new >= PG_NEW_LAYOUT else PGDATA_DEFAULT)
+        if not inside(pgdata, mount["destination"]):
+            return refuse("major-pgdata", f"{pgdata} | {mount['destination']}")
+        mj["pgdata"] = pgdata
+    else:
+        mj["datadir"] = datadir
+        # Dump, count and restore log in as root with the password of the environment.
+        if not (env_of(c).get("MARIADB_ROOT_PASSWORD") or env_of(c).get("MYSQL_ROOT_PASSWORD")):
+            return refuse("major-root-password")
     mj["stop"] = [d["service"] for d in plan["dependents"]
                   if any((inspect(n)["State"] or {}).get("Running") for n in d["containers"])]
-    try:
-        mj["extensions"] = sorted(set(pg_lines(name, PG_EXTENSIONS, timeout=120)) - {"plpgsql"})
-        md5 = pg_lines(name, PG_MD5_ROLES, timeout=120)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
-        return refuse("major-unreadable", (getattr(e, "stderr", None) or str(e)).strip()[-300:])
-    # The dump keeps the password hashes: an MD5 one would not let its role in
-    # any more, unless the compose file keeps MD5 for the network.
-    auth = str((env.get("POSTGRES_HOST_AUTH_METHOD") if isinstance(env, dict) else None) or "").lower()
-    if md5 and auth not in ("md5", "password", "trust"):
-        return refuse("major-md5", ", ".join(md5[:10]))
-    mj["data_bytes"] = next((d["size"] for d in plan["dbs"] if d["name"] == name), None)
+    if engine == "postgres":
+        try:
+            mj["extensions"] = sorted(set(pg_lines(name, PG_EXTENSIONS, timeout=120)) - {"plpgsql"})
+            md5 = pg_lines(name, PG_MD5_ROLES, timeout=120)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+            return refuse("major-unreadable", (getattr(e, "stderr", None) or str(e)).strip()[-300:])
+        # The dump keeps the password hashes: an MD5 one would not let its role in
+        # any more, unless the compose file keeps MD5 for the network.
+        auth = str((env.get("POSTGRES_HOST_AUTH_METHOD") if isinstance(env, dict) else None) or "").lower()
+        if md5 and auth not in ("md5", "password", "trust"):
+            return refuse("major-md5", ", ".join(md5[:10]))
+        mj["data_bytes"] = next((d["size"] for d in plan["dbs"] if d["name"] == name), None)
+    else:
+        mj["data_bytes"] = kept_bytes({"path": src})
     mj["data_free"] = shutil.disk_usage(src).free
     if mj["data_bytes"] is not None and mj["data_free"] < mj["data_bytes"] + FREE_MARGIN:
         return refuse("major-space", f"{human(mj['data_free'])} | {human(mj['data_bytes'] + FREE_MARGIN)}")
@@ -2150,7 +2236,8 @@ def make_major(name, new_tag):
         free = shutil.disk_usage(root).free
         if free < mj["data_bytes"] + FREE_MARGIN:
             return refuse("major-probe-space", f"{human(free)} | {human(mj['data_bytes'] + FREE_MARGIN)} | {root}")
-    mj["fingerprint"] = hashlib.sha256(json.dumps([rt["fingerprint"], mount, pgdata, mj["stop"]],
+    mj["fingerprint"] = hashlib.sha256(json.dumps([rt["fingerprint"], mount, pgdata or datadir, mj["stop"]]
+                                                  + ([engine] if engine != "postgres" else []),
                                                   sort_keys=True).encode()).hexdigest()
     mj["possible"] = True
     return plan, ctx
@@ -2187,35 +2274,46 @@ def probe_restore(name, plan, op, before):
     A dump the new major does not take, or other counts, stop the major here
     (exit 5)."""
     mj, new_ref, new = plan["major"], plan["retag"]["image"], plan["major"]["to_major"]
+    engine, label = engine_of(mj), ename(mj)
     env = env_of(inspect(name))
     probe = f"{name}-probe-{op['id'][:15]}"
     drop_probes()
     cmd = ["docker", "run", "-d", "--rm", "--name", probe, "--network", "none",
-           "--label", f"{PROBE_LABEL}={op['id']}", "-e", "POSTGRES_PASSWORD=" + secrets.token_hex(16)]
-    for k in ("POSTGRES_USER", "POSTGRES_DB"):
-        if env.get(k):
-            cmd += ["-e", f"{k}={env[k]}"]
-    if mj.get("pgdata"):
-        cmd += ["-e", "PGDATA=" + mj["pgdata"]]
-    say(f"Probelauf: der Dump in einen Wegwerf-Container von PostgreSQL {new}, ohne Netz …",
-        f"Trial run: the dump into a throwaway container of PostgreSQL {new}, without network …")
+           "--label", f"{PROBE_LABEL}={op['id']}"]
+    secret = {}
+    if engine == "mariadb":
+        # The dump brings the old users with it: the probe gets the root password
+        # of the real one, through the environment of docker run, not its arguments.
+        secret = {"MARIADB_ROOT_PASSWORD": env.get("MARIADB_ROOT_PASSWORD") or env.get("MYSQL_ROOT_PASSWORD") or ""}
+        cmd += ["-e", "MARIADB_ROOT_PASSWORD"]
+    else:
+        cmd += ["-e", "POSTGRES_PASSWORD=" + secrets.token_hex(16)]
+        for k in ("POSTGRES_USER", "POSTGRES_DB"):
+            if env.get(k):
+                cmd += ["-e", f"{k}={env[k]}"]
+        if mj.get("pgdata"):
+            cmd += ["-e", "PGDATA=" + mj["pgdata"]]
+    say(f"Probelauf: der Dump in einen Wegwerf-Container von {label} {new}, ohne Netz …",
+        f"Trial run: the dump into a throwaway container of {label} {new}, without network …")
     why = None
     try:
-        run(cmd + [new_ref], timeout=300)
+        run_env(cmd + [new_ref], secret, timeout=300)
         try:
-            ready = wait_postgres(probe)
+            ready = wait_ready(probe, engine)
         except Abort:
             ready = False           # it ended and --rm removed it
         if not ready:
-            why = pick("PostgreSQL startete nicht", "PostgreSQL did not start")
+            why = pick(f"{label} startete nicht", f"{label} did not start")
         else:
-            errors = restore_into(probe, op["dumps"][0])
+            errors = restore_into(probe, op["dumps"][0], engine)
             if errors:
                 for ln in errors[:20]:
                     print(ln)
                 why = pick(f"Einspielen: {errors[0]}", f"restore: {errors[0]}")
             else:
-                diff = compare_counts(before, table_counts(probe))
+                if engine == "mariadb":
+                    after_restore(probe, engine)
+                diff = compare_counts(before, table_counts(probe, engine))
                 if diff:
                     why = pick(f"Zeilen weichen ab: {diff[0]}", f"rows differ: {diff[0]}")
     except subprocess.CalledProcessError as e:
@@ -2225,12 +2323,12 @@ def probe_restore(name, plan, op, before):
     finally:
         run(["docker", "rm", "-f", "-v", probe], check=False, timeout=120)
     if why:
-        raise Abort(5, f"Probelauf in PostgreSQL {new} gescheitert ({why}) – nichts geändert, die Datenbank läuft "
+        raise Abort(5, f"Probelauf in {label} {new} gescheitert ({why}) – nichts geändert, die Datenbank läuft "
                        f"mit ihren Daten weiter.",
-                    f"Trial run in PostgreSQL {new} failed ({why}) – nothing changed, the database runs on with "
+                    f"Trial run in {label} {new} failed ({why}) – nothing changed, the database runs on with "
                     f"its data.")
-    say(f"Probelauf: in PostgreSQL {new} eingespielt und gezählt – gleich.",
-        f"Trial run: restored into PostgreSQL {new} and counted – the same.")
+    say(f"Probelauf: in {label} {new} eingespielt und gezählt – gleich.",
+        f"Trial run: restored into {label} {new} and counted – the same.")
 
 
 def cmd_major(name, new_tag, expect):
@@ -2371,12 +2469,21 @@ def set_aside(op, suffix):
     return kept
 
 
+def version_file_of(op):
+    """The file in the data that names its major: PG_VERSION (pg_version_file),
+    MariaDB's mysql_upgrade_info (version_file, if it was there), or None."""
+    return op.get("pg_version_file") or op.get("version_file") or \
+        ("PG_VERSION" if engine_of(op) == "postgres" else None)
+
+
 def pg_version_of(op):
-    """What PG_VERSION of the database's data says now (None if unreadable)."""
-    path = os.path.join(op["data"]["source"], op.get("pg_version_file") or "PG_VERSION")
+    """What the version file of the database's data says now (None if unreadable)."""
+    if not version_file_of(op):
+        return None
+    path = os.path.join(op["data"]["source"], version_file_of(op))
     try:
         with open(path) as f:
-            return f.read().strip()
+            return f.read().strip().strip("\x00").strip()
     except OSError:
         return None
 
@@ -2399,12 +2506,13 @@ def data_restored(op):
     if not names:
         return pick(f"{src} ist leer (die Datenbank legte darin einen neuen, leeren Cluster an)",
                     f"{src} is empty (the database would set up a new, empty cluster in it)")
-    path = os.path.join(src, op.get("pg_version_file") or "PG_VERSION")
-    if op.get("pg_version_file") or os.path.isfile(path):
+    vf = version_file_of(op)
+    path = os.path.join(src, vf) if vf else None
+    if path and (op.get("pg_version_file") or op.get("version_file") or os.path.isfile(path)):
         v = pg_version_of(op)
-        if v != str(op.get("from_major")):
-            return pick(f"{path} nennt {v or 'nichts'} statt PostgreSQL {op.get('from_major')}",
-                        f"{path} says {v or 'nothing'} instead of PostgreSQL {op.get('from_major')}")
+        if lead_major(v) != op.get("from_major"):
+            return pick(f"{path} nennt {v or 'nichts'} statt {ename(op)} {op.get('from_major')}",
+                        f"{path} says {v or 'nothing'} instead of {ename(op)} {op.get('from_major')}")
     return None
 
 
@@ -2415,7 +2523,8 @@ def unrecorded_place(op):
     operation, as that version named it, with data in it. None if there is
     none."""
     data = op.get("data") or {}
-    if op.get("old_data") or op.get("move") or not op.get("from_major") or data.get("type") not in ("volume", "bind"):
+    if op.get("old_data") or op.get("move") or not op.get("from_major") or data.get("type") not in ("volume", "bind") \
+            or engine_of(op) != "postgres":
         return None
     suffix = f"pg{op['from_major']}-{op['id'][:15]}"
     if data["type"] == "volume":
@@ -2447,18 +2556,19 @@ def kept_where(kept):
                      else kept["path"])
 
 
-def wait_postgres(name):
+def wait_ready(name, engine="postgres"):
     """The new major accepts connections over TCP: the server the image runs
-    while it sets up a new cluster listens on its socket only. False when the
-    container stops or READY_TIMEOUT passes."""
+    while it sets up a new cluster listens on its socket only (PostgreSQL) or
+    on no network (MariaDB). False when the container stops or READY_TIMEOUT
+    passes."""
     deadline = time.time() + READY_TIMEOUT
     while time.time() < deadline:
         state = inspect(name)["State"] or {}
         if state.get("Status") in ("exited", "dead") or state.get("Restarting"):
             return False
         try:
-            if subprocess.run(["docker", "exec", name, "sh", "-c", PG_READY], capture_output=True,
-                              timeout=30).returncode == 0:
+            if subprocess.run(["docker", "exec", name, "sh", "-c", MY_READY if engine == "mariadb" else PG_READY],
+                              capture_output=True, timeout=30).returncode == 0:
                 return True
         except subprocess.TimeoutExpired:
             pass
@@ -2466,9 +2576,17 @@ def wait_postgres(name):
     return False
 
 
-def restore_into(name, rel):
-    """Restore a dump (pg_dumpall, gzip) into the new major: its error lines
-    (restore_errors). The database the image created first goes before."""
+def restore_into(name, rel, engine="postgres"):
+    """Restore a dump (pg_dumpall / mariadb-dump, gzip) into the new major:
+    its error lines (restore_errors). PostgreSQL: the database the image
+    created first goes before. MariaDB: the client stops at the first error."""
+    if engine == "mariadb":
+        p = subprocess.run(["sh", "-c", 'gunzip -c "$1" | docker exec -i "$2" sh -c "$3"', "sh",
+                            os.path.join(DUMPS, rel), name, MY_RESTORE],
+                           capture_output=True, text=True, timeout=LIMITS["dump"])
+        if p.returncode == 0:
+            return []
+        return [ln for ln in (p.stderr or "").splitlines() if ln.strip()][-5:] or [f"exit {p.returncode}"]
     run(["docker", "exec", name, "sh", "-c", PG_DROP_FIRST], timeout=120)
     p = subprocess.run(["sh", "-c", 'gunzip -c "$1" | docker exec -i "$2" sh -c "$3"', "sh",
                         os.path.join(DUMPS, rel), name, PG_RESTORE],
@@ -2477,6 +2595,36 @@ def restore_into(name, rel):
     if p.returncode != 0 and not errors:
         errors = [(p.stderr or "").strip()[-300:] or f"exit {p.returncode}"]
     return errors
+
+
+def after_restore(name, engine):
+    """What follows a restore. MariaDB: the privileges read again and
+    mariadb-upgrade --force (raises when that fails). PostgreSQL: the
+    statistics renewed (a failure is a note)."""
+    if engine == "mariadb":
+        run(["docker", "exec", name, "sh", "-c", MY_AFTER], timeout=LIMITS["dump"])
+        return
+    try:
+        run(["docker", "exec", name, "sh", "-c", PG_ANALYZE], timeout=LIMITS["dump"])
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        say("Hinweis: Die Statistiken ließen sich nicht erneuern (vacuumdb --analyze-only).",
+            "Note: the statistics could not be renewed (vacuumdb --analyze-only).")
+
+
+def login_failure(name, engine):
+    """None when the user of the environment logs in over TCP with its
+    password, as the waiting services do (MariaDB without an app user: root),
+    else the last line the client said."""
+    try:
+        out = run(["docker", "exec", name, "sh", "-c", MY_LOGIN if engine == "mariadb" else PG_LOGIN],
+                  timeout=60).strip()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        lines = (getattr(e, "stderr", None) or str(e) or "").strip().splitlines()
+        return lines[-1] if lines else "?"
+    if out != "skipped":
+        say("Anmeldung über TCP mit dem Passwort aus der Umgebung: in Ordnung.",
+            "Login over TCP with the password from the environment: OK.")
+    return None
 
 
 def start_stopped(op, base):
@@ -2516,13 +2664,22 @@ def migrate(name, plan, ctx):
     service, project = plan["services"][0], plan["project"]
     base = compose_cmd(ctx)
     old, new = mj["from_major"], mj["to_major"]
+    engine, label = engine_of(mj), ename(mj)
     with before_change():
         c = inspect(name)
         old_id = c["Image"]
-    # Where the old major's PG_VERSION lies in the mount: what a rollback checks
-    # before it starts the old major again (data_restored).
-    pg_version_file = os.path.normpath(os.path.join(
-        os.path.relpath(env_of(c).get("PGDATA") or PGDATA_DEFAULT, mj["data"]["destination"]), "PG_VERSION"))
+    # The file that names the old major in the mount: what a rollback checks
+    # before it starts the old major again (data_restored). PostgreSQL:
+    # PG_VERSION below PGDATA; MariaDB: mysql_upgrade_info, if there is one.
+    pg_version_file = version_file = None
+    if engine == "postgres":
+        pg_version_file = os.path.normpath(os.path.join(
+            os.path.relpath(env_of(c).get("PGDATA") or PGDATA_DEFAULT, mj["data"]["destination"]), "PG_VERSION"))
+    else:
+        rel = os.path.normpath(os.path.join(os.path.relpath(mj.get("datadir") or MY_DATADIR, mj["data"]["destination"]),
+                                            MY_VERSION_FILE))
+        if os.path.isfile(os.path.join(mj["data"]["source"], rel)):
+            version_file = rel
     op = {"id": op_id, "ts": now_iso(), "kind": "dbmajor", "container": name, "project": project,
           "workdir": ctx["workdir"], "files": ctx["files"], "env_files": ctx["env_files"],
           "services": [service], "containers": [name], "image": ref, "old_id": old_id,
@@ -2530,10 +2687,11 @@ def migrate(name, plan, ctx):
           "to_image": new_ref, "from_tag": rt["from_tag"], "to_tag": rt["tag"],
           "changes": [{k: c[k] for k in ("file", "line", "old", "new")} for c in rt["changes"]],
           "from_major": old, "to_major": new, "data": mj["data"], "old_data": None, "stopped": [],
-          "pg_version_file": pg_version_file, "data_entries": None, "move": None,
+          "engine": engine, "pg_version_file": pg_version_file, "version_file": version_file,
+          "data_entries": None, "move": None,
           "rollback": None, "dumps": [], "status": "running", "pid": os.getpid()}
-    say(f"Datenbank-Major {ref} → {new_ref} (PostgreSQL {old} → {new}) in Projekt {project}.",
-        f"Database major {ref} to {new_ref} (PostgreSQL {old} to {new}) in project {project}.")
+    say(f"Datenbank-Major {ref} → {new_ref} ({label} {old} → {new}) in Projekt {project}.",
+        f"Database major {ref} to {new_ref} ({label} {old} to {new}) in project {project}.")
     say("Die Datenbank und die Dienste, die auf sie warten, sind bis zum Ende nicht erreichbar.",
         "The database and the services that wait for it are unavailable until the end.")
 
@@ -2553,7 +2711,7 @@ def migrate(name, plan, ctx):
         if pull_rc != 0:
             say(f"Warnung: Der Pull ist fehlgeschlagen; {new_ref} liegt schon auf dem Server und wird verwendet.",
                 f"Warning: the pull failed; {new_ref} is on the server already and is used.")
-        missing = missing_extensions(new_ref, mj["extensions"])
+        missing = missing_extensions(new_ref, mj["extensions"]) if engine == "postgres" else []
         if missing:
             raise Abort(5, f"{new_ref} hat die Erweiterungen {', '.join(missing)} nicht, die die Datenbanken nutzen "
                            f"– nichts geändert. Ein Image mit ihnen wählen (z. B. pgvector/pgvector).",
@@ -2582,14 +2740,19 @@ def migrate(name, plan, ctx):
                             "The waiting services could not be stopped – nothing changed.")
         db = next(d for d in plan["dbs"] if d["name"] == name)
         op["dumps"].append(dump_db(project, db, st))
-        before = table_counts(name)
+        before = table_counts(name, engine)
         say(f"Gezählt: {count_summary(before)}", f"Counted: {count_summary(before)}")
-        # The data the major moves must be this cluster: a rollback checks it by the same file.
-        if pg_version_of(op) != str(old):
-            raise Abort(5, f"{os.path.join(mj['data']['source'], pg_version_file)} nennt nicht PostgreSQL {old} – "
-                           f"nichts geändert.",
-                        f"{os.path.join(mj['data']['source'], pg_version_file)} does not say PostgreSQL {old} – "
-                        f"nothing changed.")
+        # The data the major moves must be this server's: a rollback checks it by the same file.
+        running = old
+        if engine == "mariadb":
+            try:
+                running = lead_major((pg_lines(name, MY_SERVER_VERSION, timeout=60) or [""])[0])
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                running = None
+        if running != old or (version_file_of(op) and lead_major(pg_version_of(op)) != old):
+            where = os.path.join(mj["data"]["source"], version_file_of(op) or "")
+            raise Abort(5, f"Server oder {where} nennen nicht {label} {old} – nichts geändert.",
+                        f"The server or {where} do not say {label} {old} – nothing changed.")
         # 4b. The trial run: does the new major take the dump, are the counts the same?
         probe_restore(name, plan, op, before)
         change_files(op, ctx, rt, [service], st)
@@ -2606,25 +2769,40 @@ def migrate(name, plan, ctx):
     try:
         if stream(base + ["stop", service]) != 0:
             raise RuntimeError(pick("docker compose stop schlug fehl", "docker compose stop failed"))
-        set_aside(op, f"pg{old}-{st}")
-        say(f"Die Daten von PostgreSQL {old} liegen jetzt in {kept_where(op['old_data'])}; sie bleiben, bis sie "
+        set_aside(op, f"{PLACE_PREFIX[engine]}{old}-{st}")
+        say(f"Die Daten von {label} {old} liegen jetzt in {kept_where(op['old_data'])}; sie bleiben, bis sie "
             f"freigegeben werden.",
-            f"The data of PostgreSQL {old} is now in {kept_where(op['old_data'])}; it stays until released.")
+            f"The data of {label} {old} is now in {kept_where(op['old_data'])}; it stays until released.")
         rc = stream(base + ["up", "-d", "--no-deps", "--pull", "never", service])
-        if rc != 0 or not wait_postgres(name):
+        if rc != 0 or not wait_ready(name, engine):
             show_logs([name])
             reason = failure_reason([name], compose_rc=rc)
             raise RuntimeError("not ready")
         op["new_id"] = new_id
         op["to_version"] = version_of(new_ref, new_id)
-        say(f"PostgreSQL {new} läuft. Spiele den Dump ein …", f"PostgreSQL {new} runs. Restoring the dump …")
-        errors = restore_into(name, op["dumps"][0])
+        say(f"{label} {new} läuft. Spiele den Dump ein …", f"{label} {new} runs. Restoring the dump …")
+        errors = restore_into(name, op["dumps"][0], engine)
         if errors:
             for ln in errors[:20]:
                 print(ln)
             reason = major_reason(name, "restore", errors[0][-REASON_MAX:])
             raise RuntimeError("restore")
-        after = table_counts(name)
+        if engine == "mariadb":
+            # The system tables of the dump's version brought up, then a restart on them.
+            try:
+                after_restore(name, engine)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                lines = (getattr(e, "stderr", None) or getattr(e, "output", None) or str(e) or "").strip().splitlines()
+                reason = major_reason(name, "upgrade", "mariadb-upgrade: " + (lines[-1] if lines else "?")[:REASON_MAX - 20])
+                raise RuntimeError("upgrade")
+            say("Rechte neu gelesen, mariadb-upgrade gelaufen; MariaDB startet neu …",
+                "Privileges read again, mariadb-upgrade done; MariaDB restarts …")
+            rc = stream(base + ["restart", service])
+            if rc != 0 or not wait_ready(name, engine):
+                show_logs([name])
+                reason = failure_reason([name], compose_rc=rc)
+                raise RuntimeError("restart")
+        after = table_counts(name, engine)
         diff = compare_counts(before, after)
         if diff:
             for ln in diff[:20]:
@@ -2634,21 +2812,13 @@ def migrate(name, plan, ctx):
         say(f"Gezählt nach dem Einspielen: {count_summary(after)} – gleich.",
             f"Counted after the restore: {count_summary(after)} – the same.")
         # The services that wait for the database log in over the network with a password.
-        try:
-            out = run(["docker", "exec", name, "sh", "-c", PG_LOGIN], timeout=60).strip()
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-            line = (getattr(e, "stderr", None) or str(e) or "").strip().splitlines()
+        refused = login_failure(name, engine)
+        if refused is not None:
             reason = major_reason(name, "login", pick("Anmeldung über TCP gescheitert: ", "Login over TCP failed: ")
-                                  + (line[-1] if line else "?")[:REASON_MAX - 40])
+                                  + refused[:REASON_MAX - 40])
             raise RuntimeError("login")
-        if out != "skipped":
-            say("Anmeldung über TCP mit dem Passwort aus der Umgebung: in Ordnung.",
-                "Login over TCP with the password from the environment: OK.")
-        try:
-            run(["docker", "exec", name, "sh", "-c", PG_ANALYZE], timeout=LIMITS["dump"])
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-            say("Hinweis: Die Statistiken ließen sich nicht erneuern (vacuumdb --analyze-only).",
-                "Note: the statistics could not be renewed (vacuumdb --analyze-only).")
+        if engine == "postgres":
+            after_restore(name, engine)
         # 9. The services that wait for the database
         if op["stopped"]:
             rc = stream(base + ["start", *op["stopped"]])
@@ -2676,7 +2846,7 @@ def migrate(name, plan, ctx):
         return 4
     op["status"] = "ok"
     record(op, log=op_id + ".log")
-    say(f"Datenbank-Major erfolgreich: PostgreSQL {new}.", f"Database major successful: PostgreSQL {new}.")
+    say(f"Datenbank-Major erfolgreich: {label} {new}.", f"Database major successful: {label} {new}.")
     try:
         start_radar()
     except Interrupted as e:
@@ -2730,7 +2900,8 @@ def swap_back(op, base):
         if kept and step != "aside":
             if step == "new-aside" or (step is None and os.listdir(src)):
                 if step != "new-aside":
-                    new_kept = make_place(op["data"], f"pg{op['to_major']}-{stamp()}", op["id"])
+                    new_kept = make_place(op["data"], f"{PLACE_PREFIX[engine_of(op)]}{op['to_major']}-{stamp()}",
+                                          op["id"])
                     op.update(new_data=new_kept, move={"step": "new-aside", "from": src, "to": new_kept["path"]})
                     record({"id": op["id"], "new_data": new_kept, "move": op["move"]})
                 try:
@@ -2760,11 +2931,11 @@ def swap_back(op, base):
             op.update(old_data=None, move=None)
             record({"id": op["id"], "old_data": None, "move": None})
     if kept:
-        say(f"Die Daten von PostgreSQL {op['from_major']} liegen wieder an ihrem Ort"
-            + (f"; die von PostgreSQL {op['to_major']} bleiben in {kept_where(op.get('new_data'))}, bis sie "
+        say(f"Die Daten von {ename(op)} {op['from_major']} liegen wieder an ihrem Ort"
+            + (f"; die von {ename(op)} {op['to_major']} bleiben in {kept_where(op.get('new_data'))}, bis sie "
                f"freigegeben werden." if op.get("new_data") else "."),
-            f"The data of PostgreSQL {op['from_major']} is back in its place"
-            + (f"; that of PostgreSQL {op['to_major']} stays in {kept_where(op.get('new_data'))} until released."
+            f"The data of {ename(op)} {op['from_major']} is back in its place"
+            + (f"; that of {ename(op)} {op['to_major']} stays in {kept_where(op.get('new_data'))} until released."
                if op.get("new_data") else "."))
     return op.get("new_data")
 
@@ -2934,8 +3105,8 @@ def cmd_rollback(op_id):
         say(f"Rollback von {op['image']} auf {rb} (Projekt {op['project']}) …",
             f"Rolling {op['image']} back to {rb} (project {op['project']}) …")
         if major:
-            say(f"Die Datenbank kehrt mit ihren alten Daten zu PostgreSQL {op.get('from_major')} zurück.",
-                f"The database returns to PostgreSQL {op.get('from_major')} with its old data.")
+            say(f"Die Datenbank kehrt mit ihren alten Daten zu {ename(op)} {op.get('from_major')} zurück.",
+                f"The database returns to {ename(op)} {op.get('from_major')} with its old data.")
         else:
             say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
                 "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
@@ -3121,7 +3292,7 @@ def cmd_backups():
             # Without the old data a rollback has nothing to move back.
             if o.get("can_rollback") and not o.get("rolled_back") and o.get("old_data") and "kept" not in o:
                 o["can_rollback"] = False
-            for k in ("data", "old_data", "new_data", "move", "data_entries", "pg_version_file"):
+            for k in ("data", "old_data", "new_data", "move", "data_entries", "pg_version_file", "version_file"):
                 o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))
         o["rollback_log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".rollback.log"))

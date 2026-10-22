@@ -6,7 +6,7 @@
     "use strict";
     const P = window.ImageUpdatesPage;
     if (!P) return;     // common.js did not load: diun.js asks Cockpit for it again
-    const { UPDATE_CMD, t, $, tagSplit, esc, rich, human, fmtDate, ciJobText, spawnHelper, isNoAdmin,
+    const { UPDATE_CMD, t, $, tagSplit, esc, rich, human, fmtDate, ciJobText, spawnHelper, isNoAdmin, engineName,
             label, alertBox, errorText, LEVEL_NAMES, dlg, confirmAndRun, reasonText, ticket } = P;
 
     // --- Update ------------------------------------------------------------
@@ -231,7 +231,7 @@
         confirmAndRun({
             title: t("rb.title", { name: op.container }),
             desc: t(op.kind === "retag" ? "rb.descRetag" : op.kind === "dbmajor" ? "rb.descMajor" : "rb.desc",
-                    { ...vars, from: op.from_major, to: op.to_major }),
+                    { ...vars, engine: engineName(op.engine), from: op.from_major, to: op.to_major }),
             confirm: { label: t("rb.button"), argv: () => [UPDATE_CMD, "rollback", op.id] },
             onDone: (o) => {
                 if (o.ok) { dlg.result(t("rb.ok"), true); return true; }

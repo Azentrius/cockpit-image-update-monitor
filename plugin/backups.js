@@ -6,7 +6,7 @@
     "use strict";
     const P = window.ImageUpdatesPage;
     if (!P) return;     // common.js did not load: diun.js asks Cockpit for it again
-    const { UPDATE_CMD, t, $, esc, rich, human, fmtDate, spawnHelper, isNoAdmin, label, alertInner,
+    const { UPDATE_CMD, t, $, esc, rich, human, fmtDate, spawnHelper, isNoAdmin, label, alertInner, engineName,
             errorText, textButton, iconButton, iconSlot, dlg, confirmAndRun, openInstallDialog,
             reasonText, ticket } = P;
 
@@ -180,8 +180,8 @@
             `<td data-label="${L("col.image")}"><span class="dm-cell"><span class="az-mono">${esc(o.image || "")}</span>` +
               (o.kind === "retag" ? `<span class="dm-row-note">${esc(t("op.retag", { from: o.from_tag, to: o.to_tag }))}</span>` : "") +
               (o.kind === "rebuild" ? `<span class="dm-row-note">${esc(t("op.rebuild"))}</span>` : "") +
-              (o.kind === "dbmajor" ? `<span class="dm-row-note">${esc(t("op.dbmajor", { from: o.from_major, to: o.to_major }))}</span>` +
-                  (o.kept ? `<span class="dm-row-note">${esc(t("op.kept", { major: o.kept.major, where: o.kept.where,
+              (o.kind === "dbmajor" ? `<span class="dm-row-note">${esc(t("op.dbmajor", { engine: engineName(o.engine), from: o.from_major, to: o.to_major }))}</span>` +
+                  (o.kept ? `<span class="dm-row-note">${esc(t("op.kept", { engine: engineName(o.engine), major: o.kept.major, where: o.kept.where,
                                                                              size: o.kept.bytes == null ? "?" : human(o.kept.bytes) }))}</span>` : "")
                   : "") +
             `</span></td>` +
@@ -203,7 +203,7 @@
             const o = b.ops[Number(btn.dataset.release)];
             btn.addEventListener("click", () => confirmAndRun({
                 title: t("rel.title"),
-                desc: t("rel.desc", { major: o.kept.major, where: o.kept.where,
+                desc: t("rel.desc", { engine: engineName(o.engine), major: o.kept.major, where: o.kept.where,
                                       size: o.kept.bytes == null ? "?" : human(o.kept.bytes) }),
                 confirm: { label: t("rel.confirm"), danger: true, argv: () => [UPDATE_CMD, "delete-olddata", o.id] },
                 onDone: (r) => { if (r.ok) { dlg.result(t("rel.ok"), true); return true; } return false; },

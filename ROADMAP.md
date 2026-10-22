@@ -240,13 +240,15 @@ what failed, what was rolled back.
 
 ---
 
-## Stage 5 – Guided database majors (PostgreSQL ✅)
+## Stage 5 – Guided database majors (PostgreSQL ✅, MariaDB ✅)
 
 PostgreSQL done in 0.23.0. Since 0.23.0 the helper does a PostgreSQL major by dump and restore (`diun-update.py
 dbmajor`, see [docs/INTERNALS.md](docs/INTERNALS.md#dbmajor-database-major-stage-5-since-0230)), with
 its rollback and the release of the kept data; the end-to-end test runs 16 → 17 with test data, the
 rollback and the release. The page offers it in “Change version” with two tick boxes (a backup checked
-elsewhere, the downtime) and releases the kept data from the history. Open: MariaDB/MySQL, path B.
+elsewhere, the downtime) and releases the kept data from the history. Since 0.25.0 a trial run in a
+throwaway container of the new major comes before the data changes, and MariaDB majors run the same
+way (with `mariadb-upgrade` after the restore). Open: MySQL, path B.
 Where it differs from the plan below:
 - No new volume and no change of the volume line: the old data is moved aside (into a volume of its
   own next to a named volume, into a sibling directory of a bind mount), by renames on the same

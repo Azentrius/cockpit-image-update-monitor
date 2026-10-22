@@ -39,7 +39,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**” in the card. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
 | **Update / roll out** | One click first shows a plan (containers recreated with it, one-off jobs, compose project, databases, what the services wait for and what waits for them, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If nobody can tell how big the jump is (unknown version, tag `latest`), the plan says so and asks for an extra confirmation. If the containers do not come up, the most likely cause from their log stands next to the rollback button. **In two steps** if you like: download now, roll out later (e.g. in a maintenance window). The plan lists the **release notes** from GitHub between the installed and the new version, with *breaking*, *migration* and *deprecated* marked. Images **built on the server** (`build:`) get **Rebuild** once a base image is newer: the same flow with `docker compose build --pull` instead of the pull. |
 | **Change version** | A list of the versions the registry offers for the installed one: pin the running version, a version line such as `5`, an exact patch / minor / major version, or `latest`. The dialog shows every line of the compose file (or `.env`) before and after, then the same plan and flow as an update; the rollback puts the files back byte for byte. A newer PostgreSQL major runs as a **database major** (below); other database majors and Nextcloud jumps over more than one major are listed but locked. |
-| **Database majors** | PostgreSQL 16 → 17 (or another newer major) by dump and restore, from *Change version*: the services that wait for the database stop, every table is counted before and after, the old data is moved aside (not copied) and kept until you release it, a rollback moves it back. Two tick boxes first: a backup checked elsewhere, the downtime. |
+| **Database majors** | PostgreSQL 16 → 17 and MariaDB 11 → 12 (or another newer major) by dump and restore, from *Change version*, after a trial run in a throwaway container: the services that wait for the database stop, every table is counted before and after, the old data is moved aside (not copied) and kept until you release it, a rollback moves it back. Two tick boxes first: a backup checked elsewhere, the downtime. |
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
 | **Status Board** | `diun-update.py status --lang en\|de` gives the shared status of the Azentrius add-ons, which the Status Board on a Cockpit bastion shows as a tile per host: updates available, failed updates, an outdated radar, roll-outs pending and new versions, the same rows the overview marks. It works without administrative access on the host: the radar run and every update, rollback and cleanup write it to `/var/lib/diun-radar/status.json`, readable by all, with the names of containers only. A click on the tile opens the page where the finding is: the Updates tab at the first row of that kind, or the update history. |
@@ -295,7 +295,7 @@ The update dialog and the preview of a version change list the releases between 
 
 ## Database majors (stage 5)
 
-A newer PostgreSQL major (e.g. 16 → 17) is offered in **Change version** as “database major by dump and restore”. The preview plans it (`diun-update.py dbmajor … --dry-run`) and shows where the data lies, what stops meanwhile, the extensions in use and the space; two tick boxes (a backup of the database outside this server checked, the downtime) unlock the button. The run:
+A newer PostgreSQL major (e.g. 16 → 17) or, since 0.25.0, MariaDB major (e.g. 11 → 12) is offered in **Change version** as “database major by dump and restore”. The preview plans it (`diun-update.py dbmajor … --dry-run`) and shows where the data lies, what stops meanwhile, the extensions in use and the space; two tick boxes (a backup of the database outside this server checked, the downtime) unlock the button. The run:
 
 1. pulls the new image and checks that it ships the extensions in use;
 2. keeps a rollback copy of the old image and stops the services that wait for the database;
@@ -303,7 +303,7 @@ A newer PostgreSQL major (e.g. 16 → 17) is offered in **Change version** as �
 4. **trial run** (since 0.25.0): restores the dump into a throwaway container of the new major, without network, and counts again. Only if everything matches does it go on; otherwise it stops here with nothing changed, and the database runs on with its data;
 5. changes the tag line of the compose file (as *Change version* does, with a byte-exact copy);
 6. stops the database and moves its data aside: into a volume of its own next to a named volume, or a directory next to a bind mount (renames on the same filesystem, no second copy);
-7. starts the new major on the emptied place, restores the dump, compares the counts and checks that the user of the environment can log in over the network with its password;
+7. starts the new major on the emptied place, restores the dump (MariaDB: then `mariadb-upgrade --force` and a restart), compares the counts and checks that the user of the environment can log in over the network with its password;
 8. starts the waiting services again.
 
 Anything that fails before the database stops leaves nothing changed. Later the history offers the rollback: it moves the old data back (what was written after the major is not in it) and keeps the new major's data. The old data stays until **Release** in the history deletes it.
@@ -312,7 +312,7 @@ Anything that fails before the database stops leaves nothing changed. Later the 
 
 **Roles with an MD5 password:** the images of PostgreSQL 14 and newer let clients in over the network with `scram-sha-256` only, and the dump keeps each role's password hash. The preview therefore refuses a major while roles still log in with an MD5 hash and names them: set their passwords again after `SET password_encryption = 'scram-sha-256'`, or keep `POSTGRES_HOST_AUTH_METHOD: md5` in the compose file.
 
-**Limits:** the data must lie in a named volume of the `local` driver or a bind mount that is no mount point of its own. PostgreSQL 18 keeps its data in `/var/lib/postgresql/18/docker`: add `PGDATA: /var/lib/postgresql/data` to the service's environment first (the preview says so). MariaDB/MySQL majors, pgvector's `pg17` tags and `pg_upgrade` are not supported yet.
+**Limits:** the data must lie in a named volume of the `local` driver or a bind mount that is no mount point of its own. PostgreSQL 18 keeps its data in `/var/lib/postgresql/18/docker`: add `PGDATA: /var/lib/postgresql/data` to the service's environment first (the preview says so). MariaDB needs its root password in the container's environment (`MARIADB_ROOT_PASSWORD`). MySQL majors, pgvector's `pg17` tags and `pg_upgrade` are not supported yet.
 
 ---
 
@@ -787,7 +787,7 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | **done** (0.11.0) |
 | 3 | Release notes / changelog links per version, hints on breaking changes | **done** (0.23.0) |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
-| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | **in progress** (0.23.0: PostgreSQL by dump and restore, with rollback and release of the old data) |
+| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | **in progress** (0.23.0: PostgreSQL by dump and restore, with rollback and release of the old data; 0.25.0: a trial run first, and MariaDB) |
 | 6 | Distribution: packages and Cockpit's Applications page, private registries, Podman, several hosts | **in progress** (0.12.0: packages, Applications page) |
 
 ---

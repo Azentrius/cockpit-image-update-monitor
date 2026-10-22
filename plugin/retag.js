@@ -6,7 +6,7 @@
     "use strict";
     const P = window.ImageUpdatesPage;
     if (!P) return;     // common.js did not load: diun.js asks Cockpit for it again
-    const { UPDATE_CMD, t, $, tagSplit, repoKey, esc, rich, human, spawnHelper, isNoAdmin, label, alertBox,
+    const { UPDATE_CMD, t, $, tagSplit, repoKey, esc, rich, human, spawnHelper, isNoAdmin, label, alertBox, engineName,
             LEVELS, dlg, confirmAndRun, ticket } = P;
 
     // What the selection field of "Change version" offers: the radar's
@@ -18,6 +18,7 @@
     // configured tag is the field's first entry and is left out here.
     const NEXTCLOUD_RE = /(^|\/)nextcloud$/;
     const PG_RE = /(^|\/)(postgres|postgresql|postgis|pgvector|timescaledb[a-z0-9-]*)$/;
+    const MARIADB_RE = /(^|\/)mariadb$/;
 
     function majorOf(v) {
         const m = /\d+/.exec(String(v || ""));
@@ -30,8 +31,9 @@
         if (!ch) return [];
         const cur = majorOf(inst.v);
         const nextcloud = NEXTCLOUD_RE.test(repoKey(ctn.image));
-        const postgres = PG_RE.test(repoKey(ctn.image));
-        const dbMajor = (target) => rec.db && postgres && target != null && majorOf(target) > cur;
+        // PostgreSQL and (since 0.25.0) MariaDB; MySQL and the other databases stay locked.
+        const engine = PG_RE.test(repoKey(ctn.image)) || MARIADB_RE.test(repoKey(ctn.image));
+        const dbMajor = (target) => rec.db && engine && target != null && majorOf(target) > cur;
         const blocked = (target) => {      // the version the tag brings; null: follows every release
             const m = target == null ? null : majorOf(target);
             if (rec.db && m !== cur && !dbMajor(target)) return "rt.optDbMajor";
@@ -120,17 +122,18 @@
         const li = (k, v) => `<li><span class="dm-kv-k">${esc(k)}</span><span class="dm-kv-v">${v}</span></li>`;
         const code = (s) => `<code>${esc(s)}</code>`;
         const stop = mj.stop.length ? mj.stop.map(code).join(" ") : esc(t("mj.none"));
+        const vars = { engine: engineName(mj.engine), from: mj.from_major, to: mj.to_major };
+        const mariadb = mj.engine === "mariadb";
         return `<div class="dm-gate-group">` +
-            alertBox("warning", t("mj.title", { from: mj.from_major, to: mj.to_major }),
-                     esc(t("mj.body", { from: mj.from_major, to: mj.to_major }))) +
+            alertBox("warning", t("mj.title", vars), esc(t(mariadb ? "mj.bodyMariadb" : "mj.body", vars))) +
             `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-mj-backup"> ${esc(t("mj.backupConfirm"))}</label>` +
             `<label class="dm-check"><input type="checkbox" class="dm-gate" id="dm-mj-downtime"> ${esc(t("mj.downtimeConfirm"))}</label>` +
             `</div><ul class="dm-kv">` +
             li(t("mj.data"), code(data.type === "volume" ? data.name : data.source) +
                ` <span class="dm-muted">${esc(t(data.type === "volume" ? "mj.volume" : "mj.bind"))}</span>`) +
-            li(t("mj.pgdata"), code(mj.pgdata)) +
+            (mariadb ? li(t("mj.datadir"), code(mj.datadir)) : li(t("mj.pgdata"), code(mj.pgdata))) +
             li(t("mj.stop"), stop) +
-            li(t("mj.ext"), mj.extensions.length ? mj.extensions.map(code).join(" ") : esc(t("mj.none"))) +
+            (mariadb ? "" : li(t("mj.ext"), mj.extensions.length ? mj.extensions.map(code).join(" ") : esc(t("mj.none")))) +
             (mj.data_bytes != null ? li(t("mj.size"), esc(t("mj.sizeFree", { size: human(mj.data_bytes), free: human(mj.data_free) }))) : "") +
             `</ul>`;
     }
