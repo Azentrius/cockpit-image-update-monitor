@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-21 (0.24.0). Each stage is cut so that it is useful on its own and brings its own tests. The order
+As of 2026-10-23 (0.25.0). Each stage is cut so that it is useful on its own and brings its own tests. The order
 is the recommendation.
 
 **Guardrails for every stage** (they keep applying unchanged):
@@ -47,7 +47,7 @@ Decided on the way:
 
 ---
 
-## Stage 1.2 – Know before switching, fail clearly
+## Stage 1.2 – Know before switching, fail clearly ✅
 
 **Goal:** an update never surprises. The dialog says how big the jump is, or that nobody knows. If the
 containers do not come up, the reason is visible at once. A failed build is not offered the same way
@@ -56,7 +56,7 @@ again.
 Done (see [CHANGELOG](CHANGELOG.md)), marked ✅ below: in 0.8.0 the unknown jump size and the most
 likely cause of a failure (“reason first”); in 0.9.0 the kept output, the restart-loop test, the
 failed builds, what is updated together and the dependencies; in 0.10.0 the floating tags; in 0.23.0 the
-update in two steps.
+update in two steps; in 0.24.0 the rebuild of images built on the server.
 
 **Seen on the reference host:** `latest` of an app moved to a new major version that needs an extra
 service; the app did not start. Dump, rollback copy and rollback worked, and the data stayed untouched.
@@ -139,6 +139,8 @@ chips, selection field, preview, tick boxes). Where it differs from the plan bel
   all of them; only anchors, `include:` and shared or composed variables stop it.
 - A git repository is named as a hint; the add-on does not commit.
 - The pointer to the release notes came with stage 3 (0.23.0).
+- Database majors can be chosen since stage 5 for PostgreSQL (0.23.0) and MariaDB (0.25.0); they
+  run as a database major, not as a tag change. Other database majors stay locked.
 
 **Goal:** the version of a container can be changed in the page, safely: a click on an *outlined* chip
 (e.g. “Patch v2.1.5” with `v2.1.4` configured), or a selection field with the versions the registry
@@ -242,13 +244,22 @@ what failed, what was rolled back.
 
 ## Stage 5 – Guided database majors (PostgreSQL ✅, MariaDB ✅)
 
-PostgreSQL done in 0.23.0. Since 0.23.0 the helper does a PostgreSQL major by dump and restore (`diun-update.py
-dbmajor`, see [docs/INTERNALS.md](docs/INTERNALS.md#dbmajor-database-major-stage-5-since-0230)), with
-its rollback and the release of the kept data; the end-to-end test runs 16 → 17 with test data, the
-rollback and the release. The page offers it in “Change version” with two tick boxes (a backup checked
-elsewhere, the downtime) and releases the kept data from the history. Since 0.25.0 a trial run in a
-throwaway container of the new major comes before the data changes, and MariaDB majors run the same
-way (with `mariadb-upgrade` after the restore). Open: MySQL, path B.
+PostgreSQL done in 0.23.0, MariaDB in 0.25.0 (see [CHANGELOG](CHANGELOG.md)). The helper does a
+major by dump and restore (`diun-update.py dbmajor`, see
+[docs/INTERNALS.md](docs/INTERNALS.md#dbmajor-database-major-stage-5-since-0230)), with its rollback
+and the release of the kept data; the end-to-end test runs PostgreSQL 16 → 17 and MariaDB 11 → 12
+with test data, the rollback and the release. The page offers it in “Change version” with two tick
+boxes (a backup checked elsewhere, the downtime) and releases the kept data from the history.
+- 0.24.1: every move of the data is in the history before it starts, so a run stopped by a signal or
+  a kill can be rolled back, and the rollback starts the old major only on its complete data.
+- 0.25.0: a trial run in a throwaway container of the new major comes before the data changes; the
+  plan refuses PostgreSQL roles with an MD5 password, which the new major would lock out; the user of
+  the environment must log in after the restore. MariaDB runs the same way, with `mariadb-upgrade`
+  after the restore, and dumps the users' databases and users, not the old system tables.
+
+Open: MySQL majors, path B (`pg_upgrade`), pgvector's `pg17` tags (the radar has no version tags to
+compare there).
+
 Where it differs from the plan below:
 - No new volume and no change of the volume line: the old data is moved aside (into a volume of its
   own next to a named volume, into a sibling directory of a bind mount), by renames on the same
@@ -283,8 +294,9 @@ and tested.
 
 Packages and Cockpit's Applications page are done in 0.12.0 (see [CHANGELOG](CHANGELOG.md)), marked ✅.
 
-- ✅ **Packages** (`.deb` and `.rpm`, `cockpit-image-updates`) with plugin, helpers and units, attached
-  to the GitHub releases; they replace `install.sh` and take over its installations.
+- ✅ **Packages** (`.deb` and `.rpm`, named `cockpit-image-update-monitor` since 0.13.0, before that
+  `cockpit-image-updates`) with plugin, helpers and units, attached to the GitHub releases; they
+  replace `install.sh` and take over its installations.
 - ✅ **Cockpit's Applications page:** AppStream data (`de.azentrius.image_updates`) in the packages, and
   the Azentrius package repository, packages.azentrius.com, whose catalog Cockpit reads: the add-on is
   found and installed from Cockpit itself.

@@ -3,6 +3,7 @@
 A [Cockpit](https://cockpit-project.org/) add-on that shows three things for every running Docker container: what the compose file says, which version actually runs and which version is the newest.
 Updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button.
 A different version (another tag in the compose file) is chosen from a list; the add-on shows the lines it will change, keeps byte-exact copies of the files and puts them back on rollback.
+A newer PostgreSQL or MariaDB major runs by dump and restore after a trial run in a throwaway container, and images built on the server are built again once a base image is newer.
 Everything that runs as root for this is a small, fixed set of helper scripts. The browser makes no external requests, and Diun sees Docker only through a read-only socket proxy.
 
 | Light | Dark |
@@ -17,6 +18,8 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 - [How newer versions are found](#how-newer-versions-are-found)
 - [Update and rollback (stage 1)](#update-and-rollback-stage-1)
 - [Change version (stage 2)](#change-version-stage-2)
+- [Release notes (stage 3)](#release-notes-stage-3)
+- [Database majors (stage 5)](#database-majors-stage-5)
 - [Backups & dumps](#backups--dumps)
 - [Architecture](#architecture)
 - [Security model](#security-model)
@@ -38,7 +41,7 @@ Everything that runs as root for this is a small, fixed set of helper scripts. T
 | **Overview** | All running containers with *Configured* (tag from compose), *Installed* (real version), *Newest version* (patch / minor / major) and status. Sorted by urgency. |
 | **Detection** | [Diun](https://crazymax.dev/diun/) reports when the same tag was rebuilt (new digest). The **version radar** looks for newer version tags in the registries every 6 hours, after every update and on “**Run radar now**” in the card. “**Roll-out pending**” finds images that are already pulled but not rolled out yet. |
 | **Update / roll out** | One click first shows a plan (containers recreated with it, one-off jobs, compose project, databases, what the services wait for and what waits for them, free space). Then: database dump → rollback copy → pull → restart of the affected services → wait for “healthy” → result with the versions (“16.14 → 16.15”). If nobody can tell how big the jump is (unknown version, tag `latest`), the plan says so and asks for an extra confirmation. If the containers do not come up, the most likely cause from their log stands next to the rollback button. **In two steps** if you like: download now, roll out later (e.g. in a maintenance window). The plan lists the **release notes** from GitHub between the installed and the new version, with *breaking*, *migration* and *deprecated* marked. Images **built on the server** (`build:`) get **Rebuild** once a base image is newer: the same flow with `docker compose build --pull` instead of the pull. |
-| **Change version** | A list of the versions the registry offers for the installed one: pin the running version, a version line such as `5`, an exact patch / minor / major version, or `latest`. The dialog shows every line of the compose file (or `.env`) before and after, then the same plan and flow as an update; the rollback puts the files back byte for byte. A newer PostgreSQL major runs as a **database major** (below); other database majors and Nextcloud jumps over more than one major are listed but locked. |
+| **Change version** | A list of the versions the registry offers for the installed one: pin the running version, a version line such as `5`, an exact patch / minor / major version, or `latest`. The dialog shows every line of the compose file (or `.env`) before and after, then the same plan and flow as an update; the rollback puts the files back byte for byte. A newer PostgreSQL or MariaDB major runs as a **database major** (below); other database majors (MySQL, Redis …) and Nextcloud jumps over more than one major are listed but locked. |
 | **Database majors** | PostgreSQL 16 → 17 and MariaDB 11 → 12 (or another newer major) by dump and restore, from *Change version*, after a trial run in a throwaway container: the services that wait for the database stop, every table is counted before and after, the old data is moved aside (not copied) and kept until you release it, a rollback moves it back. Two tick boxes first: a backup checked elsewhere, the downtime. |
 | **Backups & dumps** | A tab of its own with the update history (with versions), database dumps and rollback images, each with delete (images in use are locked) and rollback from the history. **Cleanup rules** delete old dumps and unused rollback images after updates and daily; the tab shows what they would delete. |
 | **Requirements** | Checks Docker, Diun, skopeo and the radar timer and offers to install missing parts. Existing files are never overwritten. |
@@ -93,7 +96,7 @@ Each level is a label with the level as a word (Patch, Minor, Major) and the ver
 |---|---|
 | hint (`info-circle`) | The configured tag delivers this version **with the Update button** (e.g. `latest` → everything, `16-alpine` → 16.x). |
 | without judgement, no icon | Reachable only by **changing the tag in the compose file** (e.g. `v2.1.4` → `v2.1.5`). A click on the label opens [*Change version*](#change-version-stage-2) with that tag. |
-| without judgement, `ban` | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. |
+| without judgement, `ban` | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. PostgreSQL and MariaDB majors run from *Change version* (⇄) as a [database major](#database-majors-stage-5). |
 
 > **Careful with `latest` and similar tags:** they deliver major versions on update too. If Nextcloud `apache` shows “Major 35.0.1” as a hint, a click on *Update* jumps from 34 to 35. Read the release notes before such jumps (Nextcloud allows only one major step at a time).
 
@@ -161,7 +164,9 @@ the versions (the one the running build carries, the one the base's tag points t
 usual plan. The run is an update with `docker compose build --pull <services>` in place of the pull:
 dumps, rollback copy, build, restart, wait for “healthy”, result. A build that fails stops before any
 change; a build that gives the same image changes nothing. The rollback in the history is the one of
-an update. The Dockerfile itself is never changed: a version pinned there (`FROM caddy:2.11.4`) stays.
+an update, also for a service with `build:` and no `image:` line (since 0.24.1: Compose names its image
+`<project>-<service>`, and the rollback checks that name). The Dockerfile itself is never changed: a
+version pinned there (`FROM caddy:2.11.4`) stays.
 
 ```mermaid
 sequenceDiagram
@@ -265,7 +270,7 @@ Another tag in the compose file, chosen in the page: **Change version** (⇄) in
 | Patch / minor / major versions | `5.0.3`, `5.4.5`, `6.0.2` | exactly this version |
 | Follows every release | `latest` | every new release, majors included (a tick box confirms it) |
 
-Only versions in the scheme of the installed version are offered and none older: going back is the rollback's job. Database majors (a migration, [stage 5](ROADMAP.md)) and Nextcloud jumps over more than one major are listed but locked, with the reason.
+Only versions in the scheme of the installed version are offered and none older: going back is the rollback's job. A newer PostgreSQL or MariaDB major with a known version is offered as a [database major](#database-majors-stage-5). Other database majors (MySQL, Redis …), a database tag that follows every major, and Nextcloud jumps over more than one major are listed but locked, with the reason.
 
 **Show first.** For each choice the helper plans the change and writes nothing (`retag … --dry-run`): every line before and after, with file and line number, then the plan of an update (what is recreated, dumps, dependencies, what the tag brings). Where the tag is written:
 - `image: repo:5.0.2` → that line, for every service of the image, in whichever compose file (override files too);
@@ -286,7 +291,7 @@ If the project lies in a git repository, the dialog says so; the add-on never co
 
 The update dialog and the preview of a version change list the releases between the installed and the target version, closed below the plan: “Release notes 1.6.74 → 1.8.8: 3 releases”, each with its date and its text. When a text mentions *breaking*, *migration* or *deprecated*, a warning label says so before you open it, and the words are marked in the text.
 
-- **Where from:** the releases on GitHub. The radar on the server fetches them into `releases.json` next to `versions.json`; the browser never asks GitHub. The image's repository comes from a short list of known images (`nextcloud` → nextcloud/server, `redis` → redis/redis, `ollama/ollama` …), from its label `org.opencontainers.image.source`, or for `ghcr.io/<owner>/<name>` from that name.
+- **Where from:** the releases on GitHub. The radar on the server fetches them into `releases.json` next to `versions.json`; the browser never asks GitHub. The image's repository comes from a short list of known images (`nextcloud` → nextcloud/server, `redis` → redis/redis, `ollama/ollama` …), from its label `org.opencontainers.image.source` or `org.label-schema.vcs-url`, or for `ghcr.io/<owner>/<name>` from that name.
 - **GitHub's limit** without a login is 60 requests per hour: the radar asks only for images with something newer, one request each, at most 20 per run, and keeps an answer for 24 hours (asked sooner when a newer version turns up). On the limit it keeps the last answer and tries again on a later run.
 - **Text only:** Markdown shows as its text; images and HTML are left out, links show as their text, and each release links to its page on GitHub.
 - **When there are none,** the dialog says why: the image names no source, the repository has no releases, they are not fetched yet, GitHub's limit, or no release between the two versions. Images like postgres publish their release notes elsewhere.
@@ -295,24 +300,26 @@ The update dialog and the preview of a version change list the releases between 
 
 ## Database majors (stage 5)
 
-A newer PostgreSQL major (e.g. 16 → 17) or, since 0.25.0, MariaDB major (e.g. 11 → 12) is offered in **Change version** as “database major by dump and restore”. The preview plans it (`diun-update.py dbmajor … --dry-run`) and shows where the data lies, what stops meanwhile, the extensions in use and the space; two tick boxes (a backup of the database outside this server checked, the downtime) unlock the button. The run:
+A newer PostgreSQL major (e.g. 16 → 17) or, since 0.25.0, MariaDB major (e.g. 11 → 12) is offered in **Change version** as “database major by dump and restore”. The preview plans it (`diun-update.py dbmajor … --dry-run`) and shows where the data lies, what stops meanwhile, the extensions in use (PostgreSQL) and the space; two tick boxes (a backup of the database outside this server checked, the downtime) unlock the button. The run:
 
-1. pulls the new image and checks that it ships the extensions in use;
+1. pulls the new image and, for PostgreSQL, checks that it ships the extensions in use;
 2. keeps a rollback copy of the old image and stops the services that wait for the database;
-3. dumps the database and counts every table of every database;
-4. **trial run** (since 0.25.0): restores the dump into a throwaway container of the new major, without network, and counts again. Only if everything matches does it go on; otherwise it stops here with nothing changed, and the database runs on with its data;
+3. dumps the database and counts every table of every database (MariaDB: the users' databases, and the users with their grants as statements instead of the old major's system tables, which a newer major does not take);
+4. **trial run** (since 0.25.0): restores the dump into a throwaway container of the new major, without network, and counts again (PostgreSQL gets a random password there, never the real one; MariaDB gets its root password through the environment, as the dump brings the old users). Only if everything matches does it go on; otherwise it stops here with nothing changed, and the database runs on with its data;
 5. changes the tag line of the compose file (as *Change version* does, with a byte-exact copy);
-6. stops the database and moves its data aside: into a volume of its own next to a named volume, or a directory next to a bind mount (renames on the same filesystem, no second copy);
-7. starts the new major on the emptied place, restores the dump (MariaDB: then `mariadb-upgrade --force` and a restart), compares the counts and checks that the user of the environment can log in over the network with its password;
+6. stops the database and moves its data aside: into a volume of its own next to a named volume (`<volume>-pg16-<stamp>`, `<volume>-mariadb11-<stamp>`), or a directory next to a bind mount (`<path>.pg16-<stamp>`); renames on the same filesystem, no second copy;
+7. starts the new major on the emptied place, restores the dump (MariaDB: then `FLUSH PRIVILEGES`, `mariadb-upgrade --force` and a restart), compares the counts and checks that the user of the environment can log in over the network with its password;
 8. starts the waiting services again.
 
 Anything that fails before the database stops leaves nothing changed. Later the history offers the rollback: it moves the old data back (what was written after the major is not in it) and keeps the new major's data. The old data stays until **Release** in the history deletes it.
 
-**A run that is stopped while it moves the data** (since 0.24.1): each move is in the history before its first file moves. SIGTERM, SIGHUP and Ctrl-C wait until the move and its record are done, then the run fails with its rollback. After a hard stop (SIGKILL, a power cut) the history keeps the open move, and the rollback finishes it. The rollback starts the old database only once its data is complete again (the same entries, `PG_VERSION` of the old major); otherwise it fails and leaves everything where it is, so PostgreSQL never sets up a new, empty cluster in place of the data. Nothing is deleted when a move or its undo fails. Up to 0.24.0 a signal or a kill during the move could leave the data in the kept place without the history knowing; the rollback of 0.24.1 finds such a place by its name and puts the data back.
+**A run that is stopped while it moves the data** (since 0.24.1): each move is in the history before its first file moves. SIGTERM, SIGHUP and Ctrl-C wait until the move and its record are done, then the run fails with its rollback. After a hard stop (SIGKILL, a power cut) the history keeps the open move, and the rollback finishes it. The rollback starts the old database only once its data is complete again (the same entries, `PG_VERSION` of the old major, for MariaDB its `mysql_upgrade_info` when there was one); otherwise it fails and leaves everything where it is, so PostgreSQL never sets up a new, empty cluster in place of the data. Nothing is deleted when a move or its undo fails. Up to 0.24.0 a signal or a kill during the move could leave the data in the kept place without the history knowing; the rollback of 0.24.1 finds such a place by its name and puts the data back.
 
 **Roles with an MD5 password:** the images of PostgreSQL 14 and newer let clients in over the network with `scram-sha-256` only, and the dump keeps each role's password hash. The preview therefore refuses a major while roles still log in with an MD5 hash and names them: set their passwords again after `SET password_encryption = 'scram-sha-256'`, or keep `POSTGRES_HOST_AUTH_METHOD: md5` in the compose file.
 
-**Limits:** the data must lie in a named volume of the `local` driver or a bind mount that is no mount point of its own. PostgreSQL 18 keeps its data in `/var/lib/postgresql/18/docker`: add `PGDATA: /var/lib/postgresql/data` to the service's environment first (the preview says so). MariaDB needs its root password in the container's environment (`MARIADB_ROOT_PASSWORD`). MySQL majors, pgvector's `pg17` tags and `pg_upgrade` are not supported yet.
+**Room:** the old data stays, so the new major needs about as much free space again where the data lies. When Docker's directory lies on another filesystem, the plan checks the room for the trial run there too.
+
+**Limits:** one database per run (the image runs in one service and one container), and it must be running. The data must lie in a named volume of the `local` driver or a bind mount that is no mount point of its own. PostgreSQL 18 keeps its data in `/var/lib/postgresql/18/docker`: add `PGDATA: /var/lib/postgresql/data` to the service's environment first (the preview says so). MariaDB needs its root password in the container's environment (`MARIADB_ROOT_PASSWORD` or `MYSQL_ROOT_PASSWORD`); database names with spaces are not supported. MySQL majors, pgvector's `pg17` tags and `pg_upgrade` are not supported yet.
 
 ---
 
@@ -325,6 +332,7 @@ Anything that fails before the database stops leaves nothing changed. Later the 
 | Output of each update and rollback | `/var/backups/image-updates/logs/<op-id>.log` (`.rollback.log`) | 0600 |
 | Rollback images | local Docker tags `<repo>:rollback-<YYYYMMDD-HHMMSS>` | – |
 | Copies of files a tag change wrote | `/var/backups/image-updates/compose/<project>/<YYYYMMDD-HHMMSS>/<n>_<file>` | file 0600, folder 0700 |
+| Old data of a database major | a Docker volume `<volume>-pg16-<stamp>` (or `-mariadb11-`) next to a named volume, a directory `<path>.pg16-<stamp>` next to a bind mount | as the original |
 
 - **Output:** *Show output* in the history opens what an update and its rollback printed.
 - **Rollback copy gone:** if a rollback image was deleted (by the cleanup, with *Delete* or outside the add-on, e.g. `docker image prune -a` of another tool), the history says “Rollback copy gone” for that update; a rollback is no longer possible.
@@ -338,7 +346,7 @@ Anything that fails before the database stops leaves nothing changed. Later the 
 | Dumps kept per database container (newest first) | 3 | `KEEP_DUMPS` (`0` = never delete dumps) |
 | Unused rollback images removed after | 14 days | `ROLLBACK_IMAGE_DAYS` (`0` = never) |
 
-- **Never deleted:** the dumps of each project's last update, rollback images a container (running or stopped) still uses, files in the dump folder that the add-on did not name.
+- **Never deleted:** the dumps of each project's last update, rollback images a container (running or stopped) still uses, files in the dump folder that the add-on did not name, the old data of a database major (only *Release* in the history deletes it).
 - **When:** after every successful update, for that project's dumps and that image's rollback copies only; daily for everything once `diun-cleanup.timer` is set up (button in the tab, or `diun-deps.sh install cleanup`); on **“Clean up dumps and images”** in the tab.
 - **Preview:** the tab names the rules and marks every dump and image the next run would delete. On the console: `sudo /usr/lib/cockpit-image-updates/diun-update.py cleanup --dry-run`.
 - **The file** is optional, root-owned and not writable by others, with plain `KEY=VALUE` lines:
@@ -390,7 +398,9 @@ docker exec <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"
   made it). Any other `ERROR` line means the restore is incomplete: start again with an empty volume.
 - **MariaDB, MySQL:** the dump holds all databases including the users (`mysql`), so start the new
   container with the **root password of the dumped one**; afterwards the old users and passwords apply.
-  The client stops at the first error and exits with 1.
+  The client stops at the first error and exits with 1. The dump of a MariaDB major holds the users'
+  databases and the users with their grants as statements instead of the `mysql` tables, so it loads
+  into the new major too.
 - **Check** the result before the app writes to it again: the tables, row counts and the users you
   expect. The end-to-end test (`test/e2e-server.sh`, in CI on every change) restores every dump it makes
   this way into a fresh Postgres, MariaDB and MySQL container and compares rows, views, functions,
@@ -453,7 +463,7 @@ flowchart LR
 | `plugin/` | `/usr/share/cockpit/image-updates/` | user interface (vanilla JS, no build step), EN/DE |
 | `lib/diun-inventory.py` | `/usr/lib/cockpit-image-updates/` | running containers: tag, version (tag/variable), digest, compose mapping, “pulled, not rolled out” |
 | `lib/diun-versions.py` | `/usr/lib/cockpit-image-updates/` | version radar: installed version (label/digest), newer versions → `versions.json`, then `status.json` and the release notes → `releases.json` |
-| `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, rollback, backup list, delete, cleanup, radar run, `status` for the Status Board |
+| `lib/diun-update.py` | `/usr/lib/cockpit-image-updates/` | plan, update with dump, pull only, rebuild, tag change (`retag`), database major (`dbmajor`, `delete-olddata`), rollback, backup list, delete, cleanup, radar run, `status` for the Status Board |
 | `lib/diun-deps.sh` | `/usr/lib/cockpit-image-updates/` | check requirements; install skopeo, Diun stack, radar and cleanup timers |
 | `lib/diunlib.py` | `/usr/lib/cockpit-image-updates/` | shared functions (tag scheme, version variables, reach) |
 | `lib/diunnotes.py` | `/usr/lib/cockpit-image-updates/` | release notes: an image's repository on GitHub, its releases since the installed version, GitHub's limit |
@@ -470,7 +480,7 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 ## Security model
 
 - **Root code in one place only.** Everything Cockpit or systemd runs as root lives in `/usr/lib/cockpit-image-updates` (root-owned, from the package). `/var/lib/diun` is **writable from the Diun container**; nothing is ever run from there.
-- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `rollback`, `backups`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run` and `retag … --expect <fingerprint>`; for stage 5 `dbmajor … --dry-run`, `dbmajor … --expect <fingerprint>` and `delete-olddata <op-id>`). The Status Board calls only `status --lang <xx>`.
+- **Fixed verbs, checked arguments.** The plugin calls only fixed commands (`plan`, `update`, `pull`, `rebuild … --dry-run`, `rebuild`, `rollback`, `backups`, `log`, `delete-dump`, `delete-image`, `cleanup`, `radar`, `check`, `install skopeo|diun|radar|cleanup`, `start diun`; for stage 2 `retag … --dry-run` and `retag … --expect <fingerprint>`; for stage 5 `dbmajor … --dry-run`, `dbmajor … --expect <fingerprint>` and `delete-olddata <op-id>`). The Status Board calls only `status --lang <xx>`.
   - Container names, operation IDs, dump paths, rollback tags, target tags and fingerprints are checked by regex. Path tricks (`../`) are refused. A target tag must also be one of the versions the radar offers.
 - **Your compose files.** Only a tag change writes to them, and only the lines its preview showed: it makes the plan again and stops if the result differs from what was shown (a fingerprint). Before writing it keeps byte-exact copies under `/var/backups/image-updates/compose/` (root only), writes atomically with the original owner and mode, and checks the result with `docker compose config`; a failed check puts the files back before any container changes. A rollback restores them, unless they were edited afterwards.
   - `delete-image` and the cleanup delete only `…:rollback-YYYYMMDD-HHMMSS` and never an image in use.
@@ -479,7 +489,7 @@ The exact calls, JSON formats and exit codes are in [docs/INTERNALS.md](docs/INT
 - **Status without root.** `status` only reads files and is the one verb that runs without root. What it reads, `/var/lib/diun-radar/status.json` (0644, written by root), holds the names of containers, states and times; no compose paths, projects, addresses or user names.
 - **After the login.** Cockpit loads the page hidden as soon as you log in, so that its menu entry can show the status (`preload`, as for Cockpit's own Software updates page). Until the page is opened it reads only `status.json` (`superuser: "try"`) and runs no helper; the inventory, the Diun log and the radar file load when you open it.
 - **Diun without the Docker socket.** Only the `docker-socket-proxy` sees `/var/run/docker.sock` (read-only). It exposes a filtered, read-only API (`CONTAINERS=1`, `IMAGES=1`, `POST=0`) and publishes no port.
-- **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords are read only inside the database container from its environment, never stored or logged.
+- **Dumps for root only.** Folder 0700, files 0600, written atomically (`.part` → rename). Passwords come from the database container's environment and are never stored, logged or put on a command line on the host: dumps read them inside the container, the trial run of a MariaDB major gets the root password through the environment of `docker run`, and that of a PostgreSQL major a random one.
 - **No network from the browser.** No CDNs and no external fonts (the fonts ship with the add-on); Cockpit's strict CSP stays unchanged. Only the radar on the server accesses registries and, for the release notes, GitHub's API (without a login, nothing sent but the repository's name).
 - **Release notes are text.** The page shows what GitHub's releases say as text: no HTML or image from them reaches the page, and links go only to github.com.
 - **Concurrency.** `flock` for inventory and update (exit 75 for “already running”). The plugin never starts two loads in parallel.
@@ -507,7 +517,7 @@ tested system by itself.
 
 | | Systems | What is checked |
 |---|---|---|
-| **Tested** | Ubuntu 24.04 (GitHub runner) with Docker Engine and Compose from the runner image | every helper against the real Docker Engine: updates, rollbacks, pulls against a registry, dumps and their restore into Postgres 16, MariaDB 11 and MySQL 8 (job `e2e`, also before every release) |
+| **Tested** | Ubuntu 24.04 (GitHub runner) with Docker Engine and Compose from the runner image | every helper against the real Docker Engine: updates, rollbacks, pulls against a registry, dumps and their restore into Postgres 16, MariaDB 11 and MySQL 8, tag changes, database majors (PostgreSQL 16 → 17, also stopped while the data moves, and MariaDB 11 → 12) with their rollbacks, rebuilds of images built on the host (job `e2e`, also before every release) |
 | **Tested** | Ubuntu 24.04 (GitHub runner) with Ubuntu's Cockpit, systemd and Docker | the page in a real Cockpit session in Chromium (job `cockpit`): installed with apt over the release before, reloaded and logged in again after that upgrade, found in the menu, no JavaScript or resource errors of the add-on (and none in Cockpit beyond those it shows without the add-on), with and without administrative access, skopeo and the radar set up from the page and a radar run, an update with its live output and result and its rollback on a throw-away compose project; versions, steps and screenshots in the job summary and the artifact `cockpit-session` |
 | **Tested** | Python 3.8 and 3.12 | the helper tests (fake Docker); 3.8 is the oldest supported |
 | **Package installs** | Debian 12 and 13, Ubuntu 22.04 and 24.04, Fedora 43, Rocky Linux 9 and 10 (for RHEL 9 and 10), openSUSE Leap 16.0 | the package installs with the distribution's own dependencies (`cockpit-bridge` 264 or newer, `python3` 3.8 or newer), the helpers answer, skopeo installs the way the page does it (`apt-get`, `dnf`, `zypper`), the package removes cleanly; on Debian 13 and Fedora 43 also an upgrade from the newest older release, the installed files checked against this build and the data kept. No Cockpit, Docker or systemd runs there. |
@@ -618,6 +628,8 @@ sudo /usr/lib/cockpit-image-updates/diun-inventory.py                    # one J
 sudo /usr/lib/cockpit-image-updates/diun-update.py plan <container>      # plan, changes nothing
 sudo /usr/lib/cockpit-image-updates/diun-update.py retag <container> <tag> --dry-run   # tag change: lines before/after + fingerprint, changes nothing
 sudo /usr/lib/cockpit-image-updates/diun-update.py retag <container> <tag> --expect <fingerprint>   # the tag change itself (rollback: rollback <op-id>)
+sudo /usr/lib/cockpit-image-updates/diun-update.py dbmajor <container> <tag> --dry-run   # database major: the plan or the reason it is refused, changes nothing
+sudo /usr/lib/cockpit-image-updates/diun-update.py rebuild <container> --dry-run   # rebuild of an image built here: base images and plan, changes nothing
 sudo /usr/lib/cockpit-image-updates/diun-update.py backups               # dumps, rollback images, history, cleanup preview
 sudo /usr/lib/cockpit-image-updates/diun-update.py cleanup --dry-run     # what the cleanup rules would delete
 /usr/lib/cockpit-image-updates/diun-update.py status --lang en           # the status for the Status Board (also without sudo)
@@ -650,8 +662,8 @@ tail -n 5 /var/lib/diun/events.jsonl
 | 1 | a subcommand failed (e.g. the radar run) |
 | 2 | not found / not possible (also: cleanup rules not understood) |
 | 3 | refused, e.g. already rolled back or file exists |
-| 4 | containers do not run stably after update/rollback |
-| 5 | stopped before any change (dump, space) |
+| 4 | containers do not run stably after update/rollback, or a database major failed after its data moved (the history offers the rollback) |
+| 5 | stopped before any change (dump, space, a failed pull or build, a failed trial run) |
 | 64 | wrong call |
 | 75 | already running |
 | 77 | no root rights |
@@ -676,6 +688,7 @@ tools/release-notes.sh    release notes from CHANGELOG.md
 tools/check-units.sh      systemd-analyze verify for the units
 tools/build-packages.sh   .deb and .rpm from a staged tree; the same file in every Azentrius add-on
 tools/check-design-files.sh  the shared design files match tools/design-files.sha256
+tools/upgrade-base.py     the release the CI upgrade test starts from (upgrade-base.sh fetches and checks it)
 docs/              INTERNALS.md (interfaces, formats), images
 ```
 
@@ -716,6 +729,11 @@ Covered by the tests, among other things:
 - the warning for an unknown jump size, the most likely cause of a failure, a build that failed before, the kept output
 - what a floating tag points to, the target of an update and the warning for a new major version
 - the version columns
+- the update in two steps and the rebuild of images built on the server
+- tag changes: the lines before and after, the fingerprint, the copies and their rollback
+- release notes: the source of an image, GitHub's limit (GitHub stood in for), the text shown as text
+- database majors: the plan and every refusal, the counts, the trial run, the data moved aside and back, majors and rollbacks stopped by real signals at chosen renames
+- where the Status Board's links lead, a page that misses a script after an update
 - version and changelog agree
 
 **Preview without a server:**
@@ -725,7 +743,7 @@ python3 tools/preview/build.py      # -> tools/preview/out/diun/index.html?lang=
 python3 tools/preview/shoot.py      # screenshots light, dark and phone to docs/img (needs playwright + chromium)
 ```
 
-**End-to-end on a real host** (creates the throw-away compose projects `imgupd-test` and `imgupd-test-my`, touches nothing else, cleans up afterwards):
+**End-to-end on a real host** (creates the throw-away compose projects `imgupd-test`, `imgupd-test-my`, `imgupd-test-reg`, `imgupd-test-major`, `imgupd-test-mdb` and `imgupd-test-build`, touches nothing else, cleans up afterwards and fails if anything of it is left; only on a throw-away host or VM, see [CONTRIBUTING.md](CONTRIBUTING.md)):
 
 ```bash
 sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e2e-server.sh
@@ -743,7 +761,13 @@ The test checks:
 - delete, also with a manipulated path
 - radar run
 - a restart loop (`restart: always`, exits at once) fails within seconds
-- MariaDB (`mariadb:11`) and MySQL (`mysql:8`) dumps with test data; a wrong password stops before any change (`E2E_MYSQL=0` skips this part)
+- pulls against a local registry (nothing newer, the registry down without and with a newer image on the host) and the update in two steps
+- MariaDB (`mariadb:11`) and MySQL (`mysql:8`) dumps with test data; a wrong password stops before any change (`E2E_MYSQL=0` skips this part and the MariaDB major)
+- every dump restored into a fresh container and compared object by object with the original
+- tag changes in the compose file, through `.env` and in an override file, with their rollbacks; the refusals for a shared variable and an anchor
+- `status` for the Status Board after a failed update, as root and without root
+- database majors (sections 17 to 17d): PostgreSQL 16 → 17 with test data, an extension and a role (an MD5 role refused, the trial run, the login check, the rollback, the release, a second major), majors stopped by SIGTERM and SIGKILL while they move the data and their rollbacks, MariaDB 11 → 12 with its rollback and release
+- the rebuild of an image built on the host (sections 18 and 18b): a failing build changing nothing, the newer base through `--pull`, the rollback, also for a service with `build:` and no `image:`
 
 The changes are in [CHANGELOG.md](CHANGELOG.md).
 
@@ -764,9 +788,10 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Docker with Compose 2.8 or newer only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated. See [Supported systems](#supported-systems).
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “not in a registry”, like images built on the server.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
-- **Database majors:** PostgreSQL majors by dump and restore since 0.23.0 (stage 5): in *Change version*,
-  for databases whose data lies in a named volume or a bind mount. PostgreSQL 18 needs `PGDATA` in the
-  compose file; MariaDB/MySQL majors and pgvector's `pg17` tags stay manual.
+- **Database majors:** PostgreSQL (since 0.23.0) and MariaDB (since 0.25.0) majors by dump and restore
+  (stage 5): in *Change version*, for one database whose data lies in a named volume or a bind mount.
+  PostgreSQL 18 needs `PGDATA` in the compose file. MySQL majors, pgvector's `pg17` tags and
+  `pg_upgrade` (faster for large databases) are not supported; such majors stay manual.
 - **Release notes** come only from releases on GitHub, for images whose repository is known (list, label, ghcr.io). Projects that publish them elsewhere (postgres, GitLab) get a note instead. Without a login GitHub allows 60 requests per hour per address; the radar shares that with anything else on the server.
 - **Tag changes** the add-on cannot make safely (YAML anchors, `include:`, a variable used elsewhere or built from several) stay manual; the dialog names the reason.
 - **Floating tags:** what the tag points to is resolved through the registry only when a version tag has the same digest. Builds without a version tag (e.g. from the main branch) have no version number; then the plan warns that the size of the jump is unknown. The overview calls such a build up to date when the container runs it and the registry has no release tags, or (on Docker Hub) when it was pushed after the newest release.
@@ -783,11 +808,11 @@ In detail, with goals, scope and acceptance criteria, in **[ROADMAP.md](ROADMAP.
 |---|---|---|
 | 1 | Update/roll out with the same tag, database dump, rollback, backups tab | **done** |
 | 1.1 | Polish: start the radar after an update, cleanup rules, “Run radar now”, versions in the history, MariaDB/MySQL E2E, lint in CI | **done** |
-| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **done** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds, what is updated together, dependencies; 0.10.0: floating tags resolved; 0.23.0: update in two steps) |
+| 1.2 | Know before switching: unknown jump size, floating tags resolved, update in two steps, the reason of a failure and the stored output, failed builds remembered, what is updated together (overview and dialog), dependencies in the plan | **done** (0.8.0: unknown jump size, cause of a failure; 0.9.0: kept output, failed builds, what is updated together, dependencies; 0.10.0: floating tags resolved; 0.23.0: update in two steps; 0.24.0: rebuild of images built on the server) |
 | 2 | Version jumps: pick a target tag, change the compose file (and `.env`) safely, diff preview, same update flow | **done** (0.11.0) |
 | 3 | Release notes / changelog links per version, hints on breaking changes | **done** (0.23.0) |
 | 4 | Automatic updates by rules (e.g. patch at night), notifications, automatic rollback | idea |
-| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | **in progress** (0.23.0: PostgreSQL by dump and restore, with rollback and release of the old data; 0.25.0: a trial run first, and MariaDB) |
+| 5 | Guided database majors (dump → new instance → restore, `pg_upgrade`) | **in progress**: PostgreSQL (0.23.0) and MariaDB (0.25.0) by dump and restore **done**, with rollback and release of the old data, data moves kept in the history so that a stopped run can be rolled back (0.24.1) and a trial run first (0.25.0); open: MySQL, `pg_upgrade` |
 | 6 | Distribution: packages and Cockpit's Applications page, private registries, Podman, several hosts | **in progress** (0.12.0: packages, Applications page) |
 
 ---
