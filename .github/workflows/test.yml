@@ -82,8 +82,19 @@ jobs:
             rpm -ql cockpit-image-update-monitor | grep -qx /usr/share/doc/cockpit-image-update-monitor/CC-BY-4.0-Font-Awesome.txt
             dnf remove -y -q cockpit-image-update-monitor
             test ! -e /usr/lib/cockpit-image-updates'
-      - name: Browser for the preview
-        run: python -m playwright install --with-deps chromium
+      # Only the browser, from Playwright's CDN (seconds). Its system packages (--with-deps: fonts,
+      # xvfb) come by apt from the Ubuntu mirror, which once took twelve minutes for them and cut a
+      # job off at its time limit (Azentrius/cockpit-cronjobs#85). The runner image brings what
+      # Chromium needs (it has Google Chrome); the preview step after this one shows if anything is
+      # missing. Each try gets four minutes, a hung one a second try.
+      - name: Browser for the preview (Chromium from Playwright's CDN, two tries)
+        timeout-minutes: 10
+        run: |
+          for try in 1 2; do
+            timeout --kill-after=10s 4m python -m playwright install chromium && exit 0
+            echo "::warning::playwright install failed or hung (try $try)"
+          done
+          exit 1
       - name: Preview in a browser (no JavaScript errors, no sideways scrolling on a phone) and screenshots
         run: |
           python tools/preview/build.py
@@ -340,10 +351,17 @@ jobs:
             echo "NEW_DEB=$(ls "$PWD"/dist/*.deb)"
             echo "OLD_DEB=$(ls "$PWD"/prev/*.deb 2> /dev/null || true)"
           } >> "$GITHUB_ENV"
-      - name: Browser (Playwright, pinned in test/requirements.txt)
+      - name: Playwright (pinned in test/requirements.txt)
+        run: pip install -q -r test/requirements.txt
+      # Only the browser, two tries of four minutes (see the job test).
+      - name: Browser (Chromium from Playwright's CDN, two tries)
+        timeout-minutes: 10
         run: |
-          pip install -q -r test/requirements.txt
-          python -m playwright install --with-deps chromium > /dev/null
+          for try in 1 2; do
+            timeout --kill-after=10s 4m python -m playwright install chromium > /dev/null && exit 0
+            echo "::warning::playwright install failed or hung (try $try)"
+          done
+          exit 1
       - name: Two users and a throw-away compose project
         run: |
           admin_pw=$(openssl rand -hex 16)
