@@ -350,6 +350,100 @@
      "floating"
     ]
    }
+  },
+  "glitchtip-postgres": {
+   "plan": {
+    "container": "glitchtip-postgres",
+    "image": "postgres:16-alpine",
+    "updatable": true,
+    "reason": null,
+    "project": "glitchtip",
+    "workdir": "/opt/glitchtip",
+    "services": [
+     "postgres"
+    ],
+    "containers": [
+     "glitchtip-postgres"
+    ],
+    "pulled": false,
+    "config_changed": false,
+    "old_image": "sha256:old",
+    "dbs": [
+     {
+      "name": "glitchtip-postgres",
+      "kind": "postgres",
+      "running": true,
+      "size": 120000000
+     },
+     {
+      "name": "glitchtip-redis",
+      "kind": "unsupported",
+      "running": true,
+      "size": null
+     }
+    ],
+    "free_bytes": 42949672960,
+    "installed_version": "16.14",
+    "tag_digits": 1,
+    "depends_on": [],
+    "dependents": [
+     {
+      "service": "web",
+      "containers": [
+       "glitchtip-web"
+      ]
+     },
+     {
+      "service": "worker",
+      "containers": [
+       "glitchtip-worker"
+      ]
+     }
+    ]
+   },
+   "line": {
+    "file": "/opt/glitchtip/docker-compose.yml",
+    "line": 5,
+    "old": "    image: postgres:16-alpine",
+    "service": "postgres"
+   },
+   "targets": {
+    "16.14-alpine": [
+     "16.14",
+     null,
+     "pin"
+    ],
+    "16.15-alpine": [
+     "16.15",
+     "minor",
+     "newer"
+    ],
+    "17-alpine": [
+     "17.11",
+     "major",
+     "line"
+    ],
+    "17.11-alpine": [
+     "17.11",
+     "major",
+     "newer"
+    ],
+    "18-alpine": [
+     "18.6",
+     "major",
+     "line"
+    ],
+    "18.6-alpine": [
+     "18.6",
+     "major",
+     "newer"
+    ],
+    "alpine": [
+     null,
+     null,
+     "floating"
+    ]
+   }
   }
  },
  "retag_log": [
@@ -368,5 +462,140 @@
   "All containers running: plausible=running/healthy\n",
   "Tag change successful: ghcr.io/plausible/community-edition:v2\n",
   "@@RESULT {\"op\": \"20261012-034500-plausible\", \"status\": \"ok\", \"rollback\": \"ghcr.io/plausible/community-edition:rollback-20261012-034500\", \"dumps\": [\"plausible/20261012-034500_plausible_db.sql.gz\"], \"from_version\": \"2.1.4\", \"to_version\": \"2.1.5\", \"image\": \"ghcr.io/plausible/community-edition:v2\", \"backup\": \"/var/backups/image-updates/compose/plausible/20261012-034500\"}\n"
- ]
+ ],
+ "built": {
+  "inventory": [
+   {
+    "name": "caddy",
+    "image": "caddy-caddy",
+    "tag": "latest",
+    "digest": "",
+    "imgid": "sha256:caddy",
+    "tagid": "sha256:caddy",
+    "pulled": false,
+    "project": "caddy",
+    "service": "caddy",
+    "managed": true,
+    "version": null,
+    "version_src": null,
+    "pulled_version": null,
+    "files": [
+     "/opt/caddy/compose.yml"
+    ],
+    "ci_job": false,
+    "created": "2026-06-15T18:35:36Z",
+    "revision": ""
+   }
+  ],
+  "radar": [
+   {
+    "image": "caddy-caddy",
+    "tag": "latest",
+    "containers": [
+     "caddy"
+    ],
+    "db": false,
+    "reach": [
+     "patch",
+     "minor",
+     "major"
+    ],
+    "installed": {
+     "sha256:caddy": {
+      "version": null,
+      "src": "digest",
+      "tag": null,
+      "ts": "2026-10-12T02:17:34Z"
+     }
+    },
+    "checked": "2026-10-12T02:17:34Z",
+    "status": "unlisted",
+    "error": "requested access to the resource is denied",
+    "built": "2026-06-15T18:35:36Z",
+    "base": [
+     {
+      "image": "caddy",
+      "tag": "2-builder",
+      "final": false,
+      "now": "2.11.7",
+      "pushed": "2026-10-08T00:25:00Z",
+      "newer": true
+     },
+     {
+      "image": "caddy",
+      "tag": "2",
+      "final": true,
+      "version": "2.11.4",
+      "now": "2.11.7",
+      "pushed": "2026-10-08T00:20:11Z",
+      "newer": true
+     }
+    ]
+   }
+  ]
+ },
+ "rebuild": {
+  "caddy": {
+   "container": "caddy",
+   "image": "caddy-caddy:latest",
+   "updatable": true,
+   "reason": null,
+   "build": true,
+   "project": "caddy",
+   "workdir": "/opt/caddy",
+   "services": [
+    "caddy"
+   ],
+   "containers": [
+    "caddy"
+   ],
+   "pulled": false,
+   "config_changed": false,
+   "old_image": "sha256:caddy",
+   "dbs": [],
+   "free_bytes": 42949672960,
+   "installed_version": "2.11.4",
+   "tag_digits": 0,
+   "jump_unknown": false,
+   "target_version": "2.11.7",
+   "jump": "patch",
+   "depends_on": [],
+   "dependents": []
+  }
+ },
+ "majors": {
+  "glitchtip-postgres": {
+   "major": {
+    "possible": true,
+    "reason": null,
+    "detail": null,
+    "engine": "postgres",
+    "from_major": 16,
+    "data": {
+     "type": "volume",
+     "name": "glitchtip_pgdata",
+     "driver": "local",
+     "source": "/var/lib/docker/volumes/glitchtip_pgdata/_data",
+     "destination": "/var/lib/postgresql/data"
+    },
+    "pgdata": "/var/lib/postgresql/data",
+    "datadir": null,
+    "stop": [
+     "web",
+     "worker"
+    ],
+    "extensions": [
+     "pg_trgm"
+    ],
+    "data_bytes": 120000000,
+    "data_free": 42949672960
+   },
+   "refused": {
+    "18": {
+     "reason": "major-pgdata",
+     "detail": "/var/lib/postgresql/18/docker | /var/lib/postgresql/data"
+    }
+   }
+  }
+ }
 }
