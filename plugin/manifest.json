@@ -6,10 +6,16 @@
     "menu": {
         "index": {
             "label": "Image Update Monitor",
-            "order": 35,
+            "order": 104,
             "keywords": [
                 {
-                    "matches": ["docker", "image", "update", "diun", "container", "version", "skopeo"]
+                    "matches": ["docker", "image", "update", "diun", "container", "version", "skopeo", "azentrius"]
+                }
+            ],
+            "docs": [
+                {
+                    "label": "Image Update Monitor",
+                    "url": "https://github.com/Azentrius/cockpit-image-update-monitor#readme"
                 }
             ]
         }

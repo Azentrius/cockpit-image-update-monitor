@@ -1002,12 +1002,16 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 - **Manifest:** besides the menu entry, `azentrius.status` names the status command for the Status
   Board (see [`status`](#status-diun-updatepy-since-0200)); Cockpit ignores the section. `"preload":
   ["index"]` (since 0.21.0) loads the page hidden after the login, for the status icon in the menu
-  (see [Status in Cockpit's menu](#status-in-cockpits-menu-since-0210)).
+  (see [Status in Cockpit's menu](#status-in-cockpits-menu-since-0210)). `order` 104 puts the entry
+  at the end of System, after Services (100), in one block with the other Azentrius add-ons (Status
+  Board 101 to Host Settings 106); `azentrius` in `keywords` finds them all; `docs` links the README
+  from Cockpit's Help menu.
 - **Language:** `../base1/po.js` sets `cockpit.language`. `de*` → German, otherwise English.
   - Texts live in `I18N.en` / `I18N.de` in `i18n.js` (since 0.19.0; `window.ImageUpdatesI18n`, loaded
     before `menu-status.js` and the page's scripts, which keep only the code). Static texts in the HTML carry
     `data-i18n`.
-  - The menu entry is the product name, Image Update Monitor, and is not translated (`po.manifest.de.js` stays empty).
+  - The menu entry and the README link in the Help menu are the product name, Image Update Monitor,
+    and are not translated (`po.manifest.de.js` stays empty).
 - **Loading:** `safeLoad()` never loads twice; a request during a load is repeated once afterwards.
   - `cockpit.file().watch()` triggers a reload only on a **changed** tag.
   - Background: on 2026-10-12 a watch/read loop started hundreds of inventory processes.
