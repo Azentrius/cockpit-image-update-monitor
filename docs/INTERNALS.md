@@ -501,7 +501,9 @@ because the dump brings the old users with it.
   them the accounts as statements (`MY_MAJOR_DUMP`), since 0.25.1 in an order the new server takes:
   every user (`CREATE OR REPLACE USER`, from `SHOW CREATE USER`; the restoring account
   `root`@`localhost` with `ALTER USER`: replacing it would drop its `PROXY` grant and with it the
-  right to grant `PROXY`, so its own `GRANT PROXY` was refused, as the end-to-end test found); `CREATE ROLE
+  right to grant `PROXY`, so its own `GRANT PROXY` was refused, as the end-to-end test found; it
+  keeps the `PROXY` grant its new image gave it, and with the dump's equal one `SHOW GRANTS` lists
+  that line twice); `CREATE ROLE
   image_updates_import_role` (which grants it to the restoring user); every role (`CREATE OR REPLACE ROLE … WITH ADMIN
   image_updates_import_role`, also a role nobody has; not `PUBLIC`, which every server has); the
   grants of every user, role and of `PUBLIC` (`SHOW GRANTS` without its `SET DEFAULT ROLE` lines:
@@ -521,7 +523,8 @@ because the dump brings the old users with it.
 - Accounts (since 0.25.1): `MY_GRANTS` lists every user, role and `PUBLIC` the dump takes along
   with its `SHOW GRANTS` lines (`"account<TAB>line"`), read before the dump, in the trial run after
   `mariadb-upgrade` and after the restore and the restart (`account_grants`). Every account of the
-  old server must be there with the same lines (`compare_grants`); an account only the new server
+  old server must be there with the same lines, taken as a set (`compare_grants`; a line listed
+  twice, as root's `PROXY` above, counts once); an account only the new server
   has (one its image sets up from the environment) does not count. A difference stops the trial
   run (exit 5, “privileges differ: …”) or fails the run (`reason.source: "grants"`).
 - Counts: every base table of every database but `mysql`, `information_schema`, `performance_schema`

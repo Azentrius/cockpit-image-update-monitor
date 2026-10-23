@@ -32,7 +32,8 @@ is gone”, while the data is back) goes through now.
   server takes. The roles are created with a role of the restore's own as their admin
   (`image_updates_import_role`, dropped at the end), as `mariadb-dump --system=users` does, so root
   ends up with the roles it had and no more. The restoring account, `root`@`localhost`, is altered
-  (`ALTER USER`), not replaced, so it keeps the right to grant `PROXY` while the restore runs. A
+  (`ALTER USER`), not replaced, so it keeps the right to grant `PROXY` while the restore runs (it
+  also keeps the `PROXY` grant its new image gave it, so `SHOW GRANTS` lists that line twice). A
   failed restore names its `ERROR` line, not the dashes the client frames the statement with. Every query's answer is read whole before a pipe uses
   it, so an error ends the dump. Names reach the server only as literals of `QUOTE()`.
 - **Grants compared.** Besides the rows, a MariaDB major now compares every user and role with its

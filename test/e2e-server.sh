@@ -1054,9 +1054,11 @@ my -e "create role viewer; grant select on appdb.notes to viewer;
        create user 'staff'@'%' identified by 'staff-only'; grant editor to 'staff'@'%'; set default role editor for 'staff'@'%';
        create user 'lead'@'%' identified by 'lead-only'; grant viewer to 'lead'@'%' with admin option;
        grant select on shop.items to PUBLIC;"
-# Every account's grants as the server shows them, read here and not by the helper.
+# Every account's grants as the server shows them, read here and not by the helper, as a set:
+# the restoring root keeps the PROXY grant its new image gave it, and the dump grants an equal
+# one, which SHOW GRANTS lists a second time.
 GRANTS_OF() { for a in "'root'@'localhost'" "'app'@'%'" "'reader'@'%'" "'staff'@'%'" "'lead'@'%'" viewer editor auditor PUBLIC; do
-                  printf '%s: ' "$a"; my -e "show grants for $a" | sort | tr '\n' '|'; echo; done; }
+                  printf '%s: ' "$a"; my -e "show grants for $a" | sort -u | tr '\n' '|'; echo; done; }
 ROLES_OF() { my -e "select user from mysql.user where is_role = 'Y' order by 1" | tr '\n' ' '; }
 # (the client's own WARNING lines, e.g. about --ssl-verify-server-cert, left out)
 as_user() { docker exec -e MYSQL_PWD="$2" "$MYDB" mariadb --protocol=tcp -h 127.0.0.1 -u"$1" -N -B -e "$3" 2>&1 | grep -v '^WARNING: ' | tr '\n' ' '; }
@@ -1115,6 +1117,8 @@ check "MariaDB major: the app user and the reader log in over TCP, the app runs 
 check "MariaDB major: the roles, every account's grants (default role, admin option, the role nobody has, PUBLIC) and the rights at work as before; the helper compared them in the trial run and after the restore" \
     '[ "$(ROLES_OF)" = "$ROLES0" ] && [ "$(GRANTS_OF)" = "$GRANTS0" ] && [ "$(USABLE)" = "$USABLE0" ] && grep -q "Users, roles and grants after the restore: the same." /tmp/e2e-y1.log'
 [ "$(GRANTS_OF)" = "$GRANTS0" ] || { echo "  | grants before:"; printf '%s\n' "$GRANTS0" | sed 's/^/  |   /'; echo "  | grants after:"; GRANTS_OF | sed 's/^/  |   /'; }
+[ "$(USABLE)" = "$USABLE0" ] || { echo "  | rights at work after:"; USABLE | sed 's/^/  |   /'; }
+[ "$(ROLES_OF)" = "$ROLES0" ] || echo "  | roles after: $(ROLES_OF)"
 check "MariaDB major: the tag line changed, the old data kept in a volume of its own, the history knows the engine" \
     '[ "$(grep -c "image: imgupd-test/mariadb:$V12$" "$D6/docker-compose.yml")" = 1 ] && [ -n "$KEPT11" ] && [ -n "$(ls -A "$(docker volume inspect -f "{{.Mountpoint}}" "$KEPT11")")" ] && grep -q "\"id\": \"$OPY\".*\"engine\": \"mariadb\"" "$OPS"'
 python3 $H rollback "$OPY" > /tmp/e2e-y2.log 2>&1; RC=$?
