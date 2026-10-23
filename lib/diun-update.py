@@ -2010,22 +2010,72 @@ MY_COUNTS = MY_SH + r"""q=$("$C" -uroot -N -B -e "select concat('select ', quote
 MY_SERVER_VERSION = MY_SH + '"$C" -uroot -N -B -e "select version()"'
 # The dump of a MariaDB major: the system tables of the old major (the mysql
 # database) do not load into a newer one (mysql.proc has another column count),
-# so the dump holds the users' databases and, after them, every user (not the
-# roles, mariadb.sys and the image's own healthcheck user) as CREATE OR
-# REPLACE USER with its grants, taken from the server
-# itself. The end marker comes last.
+# so the dump holds the users' databases and then the accounts as statements
+# the new major runs, in an order it takes: every user (CREATE OR REPLACE USER,
+# from SHOW CREATE USER), every role (CREATE OR REPLACE ROLE, also one nobody
+# has), then the grants of each (SHOW GRANTS: privileges, the roles granted to
+# users and roles, the grant and admin options), then the default roles, then
+# FLUSH PRIVILEGES. The roles are created with a role of the restore's own as
+# their admin (IMPORT_ROLE, dropped at the end), as mariadb-dump --system=users
+# does: CREATE ROLE grants that role to the restoring user, and MariaDB lets a
+# user grant every role it reaches with the admin option through the roles
+# granted to it, so the restore may grant every role, and root ends up with
+# the roles it had and no more. No SET ROLE: it would compute the session's
+# privileges anew from root's account, which the restore has just replaced
+# and not granted anything yet (CREATE ROLE then fails for want of CREATE
+# USER, as the end-to-end test found). The restoring account, root@localhost
+# (the restore logs in as root over the socket), is altered, not replaced:
+# replacing it drops its PROXY grant, and with that the right to grant PROXY
+# (acl_check_proxy_grant_access), so its own GRANT PROXY was refused (found by
+# the end-to-end test too); mariadb-dump never drops the current user either.
+# PUBLIC is not created (every
+# server has it), only its grants come along. Left out: mariadb.sys and
+# healthcheck, which the image sets up itself. An error of any query ends the
+# dump (each answer is read whole before a pipe uses it), and the end marker
+# comes last; names reach the server only as SQL literals QUOTE() made.
+IMPORT_ROLE = "image_updates_import_role"
 MY_MAJOR_DUMP = MY_SH + r"""dbs=$("$C" -uroot -N -B -e "select schema_name from information_schema.schemata where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys') order by 1") || exit 1
 if command -v mariadb-dump >/dev/null 2>&1; then D=mariadb-dump; else D=mysqldump; fi
 if [ -n "$dbs" ]; then "$D" -uroot --single-transaction --routines --events --triggers --databases $dbs || exit 1; fi
-users=$("$C" -uroot -N -B -e "select concat(quote(user), '@', quote(host)) from mysql.user where is_role = 'N' and user not in ('mariadb.sys', 'healthcheck') order by 1") || exit 1
-echo "-- Users and their grants"
-for u in $users; do
-  "$C" -uroot -N -B -r -e "show create user $u" | sed 's/^CREATE USER /CREATE OR REPLACE USER /; s/$/;/' || exit 1
-  "$C" -uroot -N -B -r -e "show grants for $u" | sed 's/$/;/' || exit 1
+x="user not in ('mariadb.sys', 'healthcheck', 'image_updates_import_role')"
+users=$("$C" -uroot -N -B -r -e "select concat(quote(user), '@', quote(host)) from mysql.user where is_role = 'N' and $x order by user, host") || exit 1
+roles=$("$C" -uroot -N -B -r -e "select quote(user) from mysql.user where is_role = 'Y' and user <> 'PUBLIC' and $x order by user") || exit 1
+public=$("$C" -uroot -N -B -r -e "select count(*) from mysql.user where is_role = 'Y' and user = 'PUBLIC'") || exit 1
+defaults=$("$C" -uroot -N -B -r -e "select concat('SET DEFAULT ROLE ', quote(default_role), ' FOR ', quote(user), '@', quote(host), ';') from mysql.user where is_role = 'N' and default_role <> '' and $x order by user, host") || exit 1
+echo "-- Users and roles"
+printf '%s\n' "$users" | while IFS= read -r a; do
+  [ -n "$a" ] || continue
+  s=$("$C" -uroot -N -B -r -e "show create user $a") || exit 1
+  if [ "$a" = "'root'@'localhost'" ]; then c="ALTER USER "; else c="CREATE OR REPLACE USER "; fi
+  printf '%s;\n' "$s" | sed "s/^CREATE USER /$c/"
+done || exit 1
+echo "CREATE ROLE image_updates_import_role;"
+printf '%s\n' "$roles" | while IFS= read -r r; do
+  [ -z "$r" ] || printf 'CREATE OR REPLACE ROLE %s WITH ADMIN image_updates_import_role;\n' "$r"
 done
+echo "-- Grants"
+{ printf '%s\n' "$users" "$roles"; [ "$public" = 0 ] || echo PUBLIC; } | while IFS= read -r a; do
+  [ -n "$a" ] || continue
+  g=$("$C" -uroot -N -B -r -e "show grants for $a") || exit 1
+  [ -z "$g" ] || printf '%s\n' "$g" | sed '/^SET DEFAULT ROLE /d; s/$/;/'
+done || exit 1
+[ -z "$defaults" ] || printf '%s\n' "$defaults"
+echo "DROP ROLE image_updates_import_role;"
 echo "FLUSH PRIVILEGES;"
 echo "-- Dump completed"
 """
+# Every account the dump takes along (users, roles, PUBLIC) with its grants,
+# one "account<TAB>line" per line: read before the dump, in the trial run and
+# after the restore, and compared (compare_grants).
+MY_GRANTS = MY_SH + r"""x="user not in ('mariadb.sys', 'healthcheck', 'image_updates_import_role')"
+a=$("$C" -uroot -N -B -r -e "select if(is_role = 'Y', if(user = 'PUBLIC', 'PUBLIC', quote(user)), concat(quote(user), '@', quote(host))) from mysql.user where $x order by is_role, user, host") || exit 1
+printf '%s\n' "$a" | while IFS= read -r u; do
+  [ -n "$u" ] || continue
+  g=$("$C" -uroot -N -B -r -e "show grants for $u") || exit 1
+  printf '%s\n' "$g" | while IFS= read -r l; do printf '%s\t%s\n' "$u" "$l"; done
+done || exit 1"""
+# Whether a role (or user) has the name the restore uses for its own role.
+MY_ROLE_NAME = MY_SH + "\"$C\" -uroot -N -B -e \"select count(*) from mysql.user where user = 'image_updates_import_role'\""
 MY_READY = MY_SH + '"$A" ping --protocol=tcp -h 127.0.0.1 -uroot --silent'
 MY_RESTORE = MY_SH + 'exec "$C" -uroot'
 # A restore leaves the system tables of the dump's version while the data
@@ -2136,6 +2186,31 @@ def compare_counts(before, after):
     return out
 
 
+def account_grants(name):
+    """MariaDB: {account: its SHOW GRANTS lines, sorted} of every user, role
+    and PUBLIC the major dump takes along (MY_GRANTS)."""
+    out = {}
+    for ln in pg_lines(name, MY_GRANTS, timeout=120):
+        acct, sep, line = ln.partition("\t")
+        if sep:
+            out.setdefault(acct, []).append(line)
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def compare_grants(before, after):
+    """What a restore lost or added: ["'viewer': missing", "'app'@'%': lacks
+    GRANT …", "'root'@'localhost': has GRANT … too"]. An account only the new
+    server has (one its image set up from the environment) does not count."""
+    out = []
+    for acct in sorted(before):
+        if acct not in after:
+            out.append(f"{acct}: missing")
+            continue
+        b, a = set(before[acct]), set(after[acct])
+        out += [f"{acct}: lacks {ln}" for ln in sorted(b - a)] + [f"{acct}: has {ln} too" for ln in sorted(a - b)]
+    return out
+
+
 def count_summary(counts):
     return pick(f"{len(counts)} Datenbanken, {sum(len(t) for t in counts.values())} Tabellen, "
                 f"{sum(n for t in counts.values() for n in t.values())} Zeilen",
@@ -2229,6 +2304,15 @@ def make_major(name, new_tag):
         # Dump, count and restore log in as root with the password of the environment.
         if not (env_of(c).get("MARIADB_ROOT_PASSWORD") or env_of(c).get("MYSQL_ROOT_PASSWORD")):
             return refuse("major-root-password")
+        # The users and roles with their grants, as the dump and the comparisons will read them;
+        # the restore gives its own role a name no role of the database may have.
+        try:
+            account_grants(name)
+            taken = pg_lines(name, MY_ROLE_NAME, timeout=60)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+            return refuse("major-unreadable", (getattr(e, "stderr", None) or str(e)).strip()[-300:])
+        if taken and taken[0].strip() != "0":
+            return refuse("major-role-name", IMPORT_ROLE)
     mj["stop"] = [d["service"] for d in plan["dependents"]
                   if any((inspect(n)["State"] or {}).get("Running") for n in d["containers"])]
     if engine == "postgres":
@@ -2285,12 +2369,13 @@ def drop_probes():
         run(["docker", "rm", "-f", "-v", i], check=False, timeout=120)
 
 
-def probe_restore(name, plan, op, before):
+def probe_restore(name, plan, op, before, grants=None):
     """Before anything changes (the old database runs on its data): the dump
     restored into a throwaway container of the new major, without network, on
-    an anonymous volume, removed afterwards, and counted as the run counts it.
-    A dump the new major does not take, or other counts, stop the major here
-    (exit 5)."""
+    an anonymous volume, removed afterwards, and counted as the run counts it;
+    MariaDB: its users and roles with their grants compared too (grants, as
+    account_grants read them on the old server). A dump the new major does not
+    take, other counts or other grants stop the major here (exit 5)."""
     mj, new_ref, new = plan["major"], plan["retag"]["image"], plan["major"]["to_major"]
     engine, label = engine_of(mj), ename(mj)
     env = env_of(inspect(name))
@@ -2334,6 +2419,12 @@ def probe_restore(name, plan, op, before):
                 diff = compare_counts(before, table_counts(probe, engine))
                 if diff:
                     why = pick(f"Zeilen weichen ab: {diff[0]}", f"rows differ: {diff[0]}")
+                elif grants is not None:
+                    diff = compare_grants(grants, account_grants(probe))
+                    for ln in diff[:20]:
+                        print(ln)
+                    if diff:
+                        why = pick(f"Rechte weichen ab: {diff[0]}", f"privileges differ: {diff[0]}")
     except subprocess.CalledProcessError as e:
         why = ((e.stderr or "") if isinstance(e.stderr, str) else str(e)).strip()[-300:] or str(e)
     except subprocess.TimeoutExpired:
@@ -2377,7 +2468,8 @@ def cmd_major(name, new_tag, expect):
 # (swap_back). Steps: "aside" (the major: the old data into its place),
 # "new-aside" and "old-back" (the rollback: the new major's data into a place
 # of its own, then the old data back). Nothing here deletes data: a place is
-# removed only while it is empty (drop_empty).
+# removed only while it is empty (drop_empty), and only once the history says
+# its data is back where it belongs ("emptied", see drop_emptied).
 MOVE_STEPS = ("aside", "new-aside", "old-back")
 
 
@@ -2440,6 +2532,26 @@ def drop_quietly(kept):
         pass
 
 
+def drop_emptied(op):
+    """Remove the place a move emptied, then let the history forget it. The
+    history names it ("emptied") in the same line that says its move is over
+    (old_data or new_data null, move null), before it goes: a kill before or
+    after the removal leaves a state the next rollback finishes here. Up to
+    0.25.0 the place went first, and a kill right after that left the history
+    naming a place that was gone (old_data_home). Only a place make_place
+    made, only while empty: one with data in it stays, and so does its record."""
+    place = op.get("emptied")
+    if not place:
+        return
+    try:
+        gone = not kept_ok(place) or not kept_exists(place) or drop_empty(place)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        gone = False
+    if gone:
+        op["emptied"] = None
+        record({"id": op["id"], "emptied": None})
+
+
 def drop_kept(kept):
     """Release a place with its data (delete-olddata, on request only)."""
     if kept["type"] == "volume":
@@ -2461,9 +2573,9 @@ def set_aside(op, suffix):
     major's) into a place of its own. The place, the entries and the move are
     in the history before the first entry moves, the end of the move once the
     last has; signals wait until both are done. A rename that fails puts back
-    what moved and removes the empty place; if putting back fails too,
-    everything stays where it is and in the history (the rollback puts the
-    data together)."""
+    what moved, records that, then removes the emptied place (drop_emptied);
+    if putting back fails too, everything stays where it is and in the
+    history (the rollback puts the data together)."""
     data = op["data"]
     src = data["source"]
     with held():
@@ -2478,9 +2590,9 @@ def set_aside(op, suffix):
                 move_entries(kept["path"], src)
             except OSError as e2:
                 raise split_error(e, e2, src, kept["path"]) from e
-            drop_quietly(kept)
-            op.update(old_data=None, move=None)
+            op.update(old_data=None, move=None, emptied=kept)
             record(op, log=op["id"] + ".log")
+            drop_emptied(op)
             raise
         op["move"] = None
         record(op, log=op["id"] + ".log")
@@ -2534,15 +2646,40 @@ def data_restored(op):
     return None
 
 
+def old_data_home(op):
+    """True when the old data whose place (old_data) is gone lies whole in
+    the data directory again. Up to 0.25.0 the end of a move back, and of a
+    move aside taken back, removed the emptied place before the history said
+    the move was over; a kill in between left the history naming that move
+    and a place that is gone. Only such a move counts (old-back into the
+    data directory, or aside out of it), never data whose place went in
+    another way, and only when the data directory holds exactly the entries
+    set aside and the old major's version file (data_restored): every entry
+    moves whole by one rename, so with all of them there nothing is missing."""
+    kept, mv, src = op.get("old_data"), op.get("move") or {}, (op.get("data") or {}).get("source")
+    if not (src and kept_ok(kept)) or op.get("data_released") or op.get("data_entries") is None:
+        return False
+    if (mv.get("step"), mv.get("from"), mv.get("to")) not in (("old-back", kept["path"], src),
+                                                                ("aside", src, kept["path"])):
+        return False
+    try:
+        if kept_exists(kept):
+            return False
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+    return data_restored(op) is None
+
+
 def unrecorded_place(op):
     """Where a major of 0.23.0 to 0.24.0 may have moved the old data without
     the history knowing (it recorded the place only after the move, so a
     signal or a kill in between lost it): the place named after the
     operation, as that version named it, with data in it. None if there is
-    none."""
+    none, and for a run since 0.24.1, which records every move before it
+    begins (data_entries) and a place it emptied (emptied)."""
     data = op.get("data") or {}
     if op.get("old_data") or op.get("move") or not op.get("from_major") or data.get("type") not in ("volume", "bind") \
-            or engine_of(op) != "postgres":
+            or engine_of(op) != "postgres" or op.get("data_entries") is not None or op.get("emptied"):
         return None
     suffix = f"pg{op['from_major']}-{op['id'][:15]}"
     if data["type"] == "volume":
@@ -2604,7 +2741,9 @@ def restore_into(name, rel, engine="postgres"):
                            capture_output=True, text=True, timeout=LIMITS["dump"])
         if p.returncode == 0:
             return []
-        return [ln for ln in (p.stderr or "").splitlines() if ln.strip()][-5:] or [f"exit {p.returncode}"]
+        # The client frames the statement that failed with dashes; the ERROR line says why.
+        lines = [ln for ln in (p.stderr or "").splitlines() if ln.strip() and set(ln.strip()) != {"-"}]
+        return ([ln for ln in lines if ln.startswith("ERROR")] or lines)[-5:] or [f"exit {p.returncode}"]
     run(["docker", "exec", name, "sh", "-c", PG_DROP_FIRST], timeout=120)
     p = subprocess.run(["sh", "-c", 'gunzip -c "$1" | docker exec -i "$2" sh -c "$3"', "sh",
                         os.path.join(DUMPS, rel), name, PG_RESTORE],
@@ -2706,7 +2845,7 @@ def migrate(name, plan, ctx):
           "changes": [{k: c[k] for k in ("file", "line", "old", "new")} for c in rt["changes"]],
           "from_major": old, "to_major": new, "data": mj["data"], "old_data": None, "stopped": [],
           "engine": engine, "pg_version_file": pg_version_file, "version_file": version_file,
-          "data_entries": None, "move": None,
+          "data_entries": None, "move": None, "emptied": None,
           "rollback": None, "dumps": [], "status": "running", "pid": os.getpid()}
     say(f"Datenbank-Major {ref} → {new_ref} ({label} {old} → {new}) in Projekt {project}.",
         f"Database major {ref} to {new_ref} ({label} {old} to {new}) in project {project}.")
@@ -2760,6 +2899,16 @@ def migrate(name, plan, ctx):
         op["dumps"].append(dump_db(project, db, st, MY_MAJOR_DUMP if engine == "mariadb" else None))
         before = table_counts(name, engine)
         say(f"Gezählt: {count_summary(before)}", f"Counted: {count_summary(before)}")
+        grants = None
+        if engine == "mariadb":
+            try:
+                grants = account_grants(name)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                detail = (getattr(e, "stderr", None) or str(e)).strip()[-300:]
+                raise Abort(5, f"Benutzer, Rollen und Rechte ließen sich nicht lesen ({detail}) – nichts geändert.",
+                            f"The users, roles and grants could not be read ({detail}) – nothing changed.")
+            say(f"Benutzer und Rollen: {len(grants)}, mit {sum(len(v) for v in grants.values())} Rechtezeilen",
+                f"Users and roles: {len(grants)}, with {sum(len(v) for v in grants.values())} grant lines")
         # The data the major moves must be this server's: a rollback checks it by the same file.
         running = old
         if engine == "mariadb":
@@ -2772,7 +2921,7 @@ def migrate(name, plan, ctx):
             raise Abort(5, f"Server oder {where} nennen nicht {label} {old} – nichts geändert.",
                         f"The server or {where} do not say {label} {old} – nothing changed.")
         # 4b. The trial run: does the new major take the dump, are the counts the same?
-        probe_restore(name, plan, op, before)
+        probe_restore(name, plan, op, before, grants)
         change_files(op, ctx, rt, [service], st)
     except Interrupted as e:
         undo_early(op, base)
@@ -2829,6 +2978,16 @@ def migrate(name, plan, ctx):
             raise RuntimeError("counts")
         say(f"Gezählt nach dem Einspielen: {count_summary(after)} – gleich.",
             f"Counted after the restore: {count_summary(after)} – the same.")
+        if grants is not None:
+            diff = compare_grants(grants, account_grants(name))
+            if diff:
+                for ln in diff[:20]:
+                    print(ln)
+                reason = major_reason(name, "grants", pick(f"Rechte weichen ab: {diff[0]}",
+                                                           f"privileges differ: {diff[0]}")[:REASON_MAX])
+                raise RuntimeError("grants")
+            say("Benutzer, Rollen und Rechte nach dem Einspielen: gleich.",
+                "Users, roles and grants after the restore: the same.")
         # The services that wait for the database log in over the network with a password.
         refused = login_failure(name, engine)
         if refused is not None:
@@ -2885,9 +3044,12 @@ def swap_back(op, base):
       - a move an earlier rollback left open goes on where it stopped.
     Then, and also when nothing had to move, the data must be the old
     major's (data_restored), or the rollback fails with everything where it
-    is. A state that does not fit stops it before anything moves (exit 5).
-    Returns where the new major's data is kept, or None."""
+    is. A move that is over is in the history before its emptied place goes
+    (drop_emptied, which also removes one an earlier run left). A state that
+    does not fit stops it before anything moves (exit 5). Returns where the
+    new major's data is kept, or None."""
     src = op["data"]["source"]
+    drop_emptied(op)
     found = unrecorded_place(op)
     if found:
         op.update(old_data=found, move={"step": "aside", "from": src, "to": found["path"]})
@@ -2898,6 +3060,18 @@ def swap_back(op, base):
             f"while it moved the data); it goes back.")
     kept, new_kept, mv = op.get("old_data"), op.get("new_data"), op.get("move")
     step = (mv or {}).get("step")
+    if kept and step == "new-aside" and kept_ok(new_kept) and (mv.get("from"), mv.get("to")) == (src, new_kept["path"]) \
+            and not kept_exists(new_kept) and os.path.isdir(src) and os.listdir(src):
+        # Up to 0.25.0 a move of the new major's data that failed and was taken
+        # back removed its emptied place before the history said so: the data
+        # is whole in the data directory again (a place goes only while empty).
+        op.update(new_data=None, move=None)
+        record({"id": op["id"], "new_data": None, "move": None})
+        new_kept, mv, step = None, None, None
+        say("Die Daten des neuen Majors liegen wieder im Datenverzeichnis; ein früherer Rollback endete, nachdem er "
+            "ihren leeren Ort entfernt hatte. Sie bekommen einen neuen.",
+            "The new major's data is back in the data directory; an earlier rollback ended after it removed their "
+            "empty place. They get a new one.")
     if kept:
         if mv and (step not in MOVE_STEPS or src not in (mv.get("from"), mv.get("to"))):
             raise unclear(f"der Verlauf nennt eine Verschiebung, die nicht passt ({mv})",
@@ -2930,9 +3104,9 @@ def swap_back(op, base):
                         move_entries(new_kept["path"], src)
                     except OSError as e2:
                         raise split_error(e, e2, src, new_kept["path"]) from e
-                    drop_quietly(new_kept)
-                    op.update(new_data=None, move=None)
-                    record({"id": op["id"], "new_data": None, "move": None})
+                    op.update(new_data=None, move=None, emptied=new_kept)
+                    record({"id": op["id"], "new_data": None, "move": None, "emptied": new_kept})
+                    drop_emptied(op)
                     raise
             op["move"] = {"step": "old-back", "from": kept["path"], "to": src}
             record({"id": op["id"], "move": op["move"]})
@@ -2945,9 +3119,9 @@ def swap_back(op, base):
                                     f"The data is not the old data: {why}. The database does not start; everything "
                                     f"stays where it is."))
         if kept:
-            drop_quietly(kept)
-            op.update(old_data=None, move=None)
-            record({"id": op["id"], "old_data": None, "move": None})
+            op.update(old_data=None, move=None, emptied=kept)
+            record({"id": op["id"], "old_data": None, "move": None, "emptied": kept})
+            drop_emptied(op)
     if kept:
         say(f"Die Daten von {ename(op)} {op['from_major']} liegen wieder an ihrem Ort"
             + (f"; die von {ename(op)} {op['to_major']} bleiben in {kept_where(op.get('new_data'))}, bis sie "
@@ -3090,10 +3264,20 @@ def cmd_rollback(op_id):
            "env_files": op.get("env_files") or []}
     saved = (op.get("backup_files") or []) if op.get("kind") in ("retag", "dbmajor") else []
     major = op.get("kind") == "dbmajor"
-    # A major that moved the data aside moves it back: the old data must still be there.
+    # A major that moved the data aside moves it back: the old data must still be
+    # there, or whole in its place already (a run up to 0.25.0 that was killed
+    # right after it removed the emptied place, old_data_home).
     if major and op.get("old_data") and not (kept_ok(op["old_data"]) and kept_exists(op["old_data"])):
-        raise Abort(2, f"Die alten Daten ({kept_where(op['old_data'])}) sind nicht mehr da – nichts geändert.",
-                    f"The old data ({kept_where(op['old_data'])}) is gone – nothing changed.")
+        if not old_data_home(op):
+            raise Abort(2, f"Die alten Daten ({kept_where(op['old_data'])}) sind nicht mehr da – nichts geändert.",
+                        f"The old data ({kept_where(op['old_data'])}) is gone – nothing changed.")
+        where = kept_where(op["old_data"])
+        op.update(old_data=None, move=None)
+        record({"id": op_id, "old_data": None, "move": None})
+        say(f"Die alten Daten liegen schon wieder vollständig an ihrem Ort; {where} hat ein früherer Lauf leer "
+            f"entfernt, bevor er das festhalten konnte.",
+            f"The old data is already back in its place, whole; an earlier run removed {where} empty before it "
+            f"could record that.")
     # A tag change is undone with its files. Check them all before touching one:
     # a file edited since then, or a damaged backup, stops the rollback. A file
     # that is back already (an earlier attempt, a run that ended before writing
@@ -3307,10 +3491,12 @@ def cmd_backups():
                              "major": o.get("to_major") if o.get("rolled_back") else o.get("from_major"),
                              "can_release": (o.get("status") == "ok" or bool(o.get("rolled_back")))
                              and not o.get("move")}
-            # Without the old data a rollback has nothing to move back.
-            if o.get("can_rollback") and not o.get("rolled_back") and o.get("old_data") and "kept" not in o:
+            # Without the old data a rollback has nothing to move back, unless it is back already.
+            if o.get("can_rollback") and not o.get("rolled_back") and o.get("old_data") and "kept" not in o \
+                    and not old_data_home(o):
                 o["can_rollback"] = False
-            for k in ("data", "old_data", "new_data", "move", "data_entries", "pg_version_file", "version_file"):
+            for k in ("data", "old_data", "new_data", "move", "emptied", "data_entries", "pg_version_file",
+                      "version_file"):
                 o.pop(k, None)
         o["log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".log"))
         o["rollback_log"] = os.path.exists(os.path.join(LOGS, o["id"] + ".rollback.log"))

@@ -12,8 +12,12 @@ point, no timing).
       action       "migrate" or "rollback" (with "op": the operation's id)
       type         "bind" or "volume": where the data lies
       stop_at      the rename after which the child waits (with ready_fd, go_fd)
+      stop_after_drop    the same after the n-th place removed (drop_empty)
+      stop_after_record  the same after the first history line that sets this key
       fail         renames (by attempt) that fail with an OSError
       probe_fail   the trial run's restore gives an error
+      grants_lost  MariaDB: the reading of the grants (1 before the dump, 2 in the
+                   trial run, 3 after the restore) that lacks a role
       engine       "postgres" (default) or "mariadb"
 
 What happened goes to <dir>/calls.jsonl: every docker command, and for each
@@ -161,6 +165,21 @@ U.restore_into = lambda name, rel, engine="postgres": (['psql:<stdin>:9: ERROR: 
                                                        if CFG.get("probe_fail") and "-probe-" in name else [])
 U.version_of = lambda ref, iid: ("12.3.3" if ENGINE == "mariadb" else "17.6") if iid == "sha256:new" else \
     ("11.8.9" if ENGINE == "mariadb" else "16.14")
+GRANTS = {"'app'@'%'": ["GRANT USAGE ON *.* TO `app`@`%`"], "'staff'@'%'": ["GRANT `editor` TO `staff`@`%`"],
+          "'editor'": ["GRANT INSERT ON `appdb`.* TO `editor`", "GRANT USAGE ON *.* TO `editor`"]}
+grant_reads = [0]
+
+
+def account_grants(name):
+    grant_reads[0] += 1
+    log_call(["account_grants", name])
+    g = json.loads(json.dumps(GRANTS))
+    if CFG.get("grants_lost") == grant_reads[0]:
+        del g["'editor'"]
+    return g
+
+
+U.account_grants = account_grants
 U.wait_healthy = lambda project, services: (True, [], {})
 U.start_radar = lambda: None
 U.show_logs = lambda names: None
@@ -171,6 +190,13 @@ real_rename = os.rename
 attempts = [0]
 
 
+def pause():
+    os.write(CFG["ready_fd"], b"r")
+    os.read(CFG["go_fd"], 1)          # the test answers once the signal is sent (SIGKILL: never)
+    g = diunproc._guard
+    print(f"@@SIGNAL-WHILE-HELD {g is not None and (g.pending is not None or g.got is not None)}", flush=True)
+
+
 def rename(a, b):
     attempts[0] += 1
     n = attempts[0]
@@ -178,13 +204,39 @@ def rename(a, b):
         raise OSError(errno.EIO, "injected failure", a)
     real_rename(a, b)
     if n == CFG.get("stop_at"):
-        os.write(CFG["ready_fd"], b"r")
-        os.read(CFG["go_fd"], 1)          # the test answers once the signal is sent (SIGKILL: never)
-        g = diunproc._guard
-        print(f"@@SIGNAL-WHILE-HELD {g is not None and (g.pending is not None or g.got is not None)}", flush=True)
+        pause()
 
 
 os.rename = rename
+
+# The same after a place is removed (drop_empty: once it is gone) or after a
+# history line (record: once it is on disk).
+real_drop_empty = U.drop_empty
+drops = [0]
+
+
+def drop_empty(kept):
+    gone = real_drop_empty(kept)
+    if gone:
+        drops[0] += 1
+        if drops[0] == CFG.get("stop_after_drop"):
+            pause()
+    return gone
+
+
+real_record = U.record
+
+
+def record(entry, log=None):
+    real_record(entry, log)
+    key = CFG.get("stop_after_record")
+    if key and entry.get(key):
+        CFG["stop_after_record"] = None
+        pause()
+
+
+U.drop_empty = drop_empty
+U.record = record
 
 DEST = "/var/lib/mysql" if ENGINE == "mariadb" else "/var/lib/postgresql/data"
 if CFG["type"] == "volume":

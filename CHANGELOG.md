@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.25.1 – 2026-10-23
+
+A rollback of a database major that was killed right after it removed an emptied place can be
+finished again, and a MariaDB major takes the roles along.
+
+**Upgrading:** nothing to do. A rollback that 0.24.1 to 0.25.0 left blocked (exit 2, “the old data
+is gone”, while the data is back) goes through now.
+
+- **Rollback after a hard stop.** The end of a move removed the emptied place first and recorded
+  the end of the move afterwards. A kill in between (SIGKILL, a power cut) left the history naming a
+  move and a place that was gone; every later rollback stopped with exit 2 (“the old data … is
+  gone”), or with exit 5 for the new major's place, and the database stayed stopped, although the
+  data was back whole. Now the history says first that the move is over and which place it emptied
+  (`emptied`), then the place goes, then the history forgets it; a kill between any two of these
+  leaves a state the next rollback finishes. The same order holds where a move is taken back (a
+  rename failed in the major's move aside, or in the rollback's move of the new major's data). The
+  state those versions left is recognised: the place gone, the history naming a move back (or a
+  move aside taken back), and the data directory holding exactly the entries set aside and the old
+  major's version file. Every entry moves whole by one rename, so with all of them there nothing is
+  missing; anything else (an entry lacking or more, another version file, the entries not in the
+  history, no such move) stops the rollback as before with nothing moved and no database started.
+  The page offers that rollback again. A place recorded as emptied that has data in it again stays
+  with its data.
+- **MariaDB roles.** The dump of a MariaDB major took only users (`is_role = 'N'`): roles, their
+  rights and roles nobody has were lost, and a user's `GRANT reader TO app` named a role the new
+  server did not have, so the trial run failed. Errors reading a user or its grants did not stop the
+  dump either: a pipe to `sed` hid them. The dump now creates every user, then every role (also
+  one nobody has), then restores the grants of each (privileges, roles granted to users and roles,
+  the grant and admin options), the default roles and the grants of `PUBLIC`, in an order the new
+  server takes. The roles are created with a role of the restore's own as their admin
+  (`image_updates_import_role`, dropped at the end), as `mariadb-dump --system=users` does, so root
+  ends up with the roles it had and no more. The restoring account, `root`@`localhost`, is altered
+  (`ALTER USER`), not replaced, so it keeps the right to grant `PROXY` while the restore runs (it
+  also keeps the `PROXY` grant its new image gave it, so `SHOW GRANTS` lists that line twice). A
+  failed restore names its `ERROR` line, not the dashes the client frames the statement with. Every query's answer is read whole before a pipe uses
+  it, so an error ends the dump. Names reach the server only as literals of `QUOTE()`.
+- **Grants compared.** Besides the rows, a MariaDB major now compares every user and role with its
+  grants (`SHOW GRANTS`): read before the dump, in the trial run after `mariadb-upgrade` and after
+  the restore and the restart. An account missing or a grant line lacking or added stops the trial
+  run with nothing changed, or fails the run with its rollback (`reason.source: "grants"`). The
+  plan reads them too and refuses the major when it cannot (`major-unreadable`, now for any read)
+  or when a role or user is called `image_updates_import_role` (`major-role-name`).
+- **Tests.** `test/major_recovery_test.py` with `test/major_child.py` (two more points to stop at:
+  after a place is removed, after a history line): SIGKILL after an emptied place is removed and
+  after the history says the move is over, for the move back, a move aside taken back and the new
+  major's move taken back, each with a bind mount and a volume, and MariaDB; the states of 0.24.1 to
+  0.25.0 made the same way (the place removed by hand after a kill), finished; eight states that are
+  no move back done, refused; the grants compared in the trial run and after the restore.
+  `test/mariadb_dump_test.py` with `test/fake_mariadb.py` (new): the dump and the grants list run
+  with sh against a stand-in for the client, and the SQL played on a model of MariaDB's accounts
+  that refuses a statement naming a user or role before it exists, granting a role the restoring
+  user does not reach with the admin option, or needing privileges the session lost (`SET ROLE`
+  computes them anew from root's account; `GRANT PROXY` needs a `PROXY` grant of the restoring
+  account, which replacing it drops; the end-to-end test found both on MariaDB 12): a user with rights only through a role and that role as default, a role that has
+  another, a role nobody has, direct rights, the admin option, a name with a quote, `PUBLIC`; an
+  error reading any list, a user or its grants ends the dump. `test/major_test.py`: the new plan
+  refusals, the grants in the trial run, the `ERROR` line of a failed MariaDB restore.
+  `test/e2e-server.sh` section 17d: roles on real
+  MariaDB 11 and 12 (a default role, an inherited role, a role nobody has with rights, the admin
+  option, a grant to `PUBLIC`): after the major and after the rollback every account's grants are
+  the same, and the rights work for a user over TCP.
+
 ## 0.25.0 – 2026-10-22
 
 A database major tries the dump in a throwaway container of the new major before it touches the
