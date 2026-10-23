@@ -7,7 +7,7 @@ CI jobs), the failed updates from the history, the radar's age, the overall
 state and the summary in English and German, the contract's shape, the file
 (0644, atomic, names only), `status` without the file, from it, as root and
 without root, its arguments, and the writers: the radar run and the hook
-after update, rollback and cleanup.
+after update, rollback and cleanup. Also the manifest's menu entry.
 
 The fixture test/fixtures/status.json is this module's output for the real
 host data of the other fixtures; test/status-rows.js checks that the page
@@ -647,6 +647,15 @@ try:
           (0, True))
 finally:
     sys.argv = argv
+
+# The menu entry: one block at the end of System, after Services (100), Status Board 101 to Host
+# Settings 106; found by "azentrius"; the README in Cockpit's Help menu under the product name.
+with open(os.path.join(os.path.dirname(ROOT), "plugin", "manifest.json"), encoding="utf-8") as f:
+    entry = json.load(f)["menu"]["index"]
+check("the menu entry sits with the other Azentrius add-ons and links the README",
+      (entry["order"], any("azentrius" in k["matches"] for k in entry["keywords"]), entry["docs"]),
+      (104, True, [{"label": "Image Update Monitor",
+                    "url": "https://github.com/Azentrius/cockpit-image-update-monitor#readme"}]))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")
