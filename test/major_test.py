@@ -26,6 +26,7 @@ sys.path.insert(0, ROOT)
 spec = importlib.util.spec_from_file_location("diun_update_major", os.path.join(ROOT, "diun-update.py"))
 U = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(U)
+real_restore_into = U.restore_into          # the trial run's tests stand in for it below
 
 fails = 0
 
@@ -394,6 +395,15 @@ def probe_my(grants_after):
     except (U.Abort, TypeError) as e:
         return p, (getattr(e, "code", None), str(e)), ""
 
+
+real_subprocess_run = U.subprocess.run
+U.subprocess.run = lambda *a, **k: type("P", (), {"returncode": 1, "stderr": (
+    "--------------\nCREATE OR REPLACE ROLE 'auditor' WITH ADMIN image_updates_import_role\n--------------\n\n"
+    "ERROR 1227 (42000) at line 5509: Access denied; you need (at least one of) the CREATE USER privilege(s)\n")})()
+check("restore_into (MariaDB): a failed restore names its ERROR line, not the dashes around the statement",
+      real_restore_into("db", "app/x.sql.gz", "mariadb"),
+      ["ERROR 1227 (42000) at line 5509: Access denied; you need (at least one of) the CREATE USER privilege(s)"])
+U.subprocess.run = real_subprocess_run
 
 p, err, out = probe_my(GRANTS)
 check("probe (MariaDB): the grants read in the probe after mariadb-upgrade, the same: no error",

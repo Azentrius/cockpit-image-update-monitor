@@ -2016,9 +2016,14 @@ MY_SERVER_VERSION = MY_SH + '"$C" -uroot -N -B -e "select version()"'
 # has), then the grants of each (SHOW GRANTS: privileges, the roles granted to
 # users and roles, the grant and admin options), then the default roles, then
 # FLUSH PRIVILEGES. The roles are created with a role of the restore's own as
-# their admin (IMPORT_ROLE, active meanwhile, dropped at the end), as
-# mariadb-dump --system=users does: so the restore may grant every role, and
-# root ends up with the roles it had and no more. PUBLIC is not created (every
+# their admin (IMPORT_ROLE, dropped at the end), as mariadb-dump --system=users
+# does: CREATE ROLE grants that role to the restoring user, and MariaDB lets a
+# user grant every role it reaches with the admin option through the roles
+# granted to it, so the restore may grant every role, and root ends up with
+# the roles it had and no more. No SET ROLE: it would compute the session's
+# privileges anew from root's account, which the restore has just replaced
+# and not granted anything yet (CREATE ROLE then fails for want of CREATE
+# USER, as the end-to-end test found). PUBLIC is not created (every
 # server has it), only its grants come along. Left out: mariadb.sys and
 # healthcheck, which the image sets up itself. An error of any query ends the
 # dump (each answer is read whole before a pipe uses it), and the end marker
@@ -2039,7 +2044,6 @@ printf '%s\n' "$users" | while IFS= read -r a; do
   printf '%s;\n' "$s" | sed 's/^CREATE USER /CREATE OR REPLACE USER /'
 done || exit 1
 echo "CREATE ROLE image_updates_import_role;"
-echo "SET ROLE image_updates_import_role;"
 printf '%s\n' "$roles" | while IFS= read -r r; do
   [ -z "$r" ] || printf 'CREATE OR REPLACE ROLE %s WITH ADMIN image_updates_import_role;\n' "$r"
 done
@@ -2050,7 +2054,6 @@ echo "-- Grants"
   [ -z "$g" ] || printf '%s\n' "$g" | sed '/^SET DEFAULT ROLE /d; s/$/;/'
 done || exit 1
 [ -z "$defaults" ] || printf '%s\n' "$defaults"
-echo "SET ROLE NONE;"
 echo "DROP ROLE image_updates_import_role;"
 echo "FLUSH PRIVILEGES;"
 echo "-- Dump completed"
@@ -2732,7 +2735,9 @@ def restore_into(name, rel, engine="postgres"):
                            capture_output=True, text=True, timeout=LIMITS["dump"])
         if p.returncode == 0:
             return []
-        return [ln for ln in (p.stderr or "").splitlines() if ln.strip()][-5:] or [f"exit {p.returncode}"]
+        # The client frames the statement that failed with dashes; the ERROR line says why.
+        lines = [ln for ln in (p.stderr or "").splitlines() if ln.strip() and set(ln.strip()) != {"-"}]
+        return ([ln for ln in lines if ln.startswith("ERROR")] or lines)[-5:] or [f"exit {p.returncode}"]
     run(["docker", "exec", name, "sh", "-c", PG_DROP_FIRST], timeout=120)
     p = subprocess.run(["sh", "-c", 'gunzip -c "$1" | docker exec -i "$2" sh -c "$3"', "sh",
                         os.path.join(DUMPS, rel), name, PG_RESTORE],

@@ -1058,7 +1058,8 @@ my -e "create role viewer; grant select on appdb.notes to viewer;
 GRANTS_OF() { for a in "'root'@'localhost'" "'app'@'%'" "'reader'@'%'" "'staff'@'%'" "'lead'@'%'" viewer editor auditor PUBLIC; do
                   printf '%s: ' "$a"; my -e "show grants for $a" | sort | tr '\n' '|'; echo; done; }
 ROLES_OF() { my -e "select user from mysql.user where is_role = 'Y' order by 1" | tr '\n' ' '; }
-as_user() { docker exec -e MYSQL_PWD="$2" "$MYDB" mariadb --protocol=tcp -h 127.0.0.1 -u"$1" -N -B -e "$3" 2>&1 | tr '\n' ' '; }
+# (the client's own WARNING lines, e.g. about --ssl-verify-server-cert, left out)
+as_user() { docker exec -e MYSQL_PWD="$2" "$MYDB" mariadb --protocol=tcp -h 127.0.0.1 -u"$1" -N -B -e "$3" 2>&1 | grep -v '^WARNING: ' | tr '\n' ' '; }
 # The rights at work: staff through its default role editor (and viewer in it) reads and updates
 # appdb.notes and reads shop.items through PUBLIC, but not shop.empty_one; lead takes viewer.
 USABLE() { echo "staff: $(as_user staff staff-only "select current_role(); select count(*) from appdb.notes; update appdb.notes set t = t where id = 1; select count(*) from shop.items")"

@@ -31,7 +31,8 @@ is gone”, while the data is back) goes through now.
   the grant and admin options), the default roles and the grants of `PUBLIC`, in an order the new
   server takes. The roles are created with a role of the restore's own as their admin
   (`image_updates_import_role`, dropped at the end), as `mariadb-dump --system=users` does, so root
-  ends up with the roles it had and no more. Every query's answer is read whole before a pipe uses
+  ends up with the roles it had and no more. A failed restore names its `ERROR` line, not the
+  dashes the client frames the statement with. Every query's answer is read whole before a pipe uses
   it, so an error ends the dump. Names reach the server only as literals of `QUOTE()`.
 - **Grants compared.** Besides the rows, a MariaDB major now compares every user and role with its
   grants (`SHOW GRANTS`): read before the dump, in the trial run after `mariadb-upgrade` and after
@@ -47,11 +48,14 @@ is gone”, while the data is back) goes through now.
   no move back done, refused; the grants compared in the trial run and after the restore.
   `test/mariadb_dump_test.py` with `test/fake_mariadb.py` (new): the dump and the grants list run
   with sh against a stand-in for the client, and the SQL played on a model of MariaDB's accounts
-  that refuses a statement naming a user or role before it exists or granting a role without the
-  admin option: a user with rights only through a role and that role as default, a role that has
+  that refuses a statement naming a user or role before it exists, granting a role the restoring
+  user does not reach with the admin option, or needing privileges the session lost (`SET ROLE`
+  computes them anew from root's account, which the dump replaces; the end-to-end test found that
+  on MariaDB 12): a user with rights only through a role and that role as default, a role that has
   another, a role nobody has, direct rights, the admin option, a name with a quote, `PUBLIC`; an
   error reading any list, a user or its grants ends the dump. `test/major_test.py`: the new plan
-  refusals and the grants in the trial run. `test/e2e-server.sh` section 17d: roles on real
+  refusals, the grants in the trial run, the `ERROR` line of a failed MariaDB restore.
+  `test/e2e-server.sh` section 17d: roles on real
   MariaDB 11 and 12 (a default role, an inherited role, a role nobody has with rights, the admin
   option, a grant to `PUBLIC`): after the major and after the rollback every account's grants are
   the same, and the rights work for a user over TCP.

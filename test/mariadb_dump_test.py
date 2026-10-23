@@ -8,7 +8,9 @@ with sh as in the container, the client stood in for by test/fake_mariadb.py
 
 The SQL the dump writes is then played on a small model of MariaDB's
 accounts (Restore below): a statement that names a user or role before it
-exists, or grants a role without the admin option for it, fails there as it
+exists, grants a role the restoring user does not reach with the admin
+option, or needs privileges the session no longer has (SET ROLE computes
+them anew from root's account, which the dump replaces), fails there as it
 does on a server. What the model holds at the end must be what the server had:
 every user and role, their privileges, the roles granted to users and roles
 (with the admin option), the default roles, roles nobody has, and nothing
@@ -125,7 +127,14 @@ class Restore:
         # The new server: root, and PUBLIC, which every server has (it cannot be created).
         self.acc = {("root", "localhost"): {"role": False, "privs": [], "roles": {}, "default": ""},
                     ("PUBLIC", ""): {"role": True, "privs": [], "roles": {}, "default": ""}}
-        self.current_role = None
+        # The session's privileges: root's ALL, as computed at login; SET ROLE computes them anew
+        # from root's account as it is then.
+        self.session_all = True
+
+    def privileged(self, what):
+        if not self.session_all:
+            raise ValueError(f"access denied for {what}: the session's privileges were computed anew "
+                             f"(SET ROLE) from root@localhost, which has none yet")
 
     def need(self, k, what):
         if k not in self.acc:
@@ -133,9 +142,20 @@ class Restore:
         return self.acc[k]
 
     def admin_of(self, r):
-        """Can the restoring session grant role r: root@localhost or its current role holds it with the admin option."""
-        holders = [("root", "localhost")] + ([self.current_role] if self.current_role else [])
-        return any(self.acc.get(h, {}).get("roles", {}).get(r) for h in holders)
+        """Can the restoring user grant role r: as MariaDB's can_grant_role, some
+        role granted to root@localhost, directly or through other roles, holds
+        it with the admin option (whatever role is active)."""
+        todo, seen = [("root", "localhost")], set()
+        while todo:
+            k = todo.pop()
+            if k in seen or k not in self.acc:
+                continue
+            seen.add(k)
+            for name, admin in self.acc[k]["roles"].items():
+                if name == r and admin:
+                    return True
+                todo.append((name, ""))
+        return False
 
     def play(self, stmt):
         s = stmt.strip()
@@ -145,6 +165,7 @@ class Restore:
         s = s[:-1]
         m = re.match(r"CREATE OR REPLACE USER (" + GRANTEE + r") ", s)
         if m:
+            self.privileged("CREATE USER")
             self.acc[key_of(m.group(1))] = {"role": False, "privs": [], "roles": {}, "default": ""}
             return
         m = re.match(r"CREATE (OR REPLACE )?ROLE (\S+)( WITH ADMIN (\S+))?$", s)
@@ -152,6 +173,7 @@ class Restore:
             k = (key_of(m.group(2))[0] if m.group(2)[0] in "'`" else m.group(2), "")
             if k[0] == "PUBLIC":
                 raise ValueError("CREATE ROLE PUBLIC")
+            self.privileged("CREATE ROLE")
             if k in self.acc and not m.group(1):
                 raise ValueError(f"role {k[0]} exists")
             self.acc[k] = {"role": True, "privs": [], "roles": {}, "default": ""}
@@ -161,12 +183,10 @@ class Restore:
         m = re.match(r"SET ROLE (\S+)$", s)
         if m:
             r = m.group(1)
-            if r == "NONE":
-                self.current_role = None
-            elif r not in self.acc[("root", "localhost")]["roles"]:
+            if r != "NONE" and r not in self.acc[("root", "localhost")]["roles"]:
                 raise ValueError(f"role {r} not granted to root@localhost")
-            else:
-                self.current_role = (r, "")
+            self.session_all = any(p.startswith("GRANT ALL PRIVILEGES ON *.* TO")
+                                   for p in self.acc[("root", "localhost")]["privs"])
             return
         m = re.match(r"GRANT `((?:[^`]|``)*)` TO " + GRANTEE + r"( WITH ADMIN OPTION)?$", s)
         if m:
@@ -179,11 +199,13 @@ class Restore:
             return
         m = re.match(r"GRANT .+ ON .+ TO " + GRANTEE + r"(?: IDENTIFIED .*?)?(?: WITH GRANT OPTION)?$", s)
         if m:
+            self.privileged("GRANT")
             self.need(key_of(m.group(1)), "grantee")["privs"].append(s)
             return
         m = re.match(r"SET DEFAULT ROLE (\S+) FOR (" + GRANTEE + r")$", s)
         if m:
             r, a = key_of(m.group(1))[0], self.need(key_of(m.group(2)), "user")
+            self.privileged("SET DEFAULT ROLE FOR another user")
             if r not in a["roles"]:
                 raise ValueError(f"default role {r} not granted to {m.group(2)}")
             a["default"] = r
@@ -191,12 +213,11 @@ class Restore:
         m = re.match(r"DROP ROLE (\S+)$", s)
         if m:
             r = m.group(1)
+            self.privileged("DROP ROLE")
             self.need((r, ""), "role")
             del self.acc[(r, "")]
             for a in self.acc.values():
                 a["roles"].pop(r, None)
-            if self.current_role == (r, ""):
-                self.current_role = None
             return
         if s == "FLUSH PRIVILEGES":
             return
@@ -258,6 +279,19 @@ check("dump: a name with a quote in it reaches the server as one name",
       "CREATE OR REPLACE USER `O'Brien`@`10.0.0.%` IDENTIFIED BY PASSWORD '*0123456789ABCDEF';" in out, True)
 check("dump: the image's own accounts (healthcheck, mariadb.sys) stay out",
       ("healthcheck" in out, "mariadb.sys" in out), (False, False))
+check("dump: no SET ROLE (it would take root's privileges away while its account is replaced)",
+      [ln for ln in out.splitlines() if ln.startswith("SET ROLE")], [])
+model = Restore()
+for stmt in ["CREATE OR REPLACE USER `root`@`localhost` IDENTIFIED BY PASSWORD '*R';", "CREATE ROLE imp;",
+             "SET ROLE imp;"]:
+    model.play(stmt)
+try:
+    model.play("CREATE OR REPLACE ROLE 'r' WITH ADMIN imp;")
+    denied = None
+except ValueError as e:
+    denied = str(e)
+check("the model: after SET ROLE the replaced root has no privileges, CREATE ROLE is denied (as MariaDB 12 did in "
+      "the end-to-end test)", (denied or "").startswith("access denied for CREATE ROLE"), True)
 
 # Without roles: the users as before, the restore's own role made and dropped again.
 plain = {"dbs": ["appdb"], "accounts": [a for a in SERVER["accounts"] if a["user"] in ("root", "app")]}
