@@ -151,6 +151,8 @@ jobs:
           - { image: "ubuntu:24.04", kind: deb }
           - { image: "rockylinux/rockylinux:9", kind: rpm }
           - { image: "rockylinux/rockylinux:10", kind: rpm }
+          - { image: "almalinux:9", kind: rpm }
+          - { image: "almalinux:10", kind: rpm }
           - { image: "opensuse/leap:16.0", kind: zypper }
           - { image: "ubuntu:20.04", kind: deb, refused: "cockpit-bridge (>= 264)" }
           - { image: "rockylinux/rockylinux:8", kind: rpm, refused: "python3 >= 3.8" }
@@ -250,19 +252,30 @@ jobs:
             test ! -e /usr/lib/cockpit-image-updates
             echo "refused as it must be: $REFUSED"'
 
-  # An upgrade over a published release, and the removal, on Debian 13 and Fedora 43
-  # (test/package-upgrade.sh). The release is the newest one older than this build by
-  # Semantic Versioning, not a draft or pre-release, with packages (tools/upgrade-base.sh):
-  # a build of a version that is released already upgrades from the release before it. Its
-  # files are checked against its SHA256SUMS and its build provenance first. Without such a
-  # release there is no upgrade to test: the job says so (warning, summary) and checks a fresh
-  # install of this build instead.
+  # An upgrade over a published release, and the removal, on Debian 13, Fedora 43 and the RHEL
+  # rebuilds Rocky Linux and AlmaLinux 9 and 10 (test/package-upgrade.sh). The release is the
+  # newest one older than this build by Semantic Versioning, not a draft or pre-release, with
+  # packages (tools/upgrade-base.sh): a build of a version that is released already upgrades
+  # from the release before it. Its files are checked against its SHA256SUMS and its build
+  # provenance first. Without such a release there is no upgrade to test: the job says so
+  # (warning, summary) and checks a fresh install of this build instead.
   upgrade:
+    name: upgrade (${{ matrix.image }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
       attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:13", kind: deb }
+          - { image: "fedora:43", kind: rpm }
+          - { image: "rockylinux/rockylinux:9", kind: rpm }
+          - { image: "rockylinux/rockylinux:10", kind: rpm }
+          - { image: "almalinux:9", kind: rpm }
+          - { image: "almalinux:10", kind: rpm }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -271,6 +284,7 @@ jobs:
         id: base
         env:
           GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ matrix.image }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
@@ -279,17 +293,17 @@ jobs:
           out=$(sh tools/upgrade-base.sh prev)
           printf '%s\nversion=%s\n' "$out" "$version" >> "$GITHUB_OUTPUT"
           base=$(printf '%s\n' "$out" | sed -n 's/^BASE=//p')
-          echo "Upgrade test: ${base:-no older release with packages, only a fresh install} -> $version (this build)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Upgrade test on $IMAGE: ${base:-no older release with packages, only a fresh install} -> $version (this build)" >> "$GITHUB_STEP_SUMMARY"
           ls -l prev dist
-      - name: Upgrade and remove on Debian 13 and Fedora 43
+      - name: Upgrade and remove on ${{ matrix.image }}
         env:
           BASE: ${{ steps.base.outputs.BASE }}
           VERSION: ${{ steps.base.outputs.version }}
+          IMAGE: ${{ matrix.image }}
+          KIND: ${{ matrix.kind }}
         run: |
-          for kind_image in deb:debian:13 rpm:fedora:43; do
-            docker run --rm -e BASE -e VERSION -v "$PWD/dist:/dist:ro" -v "$PWD/prev:/prev:ro" \
-              -v "$PWD/test/package-upgrade.sh:/package-upgrade.sh:ro" "${kind_image#*:}" sh /package-upgrade.sh "${kind_image%%:*}"
-          done
+          docker run --rm -e BASE -e VERSION -v "$PWD/dist:/dist:ro" -v "$PWD/prev:/prev:ro" \
+            -v "$PWD/test/package-upgrade.sh:/package-upgrade.sh:ro" "$IMAGE" sh /package-upgrade.sh "$KIND"
 
   # The add-on in a real Cockpit with systemd and Docker, on this throw-away runner and never
   # on a server with real containers (test/cockpit-setup.sh, test/cockpit-session.py,
