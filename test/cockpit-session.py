@@ -431,10 +431,13 @@ def main():
         # restarts the running radar timer either, which started the radar at once (OnBootSec=).
         # The radar timer starts runs of its own, too: 5 minutes after the boot (OnBootSec=; this
         # runner booted minutes ago, and once that run began in the very second of the check) and
-        # on its calendar. Wait until neither is due and no run is going, so that a run right
-        # after configure can only come from configure. RandomizedDelaySec=10min holds for the
-        # boot run too: it comes anywhere from 5 to 15 minutes after the boot (its time is in
-        # NextElapseUSecMonotonic, the calendar's in NextElapseUSecRealtime).
+        # on its calendar. RandomizedDelaySec=10min holds for both: the boot run comes anywhere
+        # from 5 to 15 minutes after the boot (its time is in NextElapseUSecMonotonic, the
+        # calendar's in NextElapseUSecRealtime). configure's daemon-reload draws that delay anew,
+        # so a run that has not come yet can land in the past and start at once (up 381 s, with
+        # the boot run still more than two minutes away before configure). Wait until the boot run
+        # is over, the next calendar run is further away than the delay plus two minutes and no
+        # run is going, so that a run right after configure can only come from configure.
         def boot_run_in(up):
             """Seconds until the timer's run after the boot, or None if it has none left."""
             mono = root("systemctl", "show", "-P", "NextElapseUSecMonotonic", "diun-radar.timer", check=False).strip()
@@ -449,10 +452,11 @@ def main():
             nxt = root("systemctl", "show", "-P", "NextElapseUSecRealtime", "diun-radar.timer", check=False)
             due = root("date", "-d", nxt, "+%s", check=False) if nxt and nxt != "n/a" else ""
             idle = root("systemctl", "is-active", "diun-radar.service", check=False) not in ("activating", "active")
-            boot = boot_run_in(up)
-            return idle and up > 5 * 60 + 20 and (not due.isdigit() or int(due) - time.time() > 120) \
-                and (boot is None or boot > 120)
+            return idle and up > 5 * 60 + 20 and boot_run_in(up) is None \
+                and (not due.isdigit() or int(due) - time.time() > 10 * 60 + 120)
+        waited = time.monotonic()
         quiet = poll(page, radar_quiet, 1020)
+        waited = round(time.monotonic() - waited)
         uptime = root("cat", "/proc/uptime").split()[0]
         root("/var/lib/dpkg/info/cockpit-image-update-monitor.postinst", "configure", check=False)
         later = root("systemctl", "is-active", "diun-radar-after-install.timer", check=False)
@@ -462,7 +466,7 @@ def main():
         note("after an install: the radar starts two minutes later by a timer, not at once, its timer runs on",
              quiet and later == "active" and busy not in ("activating", "active") and timer == "active",
              f"after-install timer {later}, radar {busy}, radar timer {timer}; "
-             f"no timer run due or going before ({quiet}), up {uptime} s")
+             f"no timer run due or going before ({quiet}, waited {waited} s), up {uptime} s")
         check_menu(page, "en", "after the radar runs")
         shot(page, "radar")
 
