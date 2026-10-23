@@ -395,8 +395,8 @@ zcat /var/backups/image-updates/dumps/<project>/<file>.sql.gz \
 
 # MariaDB
 zcat /var/backups/image-updates/dumps/<project>/<file>.sql.gz \
-  | docker exec -i <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
-docker exec <db-container> sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "FLUSH PRIVILEGES"'
+  | docker exec -i <db-container> sh -c 'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb -uroot'
+docker exec <db-container> sh -c 'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb -uroot -e "FLUSH PRIVILEGES"'
 # MySQL: the same with mysql and $MYSQL_ROOT_PASSWORD
 ```
 

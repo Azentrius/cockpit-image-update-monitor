@@ -372,6 +372,22 @@ check("compare_grants: a role gone, a default role lost, a role more for root; a
       ["'auditor': missing", "'root'@'localhost': has GRANT `auditor` TO `root`@`localhost` WITH ADMIN OPTION too",
        "'staff'@'%': lacks SET DEFAULT ROLE `editor` FOR `staff`@`%`"])
 
+# ------------------------------------------- the dump before an update ----
+# MY_DUMP with a mariadb-dump that only tells its arguments and MYSQL_PWD.
+REC = os.path.join(TMP, "rec")
+os.mkdir(REC)
+with open(os.path.join(REC, "mariadb-dump"), "w") as f:
+    f.write('#!/bin/sh\nprintf "arg %s\\n" "$@"\nprintf "pwd %s\\n" "$MYSQL_PWD"\n')
+os.chmod(os.path.join(REC, "mariadb-dump"), 0o755)
+for var in ("MARIADB_ROOT_PASSWORD", "MYSQL_ROOT_PASSWORD"):
+    env = {k: v for k, v in os.environ.items() if k not in ("MARIADB_ROOT_PASSWORD", "MYSQL_ROOT_PASSWORD")}
+    p = subprocess.run(["sh", "-c", U.MY_DUMP], capture_output=True, text=True, timeout=60,
+                       env=dict(env, PATH=REC + os.pathsep + env.get("PATH", ""), **{var: "the-root-secret"}))
+    args = [ln for ln in p.stdout.splitlines() if ln.startswith("arg ")]
+    check(f"dump before an update ({var}): the root password in MYSQL_PWD, not on the command line",
+          (p.returncode, any("the-root-secret" in a for a in args), "pwd the-root-secret" in p.stdout.splitlines()),
+          (0, False, True))
+
 import shutil  # noqa: E402
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL CHECKS PASSED" if not fails else f"\n{fails} FAILED")

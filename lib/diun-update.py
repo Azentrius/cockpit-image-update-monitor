@@ -1118,9 +1118,11 @@ def watch_dependents(before):
 
 # ----------------------------------------------------------------- dumps ----
 PG_DUMP = 'exec pg_dumpall -U "${POSTGRES_USER:-postgres}"'
-MY_DUMP = ('P="${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}"; '
+# The root password goes through MYSQL_PWD, as in MY_SH: on the dump's command line it would
+# show in the host's process list.
+MY_DUMP = ('export MYSQL_PWD="${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}"; '
            'if command -v mariadb-dump >/dev/null 2>&1; then D=mariadb-dump; else D=mysqldump; fi; '
-           'exec "$D" --all-databases --single-transaction --routines --events -uroot -p"$P"')
+           'exec "$D" --all-databases --single-transaction --routines --events -uroot')
 DUMP_DONE = {"postgres": b"database cluster dump complete", "mysql": b"-- Dump completed"}
 
 
