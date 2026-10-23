@@ -15,6 +15,14 @@ the history with what is on disk:
   - SIGKILL in the middle of either move: the next call finds the move in the
     history and finishes it;
   - a rename that fails, and its taking back failing too: no data is deleted;
+  - SIGKILL once a move is done and in the history, before and after its
+    emptied place is removed (the move back, a move aside taken back, the
+    new major's move taken back): the next rollback goes on (other stopping
+    points: after a place is removed, after a history line);
+  - the states a rollback of 0.24.1 to 0.25.0 left when it was killed right
+    after it removed an emptied place, and data that is not whole or a
+    history that does not fit, which the rollback must not take for a move
+    back done;
   - the major and its rollback without a break (a volume and a bind mount);
   - states a rollback must not start a database on: the data of a 0.23.0 run
     in its place but not in the history, data that is gone, a new empty
@@ -89,14 +97,17 @@ class Scene:
             else os.path.join(self.dir, "srv", "pg")
         write_tree(self.src, ORIGINAL_MY if engine == "mariadb" else ORIGINAL)
 
-    def run(self, action, op=None, stop_at=None, sig=None, fail=(), probe_fail=False):
-        """The child: (exit code, output, whether it reached stop_at)."""
+    def run(self, action, op=None, stop_at=None, sig=None, fail=(), probe_fail=False, stop_after_drop=None,
+            stop_after_record=None, grants_lost=None):
+        """The child: (exit code, output, whether it reached the point it was to stop at)."""
         cfg = {"action": action, "op": op, "type": self.typ, "src": self.src, "fail": list(fail),
-               "probe_fail": probe_fail, "engine": self.engine}
+               "probe_fail": probe_fail, "engine": self.engine, "grants_lost": grants_lost}
         ready_r, ready_w = os.pipe()
         go_r, go_w = os.pipe()
-        if stop_at:
-            cfg.update(stop_at=stop_at, ready_fd=ready_w, go_fd=go_r)
+        stop = {k: v for k, v in (("stop_at", stop_at), ("stop_after_drop", stop_after_drop),
+                                  ("stop_after_record", stop_after_record)) if v}
+        if stop:
+            cfg.update(stop, ready_fd=ready_w, go_fd=go_r)
         with open(os.path.join(self.dir, "child.json"), "w") as f:
             json.dump(cfg, f)
         p = subprocess.Popen([sys.executable, CHILD, self.dir], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -104,7 +115,7 @@ class Scene:
         os.close(ready_w)
         os.close(go_r)
         reached = None
-        if stop_at:
+        if stop:
             # b"" when the child ended before that rename: no waiting on a signal that never comes.
             reached = os.read(ready_r, 1) == b"r"
             if reached:
@@ -269,6 +280,234 @@ for typ in ("bind", "volume"):
     check(f"major ({typ}), after the failed undo the rollback puts the data together: exit 0",
           (rc, sc.ups(), tree(sc.src), sc.places()), (0, [ORIGINAL], ORIGINAL, {}))
 
+# ------------------------------------------ a kill while a place goes ----
+# The end of a move back: the data whole where it belongs, then the place it
+# came from removed while empty. Since 0.25.1 the history says first that the
+# place is emptied (old_data or new_data null, "emptied": the place), then the
+# place goes, then the history forgets it: a kill between any two of these
+# leaves a state the next rollback goes on from. Up to 0.25.0 the place went
+# first, and a kill right after that left the history naming a place that was
+# gone: every later rollback stopped (exit 2, for the new major's place exit 5).
+TOP_MY, TOP_NEW_MY = 5, 4
+
+
+def remove_place(kept):
+    """What a run of 0.24.1 to 0.25.0 did before it recorded the end of a
+    move: the emptied place removed (a volume with its directory)."""
+    assert not os.listdir(kept["path"]), kept
+    shutil.rmtree(os.path.dirname(kept["path"]) if kept["type"] == "volume" else kept["path"])
+
+
+for typ in ("bind", "volume"):
+    sc = Scene(typ)
+    sc.run("migrate")
+    op = sc.op()
+    old = op["old_data"]
+    rc, out, reached = sc.run("rollback", op=op["id"], stop_after_drop=1, sig=signal.SIGKILL)
+    op = sc.op()
+    check(f"rollback ({typ}), SIGKILL right after the emptied place of the old data is removed: killed there, the "
+          f"old data whole in its place, the place gone, the new major's data whole in its own, no database started",
+          (reached, rc, tree(sc.src), list(sc.places().values()), os.path.exists(old["path"]), len(sc.ups())),
+          (True, -signal.SIGKILL, ORIGINAL, [NEW17], False, 1))
+    rc, out, _ = sc.run("rollback", op=op["id"])
+    op = sc.op()
+    check(f"rollback ({typ}), SIGKILL after the place went, then again: exit 0, the old database started once and on "
+          f"all of its data only, nothing open in the history",
+          (rc, sc.ups()[1:], tree(sc.src), op.get("rolled_back"), op.get("old_data"), op.get("move"), op.get("emptied")),
+          (0, [ORIGINAL], ORIGINAL, True, None, None, None))
+    check(f"rollback ({typ}), SIGKILL after the place went, then again: the new major's data kept whole, nothing else "
+          f"next to the data", (list(sc.places().values()), path_of(op.get("new_data")) in sc.places()), ([NEW17], True))
+
+    sc = Scene(typ)
+    sc.run("migrate")
+    op = sc.op()
+    old = op["old_data"]
+    rc, out, reached = sc.run("rollback", op=op["id"], stop_after_record="emptied", sig=signal.SIGKILL)
+    op = sc.op()
+    check(f"rollback ({typ}), SIGKILL once the history says the move back is done, before the empty place goes: "
+          f"the history names the emptied place and nothing open, the data whole in its place",
+          (reached, rc, path_of(op.get("emptied")), op.get("old_data"), op.get("move"), tree(sc.src),
+           tree(old["path"]) if os.path.isdir(old["path"]) else None),
+          (True, -signal.SIGKILL, old["path"], None, None, ORIGINAL, {}))
+    rc, _, _ = sc.run("rollback", op=op["id"])
+    op = sc.op()
+    check(f"rollback ({typ}), SIGKILL before the empty place went, then again: exit 0, the place removed, the old "
+          f"database once on all of its data, nothing open in the history",
+          (rc, sc.ups()[1:], os.path.exists(old["path"]), list(sc.places().values()), op.get("emptied"), op.get("rolled_back")),
+          (0, [ORIGINAL], False, [NEW17], None, True))
+
+    # The same order where a move is taken back: the major's move aside (a rename fails) and the rollback's
+    # move of the new major's data (a rename fails).
+    sc = Scene(typ)
+    rc, out, reached = sc.run("migrate", fail=[3], stop_after_drop=1, sig=signal.SIGKILL)
+    op = sc.op()
+    check(f"major ({typ}), the third rename fails, all goes back, SIGKILL right after the emptied place is removed: "
+          f"the data whole in its place, nothing next to it, no database started",
+          (reached, rc, tree(sc.src), sc.places(), sc.ups()), (True, -signal.SIGKILL, ORIGINAL, {}, []))
+    rc, _, _ = sc.run("rollback", op=op["id"])
+    op = sc.op()
+    check(f"major ({typ}), the move aside taken back and the place gone at the kill, then the rollback: exit 0, the "
+          f"old database on all of its data, nothing open in the history",
+          (rc, sc.ups(), tree(sc.src), op.get("old_data"), op.get("move"), op.get("emptied")),
+          (0, [ORIGINAL], ORIGINAL, None, None, None))
+
+    sc = Scene(typ)
+    sc.run("migrate")
+    op = sc.op()
+    rc, out, reached = sc.run("rollback", op=op["id"], fail=[2], stop_after_drop=1, sig=signal.SIGKILL)
+    op = sc.op()
+    check(f"rollback ({typ}), a rename of the new major's data fails, it goes back, SIGKILL right after its emptied "
+          f"place is removed: the new major's data whole in the data directory, the old data whole in its place",
+          (reached, rc, tree(sc.src), list(sc.places().values()), len(sc.ups())), (True, -signal.SIGKILL, NEW17, [ORIGINAL], 1))
+    rc, _, _ = sc.run("rollback", op=op["id"])
+    op = sc.op()
+    check(f"rollback ({typ}), the new major's place gone at the kill, then again: exit 0, the old database on all of "
+          f"its data, the new major's data kept whole",
+          (rc, sc.ups()[1:], tree(sc.src), list(sc.places().values()), op.get("rolled_back")), (0, [ORIGINAL], ORIGINAL, [NEW17], True))
+
+# A place recorded as emptied that has data in it again stays with it: nothing is ever deleted.
+sc = Scene()
+sc.run("migrate")
+op = sc.op()
+old = op["old_data"]
+sc.run("rollback", op=op["id"], stop_after_record="emptied", sig=signal.SIGKILL)
+if os.path.isdir(old["path"]):
+    with open(os.path.join(old["path"], "put-there-later"), "w") as f:
+        f.write("keep me")
+rc, _, _ = sc.run("rollback", op=op["id"])
+check("rollback after a kill, the emptied place has a file in it again: the place stays with the file, the rollback "
+      "goes on (exit 0, the old database on all of its data)",
+      (rc, tree(old["path"]) if os.path.isdir(old["path"]) else None, path_of(sc.op().get("emptied")), sc.ups()[1:]),
+      (0, {"put-there-later": "keep me"}, old["path"], [ORIGINAL]))
+
+# The MariaDB data the same way (its version file in the data).
+sc = Scene(engine="mariadb")
+sc.run("migrate")
+op = sc.op()
+rc, _, reached = sc.run("rollback", op=op["id"], stop_after_drop=1, sig=signal.SIGKILL)
+rc, out, _ = sc.run("rollback", op=op["id"])
+check("MariaDB rollback, SIGKILL right after the emptied place of the old data is removed, then again: exit 0, "
+      "MariaDB 11 once on all of its data, the data of 12 kept",
+      (reached, rc, sc.ups()[1:], tree(sc.src), list(sc.places().values())), (True, 0, [ORIGINAL_MY], ORIGINAL_MY, [NEW12]))
+
+# ---------------------------------- what a rollback of 0.24.1 to 0.25.0 left ----
+# Those versions removed an emptied place before they recorded the end of its
+# move. The states a kill right after that left, made the same way here (the
+# child stopped by SIGKILL after the last rename, the empty place removed as
+# they did): the rollback recognises the data as whole in its place and goes
+# on, and only then.
+for typ in ("bind", "volume"):
+    sc = Scene(typ)
+    sc.run("migrate")
+    op = sc.op()
+    old = op["old_data"]
+    _, _, reached = sc.run("rollback", op=op["id"], stop_at=TOP_NEW + TOP, sig=signal.SIGKILL)
+    remove_place(old)
+    op = sc.op()
+    check(f"0.25.0 state ({typ}): the old data back whole, its place removed, the history still naming that place "
+          f"and the move back", (reached, tree(sc.src), (op.get("move") or {}).get("step"), path_of(op.get("old_data")),
+                                os.path.exists(old["path"])), (True, ORIGINAL, "old-back", old["path"], False))
+    rc, out, _ = sc.run("rollback", op=op["id"])
+    op = sc.op()
+    check(f"0.25.0 state ({typ}), the rollback: the old data recognised as back whole (said so), exit 0, the old "
+          f"database once on all of it, the new major's data kept, nothing open in the history",
+          (rc, "already back in its place, whole" in out, sc.ups()[1:], tree(sc.src), list(sc.places().values()),
+           op.get("old_data"), op.get("move"), op.get("rolled_back")),
+          (0, True, [ORIGINAL], ORIGINAL, [NEW17], None, None, True))
+
+    sc = Scene(typ)
+    _, _, reached = sc.run("migrate", fail=[3], stop_at=5, sig=signal.SIGKILL)
+    op = sc.op()
+    old = op["old_data"]
+    remove_place(old)
+    check(f"0.25.0 state ({typ}): the move aside taken back whole, its place removed, the history still naming that "
+          f"place and the move aside", (reached, tree(sc.src), (op.get("move") or {}).get("step"), os.path.exists(old["path"])),
+          (True, ORIGINAL, "aside", False))
+    rc, out, _ = sc.run("rollback", op=op["id"])
+    op = sc.op()
+    check(f"0.25.0 state ({typ}) after a move aside taken back, the rollback: recognised, exit 0, the old database "
+          f"once on all of its data", (rc, "already back in its place, whole" in out, sc.ups(), tree(sc.src), op.get("move")),
+          (0, True, [ORIGINAL], ORIGINAL, None))
+
+    sc = Scene(typ)
+    sc.run("migrate")
+    op = sc.op()
+    _, _, reached = sc.run("rollback", op=op["id"], fail=[2], stop_at=3, sig=signal.SIGKILL)
+    op = sc.op()
+    new = op["new_data"]
+    remove_place(new)
+    check(f"0.25.0 state ({typ}): the rollback's move of the new major's data taken back whole, its place removed, "
+          f"the history still naming it", (reached, tree(sc.src), (op.get("move") or {}).get("step"),
+                                           os.path.exists(new["path"]), list(sc.places().values())),
+          (True, NEW17, "new-aside", False, [ORIGINAL]))
+    rc, out, _ = sc.run("rollback", op=op["id"])
+    op = sc.op()
+    check(f"0.25.0 state ({typ}) after the new major's move taken back, the rollback: exit 0, the old database once "
+          f"on all of its data, the new major's data kept whole",
+          (rc, sc.ups()[1:], tree(sc.src), list(sc.places().values()), op.get("move"), op.get("rolled_back")),
+          (0, [ORIGINAL], ORIGINAL, [NEW17], None, True))
+
+
+def legacy_old_back(typ="bind", engine="postgres"):
+    """The state a kill after the removed place left in 0.24.1 to 0.25.0."""
+    sc = Scene(typ, engine)
+    sc.run("migrate")
+    op = sc.op()
+    last = TOP_NEW_MY + TOP_MY if engine == "mariadb" else TOP_NEW + TOP
+    sc.run("rollback", op=op["id"], stop_at=last, sig=signal.SIGKILL)
+    remove_place(op["old_data"])
+    return sc, sc.op()
+
+
+legacy_ok = legacy_old_back("bind", "mariadb")
+rc, out, _ = legacy_ok[0].run("rollback", op=legacy_ok[1]["id"])
+check("0.25.0 state (MariaDB): recognised by the entries and the version file, exit 0, MariaDB 11 once on all of it",
+      (rc, legacy_ok[0].ups()[1:], tree(legacy_ok[0].src)), (0, [ORIGINAL_MY], ORIGINAL_MY))
+
+# Data that is not whole, or a history that does not say the data was going
+# back, is no move back done: the rollback stops as before (exit 2), nothing
+# moves, no database starts.
+NEGATIVE = []
+sc, op = legacy_old_back()
+shutil.move(os.path.join(sc.src, "base"), os.path.join(sc.dir, "base-elsewhere"))
+NEGATIVE.append(("an entry of the data moved away", sc, op))
+sc, op = legacy_old_back("volume")
+os.remove(os.path.join(sc.src, "postgresql.conf"))
+NEGATIVE.append(("a file of the data deleted (a volume)", sc, op))
+sc, op = legacy_old_back()
+with open(os.path.join(sc.src, "PG_VERSION"), "w") as f:
+    f.write("17\n")
+NEGATIVE.append(("PG_VERSION naming the new major", sc, op))
+sc, op = legacy_old_back()
+with open(os.path.join(sc.src, "postmaster.pid"), "w") as f:
+    f.write("1\n")
+NEGATIVE.append(("an entry more than the major set aside", sc, op))
+sc, op = legacy_old_back()
+with open(os.path.join(sc.dir, "backups", "operations.jsonl"), "a") as f:
+    f.write(json.dumps({"id": op["id"], "data_entries": None}) + "\n")
+NEGATIVE.append(("the entries set aside not in the history", sc, op))
+sc, op = legacy_old_back("bind", "mariadb")
+with open(os.path.join(sc.src, "mysql_upgrade_info"), "w") as f:
+    f.write("10.11.9-MariaDB")
+NEGATIVE.append(("MariaDB: the version file naming another major", sc, op))
+sc = Scene()
+sc.run("migrate")
+op = sc.op()
+shutil.move(op["old_data"]["path"], os.path.join(sc.dir, "kept-elsewhere"))
+NEGATIVE.append(("no move open: the major went through, its kept data moved away by hand", sc, op))
+sc = Scene()
+sc.run("migrate")
+op = sc.op()
+sc.run("rollback", op=op["id"], stop_at=2, sig=signal.SIGKILL)       # in the middle of the new major's move aside
+op = sc.op()
+shutil.move(op["old_data"]["path"], os.path.join(sc.dir, "kept-elsewhere"))
+NEGATIVE.append(("a move of the new major's data open, the old data's place gone", sc, op))
+for label, sc, op in NEGATIVE:
+    before, ups = tree(sc.src), len(sc.ups())
+    rc, out, _ = sc.run("rollback", op=op["id"])
+    check(f"no move back done: {label}: exit 2 (the old data is gone), nothing moved, no database started",
+          (rc, "is gone" in out, tree(sc.src) == before, len(sc.ups()), sc.op().get("rolled_back")), (2, True, True, ups, None))
+
 # ---------------------------------------------- without a break ----
 for typ in ("bind", "volume"):
     sc = Scene(typ)
@@ -312,6 +551,29 @@ for typ in ("volume", "bind"):
     check(f"MariaDB rollback ({typ}): exit 0, MariaDB 11 on all of its data, the data of 12 kept",
           (rc, sc.ups()[-1], tree(sc.src), list(sc.places().values()), op.get("rolled_back")),
           (0, ORIGINAL_MY, ORIGINAL_MY, [NEW12], True))
+# Since 0.25.1 the users and roles with their grants are compared as well:
+# read before the dump, in the trial run and after the restore.
+sc = Scene(engine="mariadb")
+rc, out, _ = sc.run("migrate")
+check("MariaDB major: the grants read on the old server, in the trial run and after the restore",
+      [c[1:] for c in sc.calls() if c[0] == "account_grants"], [["db"], ["db-probe-" + sc.op()["id"][:15]], ["db"]])
+sc = Scene(engine="mariadb")
+rc, out, _ = sc.run("migrate", grants_lost=2)
+check("MariaDB major, a role missing in the trial run: exit 5, said so, nothing changed (no history, the data where "
+      "it was, no database started)", (rc, "privileges differ: 'editor': missing" in out, sc.ops(), tree(sc.src),
+                                       sc.places(), sc.ups()), (5, True, {}, ORIGINAL_MY, {}, []))
+sc = Scene(engine="mariadb")
+rc, out, _ = sc.run("migrate", grants_lost=3)
+op = sc.op()
+reason = op.get("reason") or {}
+check("MariaDB major, a role missing after the restore: exit 4, the run failed with the cause (source grants), the "
+      "old data kept", (rc, op.get("status"), reason.get("source"), "privileges differ: 'editor': missing" in
+                        (reason.get("line") or ""), sc.places().get(path_of(op.get("old_data")))),
+      (4, "failed", "grants", True, ORIGINAL_MY))
+rc, _, _ = sc.run("rollback", op=op["id"])
+check("MariaDB major, a role missing after the restore, then the rollback: exit 0, MariaDB 11 on all of its data",
+      (rc, sc.ups()[-1], tree(sc.src)), (0, ORIGINAL_MY, ORIGINAL_MY))
+
 # A version file that does not name the old major: no MariaDB on that data.
 sc = Scene(engine="mariadb")
 sc.run("migrate")

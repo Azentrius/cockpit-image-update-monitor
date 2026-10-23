@@ -995,7 +995,12 @@ echo "=== 17d. Database major: MariaDB 11 to 12 by dump and restore, rollback, r
 # The same flow as for PostgreSQL: a database with an app that waits for it,
 # test data in two databases with a view, a procedure and users; the major
 # with its trial run, mariadb-upgrade and the login of the app user over TCP;
-# the rollback; the release of the kept data.
+# the rollback; the release of the kept data. Since 0.25.1 also roles: a user
+# with rights only through a role that is its default (staff, editor), a role
+# that has another (editor has viewer), a role nobody has with rights of its
+# own (auditor), a role granted with the admin option (lead), a grant to
+# PUBLIC; after the major and after the rollback every account's grants are
+# the same and the rights work (as staff and lead over TCP).
 my_version() { docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" | sed -n 's/^MARIADB_VERSION=\([0-9]*:\)\{0,1\}\([0-9.]*\).*/\2/p'; }
 V11=$(my_version "$MARIADB_IMAGE")
 V12=$(my_version "$MARIADB12_IMAGE")
@@ -1043,12 +1048,35 @@ my -e "use appdb; create table appdb.notes(id int primary key, t text); insert i
        create view shop.expensive as select name from shop.items where id > 4990;
        create procedure shop.item_count() select count(*) from shop.items;
        create user 'reader'@'%' identified by 'read-only'; grant select on shop.* to 'reader'@'%';"
+my -e "create role viewer; grant select on appdb.notes to viewer;
+       create role editor; grant viewer to editor; grant insert, update on appdb.notes to editor;
+       create role auditor; grant select on shop.* to auditor; revoke auditor from 'root'@'localhost';
+       create user 'staff'@'%' identified by 'staff-only'; grant editor to 'staff'@'%'; set default role editor for 'staff'@'%';
+       create user 'lead'@'%' identified by 'lead-only'; grant viewer to 'lead'@'%' with admin option;
+       grant select on shop.items to PUBLIC;"
+# Every account's grants as the server shows them, read here and not by the helper.
+GRANTS_OF() { for a in "'root'@'localhost'" "'app'@'%'" "'reader'@'%'" "'staff'@'%'" "'lead'@'%'" viewer editor auditor PUBLIC; do
+                  printf '%s: ' "$a"; my -e "show grants for $a" | sort | tr '\n' '|'; echo; done; }
+ROLES_OF() { my -e "select user from mysql.user where is_role = 'Y' order by 1" | tr '\n' ' '; }
+as_user() { docker exec -e MYSQL_PWD="$2" "$MYDB" mariadb --protocol=tcp -h 127.0.0.1 -u"$1" -N -B -e "$3" 2>&1 | tr '\n' ' '; }
+# The rights at work: staff through its default role editor (and viewer in it) reads and updates
+# appdb.notes and reads shop.items through PUBLIC, but not shop.empty_one; lead takes viewer.
+USABLE() { echo "staff: $(as_user staff staff-only "select current_role(); select count(*) from appdb.notes; update appdb.notes set t = t where id = 1; select count(*) from shop.items")"
+           echo "staff on shop.empty_one: $(as_user staff staff-only "select count(*) from shop.empty_one" | cut -c1-10)"
+           echo "lead: $(as_user lead lead-only "set role viewer; select count(*) from appdb.notes")"; }
 MDATA() { my -e "select count(*), md5(group_concat(t order by id)) from appdb.notes;
                  select count(*), md5(group_concat(h order by id)) from shop.items;
                  select count(*) from information_schema.views where table_schema = 'shop';
                  select count(*) from information_schema.routines where routine_schema = 'shop';
                  select count(*) from mysql.global_priv where user = 'reader';" | tr '\n\t' '/ '; }
 MDATA0=$(MDATA)
+GRANTS0=$(GRANTS_OF)
+ROLES0=$(ROLES_OF)
+USABLE0=$(USABLE)
+echo "  | roles: $ROLES0"
+printf '%s\n' "$USABLE0" | sed 's/^/  | /'
+check "MariaDB test data: the roles there, the rights at work (staff through editor and PUBLIC, not on shop.empty_one; lead through viewer)" \
+    'case " $ROLES0" in *" auditor editor viewer "*) true;; *) false;; esac && [ "$(printf "%s\n" "$USABLE0" | sed -n 1p)" = "staff: editor 300 5000 " ] && printf "%s\n" "$USABLE0" | sed -n 2p | grep -q "ERROR" && [ "$(printf "%s\n" "$USABLE0" | sed -n 3p)" = "lead: 300 " ]'
 SUM6=$(sum_of "$D6/docker-compose.yml")
 MYVOL=$(docker volume inspect -f '{{.Mountpoint}}' imgupd-test-major_mdbdata)
 python3 - "$VERSIONS" "$V11" "$V12" <<'PY'
@@ -1083,6 +1111,9 @@ check "MariaDB major: the trial run first, mariadb-upgrade and a restart, the lo
     'grep -q "Trial run: restored into MariaDB 12 and counted – the same." /tmp/e2e-y1.log && grep -q "mariadb-upgrade done; MariaDB restarts" /tmp/e2e-y1.log && grep -q "Login over TCP with the password from the environment: OK." /tmp/e2e-y1.log && [ -z "$(docker ps -aq --filter label=image-updates.probe)" ]'
 check "MariaDB major: the app user and the reader log in over TCP, the app runs again" \
     '[ "$(login app app-only)" = 1 ] && [ "$(login reader read-only)" = 1 ] && [ "$(docker inspect -f "{{.State.Running}}" imgupd-test-mdb-app)" = true ]'
+check "MariaDB major: the roles, every account's grants (default role, admin option, the role nobody has, PUBLIC) and the rights at work as before; the helper compared them in the trial run and after the restore" \
+    '[ "$(ROLES_OF)" = "$ROLES0" ] && [ "$(GRANTS_OF)" = "$GRANTS0" ] && [ "$(USABLE)" = "$USABLE0" ] && grep -q "Users, roles and grants after the restore: the same." /tmp/e2e-y1.log'
+[ "$(GRANTS_OF)" = "$GRANTS0" ] || { echo "  | grants before:"; printf '%s\n' "$GRANTS0" | sed 's/^/  |   /'; echo "  | grants after:"; GRANTS_OF | sed 's/^/  |   /'; }
 check "MariaDB major: the tag line changed, the old data kept in a volume of its own, the history knows the engine" \
     '[ "$(grep -c "image: imgupd-test/mariadb:$V12$" "$D6/docker-compose.yml")" = 1 ] && [ -n "$KEPT11" ] && [ -n "$(ls -A "$(docker volume inspect -f "{{.Mountpoint}}" "$KEPT11")")" ] && grep -q "\"id\": \"$OPY\".*\"engine\": \"mariadb\"" "$OPS"'
 python3 $H rollback "$OPY" > /tmp/e2e-y2.log 2>&1; RC=$?
@@ -1090,6 +1121,8 @@ sed 's/^/  | /' /tmp/e2e-y2.log | tail -n 6
 KEPT12=$(docker volume ls -q --filter name='^imgupd-test-major_mdbdata-mariadb12-')
 check "MariaDB rollback: exit 0, MariaDB 11 with the old data, the file byte-identical, the app user logs in, the app runs" \
     '[ $RC = 0 ] && [ "$(my -e "select version()" | cut -d. -f1)" = 11 ] && [ "$(MDATA)" = "$MDATA0" ] && [ "$(sum_of "$D6/docker-compose.yml")" = "$SUM6" ] && [ "$(login app app-only)" = 1 ] && [ "$(docker inspect -f "{{.State.Running}}" imgupd-test-mdb-app)" = true ]'
+check "MariaDB rollback: the roles, every account's grants and the rights at work as before the major" \
+    '[ "$(ROLES_OF)" = "$ROLES0" ] && [ "$(GRANTS_OF)" = "$GRANTS0" ] && [ "$(USABLE)" = "$USABLE0" ]'
 check "MariaDB rollback: the old data back in its volume, the data of MariaDB 12 kept" \
     '[ -z "$(docker volume ls -q --filter name="^$KEPT11\$")" ] && [ -n "$KEPT12" ] && [ -n "$(ls -A "$MYVOL")" ]'
 python3 $H delete-olddata "$OPY" > /tmp/e2e-y3.log 2>&1; RC=$?

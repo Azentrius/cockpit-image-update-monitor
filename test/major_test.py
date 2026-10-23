@@ -180,6 +180,8 @@ def stand_in(plan_ctx=None, c=None, kind="postgres", lines=("pgcrypto", "plpgsql
         def boom(*a, **k):
             raise lines
         U.pg_lines = boom
+    elif callable(lines):
+        U.pg_lines = lambda name, script, timeout=None: lines(script)
     else:
         U.pg_lines = lambda name, script, timeout=None: list(md5 if script == U.PG_MD5_ROLES else lines)
     U.docker_root = lambda: root
@@ -250,10 +252,24 @@ MY_MOUNT = [{"Type": "volume", "Name": "app_mdb", "Driver": "local", "Source": s
 MY_ENV = ("MARIADB_VERSION=1:11.8.9+maria~ubu2404", "MARIADB_ROOT_PASSWORD=x")
 
 
+def my_lines(role_name="0", grants_error=None):
+    """What the plan of a MariaDB major reads in the container: the accounts
+    with their grants (MY_GRANTS) and whether the restore's own role name is
+    taken (MY_ROLE_NAME); psql is never asked."""
+    def lines(script):
+        if script == getattr(U, "MY_GRANTS", None):
+            if grants_error:
+                raise grants_error
+            return ["'app'@'%'\tGRANT USAGE ON *.* TO `app`@`%`", "'viewer'\tGRANT SELECT ON `appdb`.* TO `viewer`"]
+        if script == getattr(U, "MY_ROLE_NAME", None):
+            return [role_name]
+        raise RuntimeError("no psql for MariaDB")
+    return lines
+
+
 def mariadb(**kw):
     args = dict(plan_ctx=plan_of(target="12.3.3", installed="11.8.9", image="mariadb:11"), kind="mysql",
-                lines=RuntimeError("no psql for MariaDB"),
-                c=container(image="mariadb:11", env=MY_ENV, mounts=MY_MOUNT))
+                lines=my_lines(), c=container(image="mariadb:11", env=MY_ENV, mounts=MY_MOUNT))
     args.update(kw)
     return stand_in(**args)
 
@@ -277,6 +293,16 @@ check("plan refused: MySQL is no MariaDB (only PostgreSQL and MariaDB)",
       ("major-not-supported", "mysql:8.4"))
 check("plan: the fingerprint of a MariaDB major differs from that of the same plan for PostgreSQL",
       m["fingerprint"] != stand_in()["fingerprint"], True)
+# Since 0.25.1 the plan reads the users and roles with their grants, as the
+# dump and the comparisons after the restore will: an error there, or a role
+# with the name the restore gives its own role, refuses the major before it starts.
+check("plan refused (MariaDB): the users, roles and grants cannot be read, the error named",
+      (lambda r: (r["reason"], r["detail"]))(mariadb(lines=my_lines(grants_error=U.subprocess.CalledProcessError(
+          1, ["docker", "exec"], "", "ERROR 1142 (42000): SELECT command denied")))),
+      ("major-unreadable", "ERROR 1142 (42000): SELECT command denied"))
+check("plan refused (MariaDB): a role already has the name the restore uses for its own role",
+      (lambda r: (r["reason"], r["detail"]))(mariadb(lines=my_lines(role_name="1"))),
+      ("major-role-name", "image_updates_import_role"))
 U.make_retag = nope
 U.pg_lines = lambda name, script, timeout=None: (["appdb\tnotes\t300", "appdb\tempty\t0", "shop\titems\t5000",
                                                   "a line without a count"] if script == U.MY_COUNTS else [])
@@ -342,6 +368,44 @@ for label, kw, want in (("the restore fails", {"errors": ['psql:<stdin>:7: ERROR
     check(f"probe: {label}: exit 5, nothing changed, the cause named, the probe removed",
           (err[0], want in err[1], "nothing changed" in err[1], p.calls[-1]),
           (5, True, True, ["docker", "rm", "-f", "-v", "db-probe-20261022-210000"]))
+
+# MariaDB (since 0.25.1): the users and roles with their grants are compared
+# too (account_grants before the dump, in the probe after mariadb-upgrade).
+GRANTS = {"'app'@'%'": ["GRANT USAGE ON *.* TO `app`@`%`"], "'staff'@'%'": ["GRANT `editor` TO `staff`@`%`"],
+          "'editor'": ["GRANT INSERT ON `appdb`.* TO `editor`", "GRANT USAGE ON *.* TO `editor`"]}
+
+
+def probe_my(grants_after):
+    p = Probe()
+    U.run = p.run
+    U.inspect = lambda n: container(image="mariadb:11", env=MY_ENV)
+    U.run_env = lambda cmd, env, timeout=300: p.run(cmd)
+    U.wait_ready = lambda n, engine="postgres": True
+    U.restore_into = lambda n, rel, engine="postgres": []
+    U.after_restore = lambda n, engine: p.calls.append(["after_restore", n])
+    U.table_counts = lambda n, engine="postgres": copy.deepcopy(BEFORE)
+    U.account_grants = lambda n: (p.calls.append(["account_grants", n]), copy.deepcopy(grants_after))[1]
+    plan = {"retag": {"image": "mariadb:12.3.3"}, "major": {"engine": "mariadb", "to_major": 12, "datadir": "/var/lib/mysql"}}
+    op = {"id": "20261022-210000-db", "dumps": ["app/20261022-210000_db.sql.gz"]}
+    try:
+        with redirect_stdout(io.StringIO()) as out:
+            U.probe_restore("db", plan, op, BEFORE, copy.deepcopy(GRANTS))
+        return p, None, out.getvalue()
+    except (U.Abort, TypeError) as e:
+        return p, (getattr(e, "code", None), str(e)), ""
+
+
+p, err, out = probe_my(GRANTS)
+check("probe (MariaDB): the grants read in the probe after mariadb-upgrade, the same: no error",
+      (err, [c for c in p.calls if c[0] in ("after_restore", "account_grants")]),
+      (None, [["after_restore", "db-probe-20261022-210000"], ["account_grants", "db-probe-20261022-210000"]]))
+lost = copy.deepcopy(GRANTS)
+del lost["'editor'"]
+lost["'staff'@'%'"] = []
+p, err, _ = probe_my(lost)
+check("probe (MariaDB): a role and its grant to a user lost: exit 5, nothing changed, the first difference named",
+      (err and err[0], "privileges differ: 'editor': missing" in (err or (0, ""))[1],
+       "nothing changed" in (err or (0, ""))[1]), (5, True, True))
 
 
 # --------------------------------------------------- delete-olddata ----
