@@ -2023,7 +2023,12 @@ MY_SERVER_VERSION = MY_SH + '"$C" -uroot -N -B -e "select version()"'
 # the roles it had and no more. No SET ROLE: it would compute the session's
 # privileges anew from root's account, which the restore has just replaced
 # and not granted anything yet (CREATE ROLE then fails for want of CREATE
-# USER, as the end-to-end test found). PUBLIC is not created (every
+# USER, as the end-to-end test found). The restoring account, root@localhost
+# (the restore logs in as root over the socket), is altered, not replaced:
+# replacing it drops its PROXY grant, and with that the right to grant PROXY
+# (acl_check_proxy_grant_access), so its own GRANT PROXY was refused (found by
+# the end-to-end test too); mariadb-dump never drops the current user either.
+# PUBLIC is not created (every
 # server has it), only its grants come along. Left out: mariadb.sys and
 # healthcheck, which the image sets up itself. An error of any query ends the
 # dump (each answer is read whole before a pipe uses it), and the end marker
@@ -2041,7 +2046,8 @@ echo "-- Users and roles"
 printf '%s\n' "$users" | while IFS= read -r a; do
   [ -n "$a" ] || continue
   s=$("$C" -uroot -N -B -r -e "show create user $a") || exit 1
-  printf '%s;\n' "$s" | sed 's/^CREATE USER /CREATE OR REPLACE USER /'
+  if [ "$a" = "'root'@'localhost'" ]; then c="ALTER USER "; else c="CREATE OR REPLACE USER "; fi
+  printf '%s;\n' "$s" | sed "s/^CREATE USER /$c/"
 done || exit 1
 echo "CREATE ROLE image_updates_import_role;"
 printf '%s\n' "$roles" | while IFS= read -r r; do

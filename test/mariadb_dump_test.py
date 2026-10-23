@@ -10,8 +10,9 @@ The SQL the dump writes is then played on a small model of MariaDB's
 accounts (Restore below): a statement that names a user or role before it
 exists, grants a role the restoring user does not reach with the admin
 option, or needs privileges the session no longer has (SET ROLE computes
-them anew from root's account, which the dump replaces), fails there as it
-does on a server. What the model holds at the end must be what the server had:
+them anew from root's account; GRANT PROXY needs a PROXY grant with the
+grant option of the restoring account, which replacing it drops), fails
+there as it does on a server. What the model holds at the end must be what the server had:
 every user and role, their privileges, the roles granted to users and roles
 (with the admin option), the default roles, roles nobody has, and nothing
 more (the restore's own role is gone again). An error while reading an
@@ -125,7 +126,8 @@ class Restore:
 
     def __init__(self):
         # The new server: root, and PUBLIC, which every server has (it cannot be created).
-        self.acc = {("root", "localhost"): {"role": False, "privs": [], "roles": {}, "default": ""},
+        # Its root holds PROXY with the grant option, as the image sets it up.
+        self.acc = {("root", "localhost"): {"role": False, "privs": [], "roles": {}, "default": "", "proxy": True},
                     ("PUBLIC", ""): {"role": True, "privs": [], "roles": {}, "default": ""}}
         # The session's privileges: root's ALL, as computed at login; SET ROLE computes them anew
         # from root's account as it is then.
@@ -168,6 +170,11 @@ class Restore:
             self.privileged("CREATE USER")
             self.acc[key_of(m.group(1))] = {"role": False, "privs": [], "roles": {}, "default": ""}
             return
+        m = re.match(r"ALTER USER (" + GRANTEE + r") ", s)
+        if m:
+            self.privileged("ALTER USER")
+            self.need(key_of(m.group(1)), "user")      # its grants stay
+            return
         m = re.match(r"CREATE (OR REPLACE )?ROLE (\S+)( WITH ADMIN (\S+))?$", s)
         if m:
             k = (key_of(m.group(2))[0] if m.group(2)[0] in "'`" else m.group(2), "")
@@ -200,7 +207,14 @@ class Restore:
         m = re.match(r"GRANT .+ ON .+ TO " + GRANTEE + r"(?: IDENTIFIED .*?)?(?: WITH GRANT OPTION)?$", s)
         if m:
             self.privileged("GRANT")
-            self.need(key_of(m.group(1)), "grantee")["privs"].append(s)
+            to = self.need(key_of(m.group(1)), "grantee")
+            if s.startswith("GRANT PROXY ON "):
+                # acl_check_proxy_grant_access: a PROXY grant with the grant option of root (localhost or %).
+                if not any(self.acc.get(k, {}).get("proxy") for k in (("root", "localhost"), ("root", "%"))):
+                    raise ValueError("access denied for GRANT PROXY: root holds no PROXY with the grant option")
+                to["proxy"] = to.get("proxy") or s.endswith("WITH GRANT OPTION")
+            if s not in to["privs"]:
+                to["privs"].append(s)
             return
         m = re.match(r"SET DEFAULT ROLE (\S+) FOR (" + GRANTEE + r")$", s)
         if m:
@@ -281,6 +295,19 @@ check("dump: the image's own accounts (healthcheck, mariadb.sys) stay out",
       ("healthcheck" in out, "mariadb.sys" in out), (False, False))
 check("dump: no SET ROLE (it would take root's privileges away while its account is replaced)",
       [ln for ln in out.splitlines() if ln.startswith("SET ROLE")], [])
+check("dump: the restoring account root@localhost altered, not replaced (it keeps the right to grant PROXY); "
+      "root@'%' replaced", ([ln.split(" IDENTIFIED")[0] for ln in out.splitlines() if "USER `root`@" in ln]),
+      ["CREATE OR REPLACE USER `root`@`%`", "ALTER USER `root`@`localhost`"])
+model = Restore()
+try:
+    for stmt in ["CREATE OR REPLACE USER `root`@`localhost` IDENTIFIED BY PASSWORD '*R';",
+                 "GRANT PROXY ON ''@'%' TO 'root'@'localhost' WITH GRANT OPTION;"]:
+        model.play(stmt)
+    denied = None
+except ValueError as e:
+    denied = str(e)
+check("the model: root@localhost replaced, its own GRANT PROXY is denied (as MariaDB 12 did in the end-to-end test)",
+      (denied or "").startswith("access denied for GRANT PROXY"), True)
 model = Restore()
 for stmt in ["CREATE OR REPLACE USER `root`@`localhost` IDENTIFIED BY PASSWORD '*R';", "CREATE ROLE imp;",
              "SET ROLE imp;"]:

@@ -1063,7 +1063,7 @@ as_user() { docker exec -e MYSQL_PWD="$2" "$MYDB" mariadb --protocol=tcp -h 127.
 # The rights at work: staff through its default role editor (and viewer in it) reads and updates
 # appdb.notes and reads shop.items through PUBLIC, but not shop.empty_one; lead takes viewer.
 USABLE() { echo "staff: $(as_user staff staff-only "select current_role(); select count(*) from appdb.notes; update appdb.notes set t = t where id = 1; select count(*) from shop.items")"
-           echo "staff on shop.empty_one: $(as_user staff staff-only "select count(*) from shop.empty_one" | cut -c1-10)"
+           echo "staff on shop.empty_one: $(as_user staff staff-only "select count(*) from shop.empty_one" | grep -o 'ERROR 1142' || echo allowed)"
            echo "lead: $(as_user lead lead-only "set role viewer; select count(*) from appdb.notes")"; }
 MDATA() { my -e "select count(*), md5(group_concat(t order by id)) from appdb.notes;
                  select count(*), md5(group_concat(h order by id)) from shop.items;
@@ -1077,7 +1077,7 @@ USABLE0=$(USABLE)
 echo "  | roles: $ROLES0"
 printf '%s\n' "$USABLE0" | sed 's/^/  | /'
 check "MariaDB test data: the roles there, the rights at work (staff through editor and PUBLIC, not on shop.empty_one; lead through viewer)" \
-    'case " $ROLES0" in *" auditor editor viewer "*) true;; *) false;; esac && [ "$(printf "%s\n" "$USABLE0" | sed -n 1p)" = "staff: editor 300 5000 " ] && printf "%s\n" "$USABLE0" | sed -n 2p | grep -q "ERROR" && [ "$(printf "%s\n" "$USABLE0" | sed -n 3p)" = "lead: 300 " ]'
+    'case " $ROLES0" in *" auditor editor viewer "*) true;; *) false;; esac && [ "$(printf "%s\n" "$USABLE0" | sed -n 1p)" = "staff: editor 300 5000 " ] && [ "$(printf "%s\n" "$USABLE0" | sed -n 2p)" = "staff on shop.empty_one: ERROR 1142" ] && [ "$(printf "%s\n" "$USABLE0" | sed -n 3p)" = "lead: 300 " ]'
 SUM6=$(sum_of "$D6/docker-compose.yml")
 MYVOL=$(docker volume inspect -f '{{.Mountpoint}}' imgupd-test-major_mdbdata)
 python3 - "$VERSIONS" "$V11" "$V12" <<'PY'

@@ -499,7 +499,9 @@ because the dump brings the old users with it.
   dumps the users' databases (`--databases`, all but `mysql`, `information_schema`,
   `performance_schema`, `sys`; `--single-transaction --routines --events --triggers`) and after
   them the accounts as statements (`MY_MAJOR_DUMP`), since 0.25.1 in an order the new server takes:
-  every user (`CREATE OR REPLACE USER`, from `SHOW CREATE USER`); `CREATE ROLE
+  every user (`CREATE OR REPLACE USER`, from `SHOW CREATE USER`; the restoring account
+  `root`@`localhost` with `ALTER USER`: replacing it would drop its `PROXY` grant and with it the
+  right to grant `PROXY`, so its own `GRANT PROXY` was refused, as the end-to-end test found); `CREATE ROLE
   image_updates_import_role` (which grants it to the restoring user); every role (`CREATE OR REPLACE ROLE … WITH ADMIN
   image_updates_import_role`, also a role nobody has; not `PUBLIC`, which every server has); the
   grants of every user, role and of `PUBLIC` (`SHOW GRANTS` without its `SET DEFAULT ROLE` lines:

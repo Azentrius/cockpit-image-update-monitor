@@ -31,8 +31,9 @@ is gone”, while the data is back) goes through now.
   the grant and admin options), the default roles and the grants of `PUBLIC`, in an order the new
   server takes. The roles are created with a role of the restore's own as their admin
   (`image_updates_import_role`, dropped at the end), as `mariadb-dump --system=users` does, so root
-  ends up with the roles it had and no more. A failed restore names its `ERROR` line, not the
-  dashes the client frames the statement with. Every query's answer is read whole before a pipe uses
+  ends up with the roles it had and no more. The restoring account, `root`@`localhost`, is altered
+  (`ALTER USER`), not replaced, so it keeps the right to grant `PROXY` while the restore runs. A
+  failed restore names its `ERROR` line, not the dashes the client frames the statement with. Every query's answer is read whole before a pipe uses
   it, so an error ends the dump. Names reach the server only as literals of `QUOTE()`.
 - **Grants compared.** Besides the rows, a MariaDB major now compares every user and role with its
   grants (`SHOW GRANTS`): read before the dump, in the trial run after `mariadb-upgrade` and after
@@ -50,8 +51,8 @@ is gone”, while the data is back) goes through now.
   with sh against a stand-in for the client, and the SQL played on a model of MariaDB's accounts
   that refuses a statement naming a user or role before it exists, granting a role the restoring
   user does not reach with the admin option, or needing privileges the session lost (`SET ROLE`
-  computes them anew from root's account, which the dump replaces; the end-to-end test found that
-  on MariaDB 12): a user with rights only through a role and that role as default, a role that has
+  computes them anew from root's account; `GRANT PROXY` needs a `PROXY` grant of the restoring
+  account, which replacing it drops; the end-to-end test found both on MariaDB 12): a user with rights only through a role and that role as default, a role that has
   another, a role nobody has, direct rights, the admin option, a name with a quote, `PUBLIC`; an
   error reading any list, a user or its grants ends the dump. `test/major_test.py`: the new plan
   refusals, the grants in the trial run, the `ERROR` line of a failed MariaDB restore.
