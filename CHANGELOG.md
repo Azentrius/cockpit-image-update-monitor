@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.26.0 – 2026-10-25
+
+The dump before an update keeps the database password out of the process list, and the menu entry
+joins the other Azentrius add-ons at the end of System, with the README in Cockpit's Help menu.
+
+**Upgrading:** nothing to do. The menu entry moves from its place among Cockpit's own pages to the
+end of System, after Services. To put it elsewhere, set another `order` in a manifest override,
+`/etc/cockpit/image-updates.override.json` (or `~/.config/cockpit/` for one user).
+
+- **Database password off the command line.** Before an update of a MariaDB or MySQL container, the
+  dump ran `mariadb-dump` or `mysqldump` with `-p` and the root password inside the container, so
+  the host's process list showed the password for as long as the dump ran. The dump now gets it
+  through `MYSQL_PWD`, as the database majors already did. The README's commands for restoring a
+  MariaDB dump by hand pass it the same way.
+- **Menu.** All Azentrius add-ons now stand together at the end of System (Image Update Monitor at
+  `order` 104, before 35). Cockpit's menu search finds all of them by "azentrius", and Cockpit's
+  Help menu links this README (`docs` in the manifest). The labels are the product name and are not
+  translated.
+- **README.** The security model says that dismissing an update is the one change the page writes
+  itself: as root through Cockpit's file API into `/var/lib/diun`, which the Diun container can
+  write too, and that nothing on the host runs from that folder. It also says which tests run on
+  Python 3.8, on which systems skopeo is installed the page's way, and what `make install` leaves
+  out compared with the package.
+- **Tests.** `test/mariadb_dump_test.py` checks that the password reaches the dump only through
+  `MYSQL_PWD`; `test/status_test.py` checks the menu order, the keyword and the Help link. CI installs
+  and upgrades the packages on Rocky Linux and AlmaLinux 9 and 10 as well, and fetches only the
+  browser for the browser tests, with a time limit and a second try.
+
 ## 0.25.1 – 2026-10-23
 
 A rollback of a database major that was killed right after it removed an emptied place can be
