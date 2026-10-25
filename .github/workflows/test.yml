@@ -410,13 +410,11 @@ jobs:
   # Docker keeps the image store of the runner's Docker 28 (overlay2): a new install of Docker 29
   # takes the containerd image store, whose image IDs are the index digests, and the tests
   # compare image IDs across pushes to and pulls from their local registry; that store is a step
-  # of its own. A pilot: no required check, and its failure does not fail the workflow, which the
-  # release waits for.
+  # of its own. A pilot, not yet a required check; the release waits for it like for every job.
   e2e-el:
     name: e2e (${{ matrix.os }}, docker-ce, SELinux enforcing)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    continue-on-error: true
     permissions:
       contents: read
       attestations: read
