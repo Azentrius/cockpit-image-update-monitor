@@ -6,7 +6,8 @@
 # "imgupd-test-reg". No other container, compose file, volume or dump is
 # touched; everything created here is removed on exit, also after a failure or
 # an interrupt. Run it on a throw-away host or VM, never next to production
-# containers: the CI workflow runs it on a fresh GitHub runner.
+# containers: the CI workflow runs it on a fresh GitHub runner, and with the
+# package installed in Rocky Linux VMs with SELinux enforcing (job e2e-el).
 #
 # Needs: root, the helpers installed in /usr/lib/cockpit-image-updates, docker
 # compose, and two DIFFERENT builds of the same postgres major:
@@ -118,6 +119,22 @@ wait_for() {
     done
 }
 registry_up() { python3 -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=2)' "http://127.0.0.1:$REG_PORT/v2/"; }
+# Where the package is installed, its radar unit runs after every update and
+# rollback and writes versions.json anew from what runs at that moment: a record
+# the test wrote is gone after such a run, and one written during a run is
+# overwritten. So the test waits for a run to end before it writes a record, and
+# writes it again before every plan that reads it. A oneshot that runs is
+# "activating", which `systemctl is-active` does not count as active. Without
+# the unit (the job e2e runs the helpers of the checkout) nothing waits.
+radar_idle() {
+    for _ in $(seq 300); do
+        case $(systemctl is-active diun-radar.service 2>/dev/null) in
+            active|activating|deactivating|reloading) sleep 1 ;;
+            *) return 0 ;;
+        esac
+    done
+    echo "WARNING: the radar still runs after five minutes"
+}
 
 # The Postgres test data as one text: rows, view, function, index, sequence,
 # role and grant. A restore is good only if it gives exactly this again.
@@ -172,7 +189,7 @@ half_dump() { zcat "$1" | head -c "$(( $(zcat "$1" | wc -c) / 2 ))" | gzip > "$2
 # imgupd-test-db (after any radar run started by an update has finished).
 offer() {
     local v
-    for _ in $(seq 120); do systemctl is-active --quiet diun-radar.service || break; sleep 1; done
+    radar_idle
     v=$(jget "$(python3 "$H" plan imgupd-test-db)" 'd["installed_version"]')
     python3 - "$VERSIONS" "$v" "$1" <<'PY'
 import json, os, sys, tempfile
@@ -242,6 +259,9 @@ cleanup() {
            "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}" "${BK_DIR:?}/compose/${P6:?}"
     rmdir "$BK_DIR/compose" 2>/dev/null
     rm -f "${LOGS:?}"/[0-9]*-imgupd-test-*.log
+    # A radar run started by the last rollback writes the test's images into
+    # versions.json when it ends: wait for it, then take them out.
+    radar_idle
     if [ -f "$VERSIONS" ]; then
         python3 - "$VERSIONS" <<'PY'
 import json, os, sys, tempfile
@@ -856,7 +876,11 @@ q shop "create extension pgcrypto; create table items(id serial primary key, nam
 DATA() { echo "$(q appdb "select count(*), md5(string_agg(t, ',' order by id)) from notes")/$(q shop "select count(*), md5(string_agg(h, ',' order by id)) from items")/$(q appdb "select count(*) from pg_roles where rolname = 'reader'")"; }
 DATA0=$(DATA)
 SUMM=$(sum_of "$D4/docker-compose.yml")
-python3 - "$VERSIONS" "$(pg_version "$OLD")" "$V17" <<'PY'
+# The radar's offer of PostgreSQL 17 for the running 16, written again before
+# every plan of a major (see radar_idle).
+offer_major() {
+    radar_idle
+    python3 - "$VERSIONS" "$(pg_version "$OLD")" "$V17" <<'PY'
 import json, os, sys, tempfile
 p, version, target = sys.argv[1:4]
 try:
@@ -874,6 +898,8 @@ with os.fdopen(fd, "w") as f:
 os.chmod(tmp, 0o644)
 os.replace(tmp, p)
 PY
+}
+offer_major
 # A role with an MD5 password would not get in after the major (the new image
 # allows scram-sha-256 over the network only): the plan refuses until it is set again.
 q appdb "set password_encryption = 'md5'; create role legacy login password 'old-only'" > /dev/null
@@ -952,6 +978,7 @@ TOP0=$(top "$VOLDIR")
 running() { docker inspect -f '{{.State.Running}}' "$1"; }
 
 echo "=== 17b. Database major stopped by SIGTERM while it moves the data aside, then the rollback ==="
+offer_major
 DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
 pause_run /tmp/e2e-m7.log 1 TERM dbmajor "$MDB" "$V17" --expect "$(jget "$DRY" 'd["major"]["fingerprint"]')"; RC=$?
 sed 's/^/  | /' /tmp/e2e-m7.log | tail -n 6
@@ -968,6 +995,7 @@ check "SIGTERM, then the rollback: exit 0, PostgreSQL 16 on all of its data, no 
     '[ $RC = 0 ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 16 ] && [ "$(DATA)" = "$DATA0" ] && [ "$(top "$VOLDIR")" = "$TOP0" ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_pgdata-pg16-")" ] && [ "$(running imgupd-test-major-app)" = true ]'
 
 echo "=== 17c. Database major killed (SIGKILL) while it moves the data aside: the rollback finds the move ==="
+offer_major
 DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
 pause_run /tmp/e2e-m9.log 2 KILL dbmajor "$MDB" "$V17" --expect "$(jget "$DRY" 'd["major"]["fingerprint"]')"; RC=$?
 OP9=$(last_major)
@@ -979,6 +1007,7 @@ python3 $H rollback "$OP9" > /tmp/e2e-m10.log 2>&1; RC=$?
 sed 's/^/  | /' /tmp/e2e-m10.log | tail -n 4
 check "SIGKILL, then the rollback: it finishes the move back, exit 0, PostgreSQL 16 on all of its data, no kept volume left" \
     '[ $RC = 0 ] && [ "$(q appdb "show server_version_num" | cut -c1-2)" = 16 ] && [ "$(DATA)" = "$DATA0" ] && [ "$(top "$VOLDIR")" = "$TOP0" ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_pgdata-pg16-")" ] && [ "$(running imgupd-test-major-app)" = true ]'
+offer_major
 DRY=$(python3 $H dbmajor "$MDB" "$V17" --dry-run)
 python3 $H dbmajor "$MDB" "$V17" --expect "$(jget "$DRY" 'd["major"]["fingerprint"]')" > /tmp/e2e-m4.log 2>&1; RC=$?
 OPM2=$(jget "$(result_of /tmp/e2e-m4.log)" 'd["op"]')
@@ -1082,6 +1111,7 @@ check "MariaDB test data: the roles there, the rights at work (staff through edi
     'case " $ROLES0" in *" auditor editor viewer "*) true;; *) false;; esac && [ "$(printf "%s\n" "$USABLE0" | sed -n 1p)" = "staff: editor 300 5000 " ] && [ "$(printf "%s\n" "$USABLE0" | sed -n 2p)" = "staff on shop.empty_one: ERROR 1142" ] && [ "$(printf "%s\n" "$USABLE0" | sed -n 3p)" = "lead: 300 " ]'
 SUM6=$(sum_of "$D6/docker-compose.yml")
 MYVOL=$(docker volume inspect -f '{{.Mountpoint}}' imgupd-test-major_mdbdata)
+radar_idle
 python3 - "$VERSIONS" "$V11" "$V12" <<'PY'
 import json, os, sys, tempfile
 p, version, target = sys.argv[1:4]
@@ -1168,7 +1198,7 @@ docker tag "$NEW" "$BASE_REF"
 docker push -q "$BASE_REF" > /dev/null
 docker tag "$OLD" "$BASE_REF"
 # The radar names the base (it cannot read the Dockerfile under /root itself).
-for _ in $(seq 120); do systemctl is-active --quiet diun-radar.service || break; sleep 1; done
+radar_idle
 python3 - "$VERSIONS" "$REG/imgupd-test/postgres" "$(pg_version "$OLD")" "$(pg_version "$NEW")" <<'PY'
 import json, os, sys, tempfile
 p, base, version, now = sys.argv[1:5]
