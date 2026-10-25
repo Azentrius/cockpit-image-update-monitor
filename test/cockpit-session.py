@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """The add-on in a real Cockpit session, on a throw-away machine with systemd and
-Docker (CI, test workflow, job cockpit; never on a server with real
-containers). Playwright drives Chromium through Cockpit's own login and shell:
+Docker (CI, test workflow: job cockpit on the Ubuntu runner, job e2e-el in Rocky
+Linux VMs; never on a server with real containers). Playwright drives Chromium
+through Cockpit's own login and shell:
 
   0. Cockpit before the add-on is installed: the errors the browser shows
      for Cockpit itself (on Ubuntu e.g. its */po.js), as the baseline;
   1. the release before this build installed (when there is one), the page
      opened as an administrator: its version;
-  2. this build installed over it with apt, the page reloaded in the same
-     session, then a new login: the new version and its texts (i18n.js);
+  2. this build installed over it with apt or dnf, the page reloaded in the
+     same session, then a new login: the new version and its texts (i18n.js);
   3. the page loaded hidden after the login ("preload"), only its status icon
      in the menu set, nothing else started; then found in Cockpit's menu and
      loaded; at the end, no JavaScript error and no failed request of the
@@ -27,9 +28,11 @@ containers). Playwright drives Chromium through Cockpit's own login and shell:
   6. a user without administrative access (German browser): the status icon
      in German before the page is opened, then the hint, no actions.
 
-Environment: ADMIN_USER, ADMIN_PW (sudo group), PLAIN_USER, PLAIN_PW, NEW_DEB
-(this build), NEW_VERSION, OLD_DEB and OLD_VERSION (empty without an older
-release), APP, OLD_ID, NEW_ID (test/cockpit-setup.sh). Writes screenshots,
+Environment: ADMIN_USER, ADMIN_PW (sudo or wheel group), PLAIN_USER, PLAIN_PW, NEW_PKG
+(this build's .deb or .rpm: apt or dnf installs it), NEW_VERSION, OLD_PKG and
+OLD_VERSION (empty without an older release), APP, OLD_ID, NEW_ID
+(test/cockpit-setup.sh); PLAYWRIGHT_WS, if set, the Playwright server whose
+browser to use (in a VM the browser stays on the CI runner). Writes screenshots,
 report.json and report.md to the folder given; exit 1 if a step failed.
 """
 import json
@@ -48,6 +51,9 @@ FRAME = 'iframe[name$="/image-updates"]'
 APP = E["APP"]
 NEED_ADMIN = {"Checking requirements needs administrative access in Cockpit.": "en",
               "Zum Prüfen der Voraussetzungen wird administrativer Zugriff in Cockpit benötigt.": "de"}
+# The package manager, told by this build's package: dnf for the .rpm (the RHEL rebuilds), apt for the .deb.
+RPM = E["NEW_PKG"].endswith(".rpm")
+PM = "dnf" if RPM else "apt"
 os.makedirs(OUT, exist_ok=True)
 
 report = {"environment": {}, "steps": [], "errors": [], "addon_files": []}
@@ -75,6 +81,32 @@ def root(*cmd, check=True):
     return p.stdout.strip()
 
 
+def pkg_install(path):
+    root("dnf" if RPM else "apt-get", "install", "-y", "-q", path)
+
+
+def pkg_version(name):
+    if RPM:
+        return root("rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", name)
+    return root("dpkg-query", "-W", "-f", "${Version}", name)
+
+
+def pkg_paths(path):
+    """The paths in a package file."""
+    if RPM:
+        return root("rpm", "-qlp", path).splitlines()
+    return [line.split()[-1] for line in root("dpkg-deb", "-c", path).splitlines()]
+
+
+def configure():
+    """What the package runs after every install and upgrade (packaging/scripts/configure),
+    once more: its postinst on Debian, its %post scriptlet with rpm."""
+    if RPM:
+        root("sh", "-c", "rpm -q --qf '%{POSTIN}' cockpit-image-update-monitor | sh -s 2", check=False)
+    else:
+        root("/var/lib/dpkg/info/cockpit-image-update-monitor.postinst", "configure", check=False)
+
+
 def shot(page, name):
     global shots
     shots += 1
@@ -99,11 +131,10 @@ BASELINE = set()
 STALE = []           # errors of the reload after the upgrade that are Cockpit's old list of files
 
 
-def new_files(old_deb):
+def new_files(old_pkg):
     """The page's files this build brings that the release before did not have."""
     page_dir = "/usr/share/cockpit/image-updates/"
-    before = {line.split()[-1].split(page_dir, 1)[1] for line in root("dpkg-deb", "-c", old_deb).splitlines()
-              if page_dir in line}
+    before = {p.split(page_dir, 1)[1] for p in pkg_paths(old_pkg) if page_dir in p}
     return set(os.listdir(page_dir)) - before
 
 
@@ -303,8 +334,10 @@ def image_of(name):
 def environment(browser):
     env = report["environment"]
     env["system"] = root("sh", "-c", ". /etc/os-release && echo \"$PRETTY_NAME\"") + ", kernel " + root("uname", "-r")
-    env["cockpit"] = root("dpkg-query", "-W", "-f", "${Version}", "cockpit-ws")
-    env["cockpit-bridge"] = root("dpkg-query", "-W", "-f", "${Version}", "cockpit-bridge")
+    if RPM:
+        env["SELinux"] = root("getenforce")
+    env["cockpit"] = pkg_version("cockpit-ws")
+    env["cockpit-bridge"] = pkg_version("cockpit-bridge")
     env["systemd"] = root("systemctl", "--version").splitlines()[0]
     env["docker"] = root("docker", "version", "--format", "{{.Server.Version}}")
     env["compose"] = root("docker", "compose", "version", "--short")
@@ -315,9 +348,11 @@ def environment(browser):
 
 
 def main():
-    old, new = E.get("OLD_DEB", ""), E["NEW_DEB"]
+    old, new = E.get("OLD_PKG", ""), E["NEW_PKG"]
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        # In a VM the browser runs on the CI runner (python -m playwright run-server), the test here.
+        ws = E.get("PLAYWRIGHT_WS")
+        browser = p.chromium.connect(ws) if ws else p.chromium.launch()
         environment(browser)
 
         # 0. Cockpit on its own: the baseline of errors that are not the add-on's.
@@ -335,17 +370,17 @@ def main():
         # 1. + 2. The release before, then this build over it: reload, new login.
         if old:
             PHASE["now"] = "release before"
-            root("apt-get", "install", "-y", "-q", old)
+            pkg_install(old)
             ctx, page = login(browser, E["ADMIN_USER"], E["ADMIN_PW"])
             note("administrator: administrative access", admin_access(page, E["ADMIN_PW"]))
             frame, label = open_page(page)
             note("release before: the page in the menu and loaded", version_of(frame) == E["OLD_VERSION"],
                  f"menu '{label}', version {version_of(frame)}")
             shot(page, "release-before")
-            root("apt-get", "install", "-y", "-q", new)
-            note("this build installed over it (apt)",
-                 root("dpkg-query", "-W", "-f", "${Version}", "cockpit-image-update-monitor").startswith(E["NEW_VERSION"]),
-                 root("dpkg-query", "-W", "-f", "${Version}", "cockpit-image-update-monitor"))
+            pkg_install(new)
+            note(f"this build installed over it ({PM})",
+                 pkg_version("cockpit-image-update-monitor").startswith(E["NEW_VERSION"]),
+                 pkg_version("cockpit-image-update-monitor"))
             # Cockpit's bridge keeps the list of the package's files it read first in this session;
             # files new in this build answer 404 until it reads the packages again. The shell asks
             # for that when it starts, while it loads the page: the page may miss them, asks the
@@ -366,8 +401,8 @@ def main():
             PHASE["now"] = "this build"
         else:
             PHASE["now"] = "this build"
-            root("apt-get", "install", "-y", "-q", new)
-            note("no older release to upgrade from: this build installed fresh (apt)", True)
+            pkg_install(new)
+            note(f"no older release to upgrade from: this build installed fresh ({PM})", True)
 
         ctx, page = login(browser, E["ADMIN_USER"], E["ADMIN_PW"])
         note("new login: administrative access", admin_access(page, E["ADMIN_PW"]))
@@ -458,7 +493,7 @@ def main():
         quiet = poll(page, radar_quiet, 1020)
         waited = round(time.monotonic() - waited)
         uptime = root("cat", "/proc/uptime").split()[0]
-        root("/var/lib/dpkg/info/cockpit-image-update-monitor.postinst", "configure", check=False)
+        configure()
         later = root("systemctl", "is-active", "diun-radar-after-install.timer", check=False)
         busy = root("systemctl", "is-active", "diun-radar.service", check=False)
         timer = root("systemctl", "is-active", "diun-radar.timer", check=False)

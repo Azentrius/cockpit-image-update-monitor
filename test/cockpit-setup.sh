@@ -1,8 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# Prepares a throw-away machine for test/cockpit-session.py (CI, test workflow, job cockpit;
-# never a server with real containers):
-#   - two Cockpit users with the passwords given: ADMIN_USER in the sudo group, PLAIN_USER not,
+# Prepares a throw-away machine for test/cockpit-session.py (CI, test workflow: job cockpit on
+# the Ubuntu runner, job e2e-el in Rocky Linux VMs; never a server with real containers):
+#   - two Cockpit users with the passwords given: ADMIN_USER in the administrators' group (sudo,
+#     on the RHEL rebuilds wheel), PLAIN_USER not,
 #   - no skopeo (the page installs it) and no XDG_CONFIG_HOME for everyone (see below),
 #   - a local registry (127.0.0.1:5000) and the compose project "imgupd-ui": its container runs
 #     busybox 1.36.1 under the tag localhost:5000/imgupd-ui/app:1, while that tag points to
@@ -25,12 +26,18 @@ if grep -q '^XDG_CONFIG_HOME=' /etc/environment 2> /dev/null; then
     echo "removing XDG_CONFIG_HOME from /etc/environment" >&2
     sed -i '/^XDG_CONFIG_HOME=/d' /etc/environment
 fi
-# The runner image brings skopeo; the page is to install it itself.
+# The runner image brings skopeo, and the job e2e-el installs it for the end-to-end test before
+# this; the page is to install it itself.
 if dpkg -s skopeo > /dev/null 2>&1; then
     echo "removing the runner's skopeo" >&2
     DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq skopeo > /dev/null
+elif command -v dnf > /dev/null 2>&1 && rpm -q --quiet skopeo; then
+    echo "removing skopeo" >&2
+    dnf remove -y -q skopeo > /dev/null
 fi
-useradd -m -s /bin/bash -G sudo "$ADMIN_USER"
+admin=sudo
+getent group sudo > /dev/null || admin=wheel
+useradd -m -s /bin/bash -G "$admin" "$ADMIN_USER"
 useradd -m -s /bin/bash "$PLAIN_USER"
 printf '%s:%s\n%s:%s\n' "$ADMIN_USER" "$ADMIN_PW" "$PLAIN_USER" "$PLAIN_PW" | chpasswd
 

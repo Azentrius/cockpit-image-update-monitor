@@ -348,8 +348,8 @@ jobs:
           sh tools/upgrade-base.sh prev >> "$GITHUB_ENV"
           {
             echo "NEW_VERSION=$(sh tools/check-version.sh)"
-            echo "NEW_DEB=$(ls "$PWD"/dist/*.deb)"
-            echo "OLD_DEB=$(ls "$PWD"/prev/*.deb 2> /dev/null || true)"
+            echo "NEW_PKG=$(ls "$PWD"/dist/*.deb)"
+            echo "OLD_PKG=$(ls "$PWD"/prev/*.deb 2> /dev/null || true)"
           } >> "$GITHUB_ENV"
       - name: Playwright (pinned in test/requirements.txt)
         run: pip install -q -r test/requirements.txt
