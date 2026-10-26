@@ -434,6 +434,18 @@ check("plan: only the services of the same compose files", (p["updatable"], p["s
 p = plan("forgejo-runner-emu")
 check("plan: the other file, its own service", (p["updatable"], p["services"], p["containers"]),
       (True, ["runner-emu"], ["forgejo-runner-emu"]))
+# The RHEL rebuilds have no /var/backups: before the first update neither the
+# backup folder nor its parent exists (Rocky Linux 9, 2026-10-26: every plan
+# stopped with FileNotFoundError). The free space is the nearest folder's, and
+# the plan makes nothing.
+base = U.BASE
+U.BASE = os.path.join(TMP, "no-var", "backups", "image-updates")
+p = plan("forgejo-runner")
+check("plan: no backup folder and no parent of it yet: updatable, free space known, nothing made",
+      (p["updatable"], isinstance(p["free_bytes"], int) and p["free_bytes"] > 0,
+       os.path.exists(os.path.join(TMP, "no-var"))),
+      (True, True, False))
+U.BASE = base
 D.undefined = {"runner-2"}
 p = plan("forgejo-runner")
 check("plan: a service the compose files no longer define", (p["updatable"], p["reason"], p["missing"]),
