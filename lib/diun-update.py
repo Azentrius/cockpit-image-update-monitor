@@ -280,6 +280,17 @@ def ensure_base():
         os.chmod(d, 0o700)
 
 
+def free_space(path):
+    """Free bytes where path is, or will be once ensure_base makes it: on the
+    nearest folder of it that exists. Debian has /var/backups, the RHEL
+    rebuilds do not, so there neither BASE nor its parent exists before the
+    first update."""
+    path = os.path.abspath(path)
+    while not os.path.isdir(path):
+        path = os.path.dirname(path)
+    return shutil.disk_usage(path).free
+
+
 def systemctl(*args, timeout=60):
     return subprocess.run(["systemctl", *args], capture_output=True, text=True, timeout=timeout)
 
@@ -629,7 +640,7 @@ def make_plan(name, build=False):
     if CI_RUNNER_RE.search(norm_ref(split_ref(ref)[0]).lower()):
         plan["ci_jobs"] = running_ci_jobs()
 
-    plan["free_bytes"] = shutil.disk_usage(BASE if os.path.isdir(BASE) else os.path.dirname(BASE)).free
+    plan["free_bytes"] = free_space(BASE)
     plan["updatable"] = True
     return plan, ctx
 
