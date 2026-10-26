@@ -49,8 +49,12 @@ It works in its own compose projects `imgupd-test`, `imgupd-test-my`, `imgupd-te
 local registry on port 5000, `E2E_REGISTRY_PORT`), `imgupd-test-major` and `imgupd-test-mdb` (the
 database majors) and `imgupd-test-build` (the rebuild), touches nothing else and cleans up on exit; a
 run that passed fails if anything of it is left behind. `E2E_MYSQL=0` skips the MariaDB and MySQL
-parts. CI runs it on a GitHub runner on every push and before every release. A new flow in the
-helpers gets a section there.
+parts. CI runs it on a GitHub runner on every push and before every release, and on every push with
+the `.rpm` installed in Rocky Linux 9 and 10 VMs with SELinux enforcing (job `e2e-el`,
+`tools/vm.sh`; a pilot, not yet a required check). Where the package is installed, the radar runs
+after every update and rollback and writes `versions.json` anew: the test waits for it before it
+writes a radar record of its own, and writes the record again before every plan that reads it. A
+new flow in the helpers gets a section there.
 
 ## The page in a real Cockpit
 
@@ -59,8 +63,10 @@ Cockpit's login with Playwright (`test/cockpit-setup.sh`, `test/cockpit-session.
 from the release before, the menu, errors in the browser, with and without administrative access,
 the radar set up from the page and an update with its rollback. It creates users and containers and
 installs packages, so it runs only there, never on a machine you use. Its summary lists the versions
-and every step; the artifact `cockpit-session` has screenshots. A change to what the page does in
-Cockpit gets a step there.
+and every step; the artifact `cockpit-session` has screenshots. The job `e2e-el` runs the same
+session in its Rocky Linux VMs after the end-to-end test: with `dnf`, the distribution's Cockpit on
+port 9090 and the browser on the runner (`PLAYWRIGHT_WS`); its artifacts are `e2e-rocky-9` and
+`e2e-rocky-10`. A change to what the page does in Cockpit gets a step there.
 
 ## How the add-on is built
 

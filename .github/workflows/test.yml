@@ -348,8 +348,8 @@ jobs:
           sh tools/upgrade-base.sh prev >> "$GITHUB_ENV"
           {
             echo "NEW_VERSION=$(sh tools/check-version.sh)"
-            echo "NEW_DEB=$(ls "$PWD"/dist/*.deb)"
-            echo "OLD_DEB=$(ls "$PWD"/prev/*.deb 2> /dev/null || true)"
+            echo "NEW_PKG=$(ls "$PWD"/dist/*.deb)"
+            echo "OLD_PKG=$(ls "$PWD"/prev/*.deb 2> /dev/null || true)"
           } >> "$GITHUB_ENV"
       - name: Playwright (pinned in test/requirements.txt)
         run: pip install -q -r test/requirements.txt
@@ -396,6 +396,232 @@ jobs:
         with:
           name: cockpit-session
           path: cockpit-session/
+
+  # Both end-to-end tests on the RHEL rebuilds, in a Rocky Linux VM with SELinux enforcing
+  # (tools/vm.sh: the pinned cloud image under KVM on this runner), with the .rpm of this build,
+  # Docker Engine, Buildx and Compose from Docker's repository for RHEL, and the distribution's
+  # Cockpit and skopeo. First the helpers as in the job e2e (test/e2e-server.sh as root in the
+  # machine, with the helpers and units the package installed), then the package removed; then
+  # the add-on in a real Cockpit session as in the job cockpit (test/cockpit-setup.sh and
+  # test/cockpit-session.py in the machine, dnf over the release before): the machine's
+  # cockpit.socket (TLS on 9090, forwarded here), the browser on this runner behind a Playwright
+  # server bound to 127.0.0.1 that an SSH tunnel brings into the machine (the server takes no
+  # other Host header). Each part fails on every SELinux denial between its mark and its end.
+  # Docker keeps the image store of the runner's Docker 28 (overlay2): a new install of Docker 29
+  # takes the containerd image store, whose image IDs are the index digests, and the tests
+  # compare image IDs across pushes to and pulls from their local registry; that store is a step
+  # of its own. A pilot, not yet a required check; the release waits for it like for every job.
+  e2e-el:
+    name: e2e (${{ matrix.os }}, docker-ce, SELinux enforcing)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: rocky-9, python: python3.12 }
+          - { os: rocky-10, python: python3 }
+    env:
+      VM_PORTS: "9090"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: The packages of this build and of the release to upgrade from, QEMU and cloud-init's seed tool
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm qemu-system-x86 qemu-utils cloud-image-utils > /dev/null
+          make packages
+          sh tools/upgrade-base.sh prev >> "$GITHUB_ENV"
+          echo "NEW_VERSION=$(sh tools/check-version.sh)" >> "$GITHUB_ENV"
+      - name: Playwright (pinned in test/requirements.txt)
+        run: pip install -q -r test/requirements.txt
+      # Only the browser, two tries of four minutes (see the job test).
+      - name: Browser (Chromium from Playwright's CDN, two tries)
+        timeout-minutes: 10
+        run: |
+          for try in 1 2; do
+            timeout --kill-after=10s 4m python -m playwright install chromium > /dev/null && exit 0
+            echo "::warning::playwright install failed or hung (try $try)"
+          done
+          exit 1
+      - name: KVM for the runner's user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: Which cloud image
+        id: image
+        env:
+          OS: ${{ matrix.os }}
+        run: echo "name=$(sh tools/vm.sh image "$OS")" >> "$GITHUB_OUTPUT"
+      - name: The cloud image (kept between runs by its pinned name; tools/vm.sh checks its SHA-256)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/azentrius-vm
+          key: vm-${{ steps.image.outputs.name }}
+      - name: Boot ${{ matrix.os }} (tools/vm.sh)
+        env:
+          OS: ${{ matrix.os }}
+        run: sh tools/vm.sh start "$OS"
+      # Docker as Docker's guide for RHEL installs it, with Buildx for the rebuild's compose build.
+      # First what the guide removes, where it is installed: Podman, which the add-on does not
+      # support, and runc, which conflicts with the one in containerd.io. Before Docker's first
+      # start, the image store of the runner (see above). The script goes in on standard input.
+      - name: Docker from Docker's repository, Cockpit, skopeo and Python for Playwright in the machine
+        env:
+          PY: ${{ matrix.python }}
+        run: |
+          sh tools/vm.sh root env PY="$PY" PLAYWRIGHT="$(grep '^playwright==' test/requirements.txt)" sh -es << 'EOF'
+          for p in podman-docker podman buildah runc; do
+              if rpm -q --quiet "$p"; then dnf remove -y -q "$p"; fi
+          done
+          dnf install -y -q dnf-plugins-core
+          dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+          dnf install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          mkdir -p /etc/docker
+          echo '{"features": {"containerd-snapshotter": false}}' > /etc/docker/daemon.json
+          systemctl enable docker
+          # skopeo as the page installs it (dnf, from the distribution), for the radar; Cockpit's
+          # socket: TLS on 9090.
+          dnf install -y -q cockpit-ws cockpit-bridge cockpit-system skopeo "$PY"
+          systemctl enable --now cockpit.socket
+          if systemctl is-active --quiet firewalld; then
+              firewall-cmd -q --add-port=9090/tcp
+              firewall-cmd -q --permanent --add-port=9090/tcp
+          fi
+          mkdir -p /root/iu
+          "$PY" -m venv /root/iu/venv
+          /root/iu/venv/bin/pip install -q "$PLAYWRIGHT"
+          EOF
+      # Docker's packages for EL 10 need kernel-modules-extra (iptables' addrtype match for Docker's
+      # NAT rules), and dnf takes it for the newest kernel, which it installs next to the image's:
+      # on the kernel that runs, dockerd fails ("Extension addrtype revision 0 not supported"). So,
+      # as on a server, the machine boots the kernel dnf made the default when that is not the one
+      # running (on Rocky 10.2; Rocky 9.8 keeps its kernel).
+      - name: The newer kernel booted, when dnf installed one
+        run: |
+          running=$(sh tools/vm.sh root uname -r)
+          default=$(sh tools/vm.sh root grubby --default-kernel)
+          echo "running $running, default ${default#/boot/vmlinuz-}"
+          [ "${default#/boot/vmlinuz-}" != "$running" ] || exit 0
+          boot=$(sh tools/vm.sh root cat /proc/sys/kernel/random/boot_id)
+          timeout 60 sh tools/vm.sh root systemctl reboot || true
+          for _ in $(seq 1 60); do
+            sleep 5
+            now=$(sh tools/vm.sh root cat /proc/sys/kernel/random/boot_id 2> /dev/null) || continue
+            if [ "$now" != "$boot" ]; then
+              echo "booted $(sh tools/vm.sh root uname -r)"
+              exit 0
+            fi
+          done
+          tail -n 40 "$RUNNER_TEMP/azentrius-vm/console.log"
+          exit 1
+      - name: Docker started, with the image store of the runner
+        run: |
+          sh tools/vm.sh root systemctl start docker
+          test "$(sh tools/vm.sh root docker info --format "'{{.Driver}}'")" = overlay2
+      - name: The package of this build and the tests into the machine, the package installed
+        run: |
+          tar -cf - test/e2e-server.sh test/e2e-pause.py test/cockpit-setup.sh test/cockpit-session.py |
+            sh tools/vm.sh root tar -C /root/iu -xf -
+          sh tools/vm.sh copy /root/iu dist/*.rpm
+          if ls prev/*.rpm > /dev/null 2>&1; then sh tools/vm.sh copy /root/iu/prev prev/*.rpm; fi
+          sh tools/vm.sh root sh -c "'dnf install -y -q /root/iu/cockpit-image-update-monitor-*.rpm'"
+          sh tools/vm.sh root rpm -q cockpit-image-update-monitor docker-ce docker-compose-plugin containerd.io \
+            container-selinux cockpit-ws cockpit-bridge skopeo python3 selinux-policy-targeted || true
+          sh tools/vm.sh root docker info --format "'Docker {{.ServerVersion}}, storage driver {{.Driver}}'"
+          sh tools/vm.sh root docker compose version
+      - name: The SELinux check catches a denial on purpose; then the mark in the audit log
+        run: |
+          sh tools/vm.sh avc-selftest
+          sh tools/vm.sh avc-mark
+      - name: End-to-end test in the machine (test/e2e-server.sh as root, the helpers of the package)
+        timeout-minutes: 45
+        shell: bash
+        run: |
+          mkdir -p e2e-el
+          sh tools/vm.sh root bash /root/iu/test/e2e-server.sh 2>&1 | tee e2e-el/e2e.log
+      - name: The package removed again
+        run: |
+          sh tools/vm.sh root dnf remove -y -q cockpit-image-update-monitor
+          sh tools/vm.sh root test ! -e /usr/lib/cockpit-image-updates
+          sh tools/vm.sh root test ! -e /usr/share/cockpit/image-updates
+      - name: No SELinux denials from the mark to the removal
+        run: sh tools/vm.sh avc-check
+      # The session as in the job cockpit: its passwords made here and masked, the KEY=value lines
+      # for the test into the machine (readable by root only), both logins through the forwarded
+      # port, then the Playwright server here, tunnelled into the machine.
+      - name: Two users and a throw-away compose project in the machine, the Playwright server here
+        run: |
+          admin_pw=$(openssl rand -hex 16)
+          plain_pw=$(openssl rand -hex 16)
+          echo "::add-mask::$admin_pw"
+          echo "::add-mask::$plain_pw"
+          new=$(basename dist/*.rpm)
+          old=$(cd prev && ls -- *.rpm 2> /dev/null || true)
+          {
+            printf 'ADMIN_USER=imgadmin\nADMIN_PW=%s\nPLAIN_USER=imgplain\nPLAIN_PW=%s\n' "$admin_pw" "$plain_pw"
+            printf 'NEW_VERSION=%s\nNEW_PKG=/root/iu/%s\n' "$NEW_VERSION" "$new"
+            printf 'OLD_VERSION=%s\nOLD_PKG=%s\n' "$OLD_VERSION" "${old:+/root/iu/prev/$old}"
+            sh tools/vm.sh root env ADMIN_USER=imgadmin ADMIN_PW="$admin_pw" PLAIN_USER=imgplain PLAIN_PW="$plain_pw" \
+              sh /root/iu/test/cockpit-setup.sh
+          } > "$RUNNER_TEMP/session.env"
+          sh tools/vm.sh root sh -c "'umask 077 && cat > /root/iu/session.env'" < "$RUNNER_TEMP/session.env"
+          rm "$RUNNER_TEMP/session.env"
+          # Cockpit's own login (the same request its login page makes) for both users.
+          for user_pw in "imgadmin:$admin_pw" "imgplain:$plain_pw"; do
+            code=$(curl -sk -u "$user_pw" -o /dev/null -w '%{http_code}' https://localhost:9090/cockpit/login)
+            echo "login ${user_pw%%:*}: HTTP $code"
+            if [ "$code" != 200 ]; then
+              sh tools/vm.sh root journalctl --no-pager -n 60 | grep -iE "cockpit|pam|auth" || true
+              exit 1
+            fi
+          done
+          nohup python -m playwright run-server --port 3333 --host 127.0.0.1 > "$RUNNER_TEMP/playwright-server.log" 2>&1 &
+          up=0
+          for _ in $(seq 1 50); do
+            if (exec 3<>/dev/tcp/127.0.0.1/3333) 2> /dev/null; then up=1; break; fi
+            sleep 0.2
+          done
+          if [ "$up" != 1 ]; then cat "$RUNNER_TEMP/playwright-server.log"; exit 1; fi
+          sh tools/vm.sh back 3333
+      - name: The SELinux mark again, for the session
+        run: sh tools/vm.sh avc-mark
+      - name: The add-on in Cockpit in the machine (test/cockpit-session.py as root, the browser here)
+        timeout-minutes: 30
+        run: |
+          sh tools/vm.sh root sh -c "'cd /root/iu && set -a && . ./session.env && set +a && PLAYWRIGHT_WS=ws://127.0.0.1:3333/ venv/bin/python test/cockpit-session.py session'"
+      - name: No SELinux denials during the session
+        run: sh tools/vm.sh avc-check
+      - name: Report and logs
+        if: always()
+        env:
+          OS: ${{ matrix.os }}
+        run: |
+          mkdir -p e2e-el
+          sh tools/vm.sh fetch e2e-el /root/iu/session || true
+          sh tools/vm.sh logs e2e-el || true
+          cp "$RUNNER_TEMP/playwright-server.log" e2e-el/ 2> /dev/null || true
+          if [ -f e2e-el/root/iu/session/report.md ]; then
+            { echo "### $OS"; cat e2e-el/root/iu/session/report.md; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Keep the logs, and the session's report and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-${{ matrix.os }}
+          path: e2e-el/
 
   # Secrets in the files and in the whole history (gitleaks, pinned with its checksum). The
   # findings are redacted in the log; GitHub's own secret scanning with push protection runs
