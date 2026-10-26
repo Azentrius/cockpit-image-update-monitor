@@ -14,7 +14,10 @@ Nice=10
 TimeoutStartSec=15min
 
 # Hardening: the job only reads Docker and talks to registries.
-NoNewPrivileges=yes
+# No NoNewPrivileges=: on the RHEL rebuilds it keeps the docker command out of
+# its SELinux domain (container_runtime_t), and every call is a denial in the
+# audit log. The job runs as root; what the settings below take away, no exec
+# gives back without it either.
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
