@@ -491,17 +491,46 @@ jobs:
           dnf install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
           mkdir -p /etc/docker
           echo '{"features": {"containerd-snapshotter": false}}' > /etc/docker/daemon.json
-          systemctl enable --now docker
-          test "$(docker info --format '{{.Driver}}')" = overlay2
+          systemctl enable docker
           # skopeo as the page installs it (dnf, from the distribution), for the radar; Cockpit's
           # socket: TLS on 9090.
           dnf install -y -q cockpit-ws cockpit-bridge cockpit-system skopeo "$PY"
           systemctl enable --now cockpit.socket
-          if systemctl is-active --quiet firewalld; then firewall-cmd -q --add-port=9090/tcp; fi
+          if systemctl is-active --quiet firewalld; then
+              firewall-cmd -q --add-port=9090/tcp
+              firewall-cmd -q --permanent --add-port=9090/tcp
+          fi
           mkdir -p /root/iu
           "$PY" -m venv /root/iu/venv
           /root/iu/venv/bin/pip install -q "$PLAYWRIGHT"
           EOF
+      # Docker's packages for EL 10 need kernel-modules-extra (iptables' addrtype match for Docker's
+      # NAT rules), and dnf takes it for the newest kernel, which it installs next to the image's:
+      # on the kernel that runs, dockerd fails ("Extension addrtype revision 0 not supported"). So,
+      # as on a server, the machine boots the kernel dnf made the default when that is not the one
+      # running (on Rocky 10.2; Rocky 9.8 keeps its kernel).
+      - name: The newer kernel booted, when dnf installed one
+        run: |
+          running=$(sh tools/vm.sh root uname -r)
+          default=$(sh tools/vm.sh root grubby --default-kernel)
+          echo "running $running, default ${default#/boot/vmlinuz-}"
+          [ "${default#/boot/vmlinuz-}" != "$running" ] || exit 0
+          boot=$(sh tools/vm.sh root cat /proc/sys/kernel/random/boot_id)
+          timeout 60 sh tools/vm.sh root systemctl reboot || true
+          for _ in $(seq 1 60); do
+            sleep 5
+            now=$(sh tools/vm.sh root cat /proc/sys/kernel/random/boot_id 2> /dev/null) || continue
+            if [ "$now" != "$boot" ]; then
+              echo "booted $(sh tools/vm.sh root uname -r)"
+              exit 0
+            fi
+          done
+          tail -n 40 "$RUNNER_TEMP/azentrius-vm/console.log"
+          exit 1
+      - name: Docker started, with the image store of the runner
+        run: |
+          sh tools/vm.sh root systemctl start docker
+          test "$(sh tools/vm.sh root docker info --format "'{{.Driver}}'")" = overlay2
       - name: The package of this build and the tests into the machine, the package installed
         run: |
           tar -cf - test/e2e-server.sh test/e2e-pause.py test/cockpit-setup.sh test/cockpit-session.py |
