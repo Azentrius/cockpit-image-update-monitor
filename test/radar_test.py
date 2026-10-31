@@ -75,7 +75,7 @@ check("core: epoch skipped, nothing else changes",
       [L.core(x) for x in ("1:11.8.9+maria~ubu2404", "2:1.2", "v6.2.0", "17.10-1.pgdg12+1", "1:", "1:16", "16", "master")],
       ["11.8.9", "1.2", "6.2.0", "17.10", None, None, None, None])
 # Eclipse Temurin names its release with "jdk-" and the build, in the JRE
-# images too (vpn-host, 2026-10-18: hibiscus-server built FROM
+# images too (2026-10-18: a Java app built FROM
 # eclipse-temurin:21-jre-jammy, whose tag points to 21.0.12.1_1-jre-jammy;
 # the base's version stayed null). The variables of that image's config;
 # the build of June carried jdk-21.0.11+10 (java -version: 21.0.11), the one
@@ -334,12 +334,12 @@ tag_digests = []
 R.tag_digest = lambda repo, tag: (tag_digests.append((repo, tag)), "sha256:now-" + tag)[1]
 now = datetime(2026, 10, 12, tzinfo=timezone.utc)
 groups = {
-    ("postgres", "16-alpine"): {"containers": ["glitchtip-postgres", "docuseal-db"], "images": {
+    ("postgres", "16-alpine"): {"containers": ["bugs-postgres", "contracts-db"], "images": {
         "id1614": img(["PG_VERSION=16.14"]), "id1615": img(["PG_VERSION=16.15"])}},
-    ("glitchtip/glitchtip", "latest"): {"containers": ["glitchtip-web"], "images": {"idg": img(["GLITCHTIP_VERSION=6.1.8"])}},
-    ("docker.io/ollama/ollama", "latest"): {"containers": ["ollama"], "images": {
+    ("glitchtip/glitchtip", "latest"): {"containers": ["bugs-web"], "images": {"idg": img(["GLITCHTIP_VERSION=6.1.8"])}},
+    ("docker.io/ollama/ollama", "latest"): {"containers": ["inference"], "images": {
         "ido": img(labels={"org.opencontainers.image.version": "24.04"}, digests=["ollama/ollama@" + D_OLLAMA])}},
-    ("pgvector/pgvector", "pg17"): {"containers": ["formbricks-db"], "images": {"idv": img(["PG_VERSION=17.10-1.pgdg12+1"])}},
+    ("pgvector/pgvector", "pg17"): {"containers": ["survey-db"], "images": {"idv": img(["PG_VERSION=17.10-1.pgdg12+1"])}},
 }
 recs = {k: R.analyse((k, g), {}, now) for k, g in groups.items()}
 pg = recs[("postgres", "16-alpine")]
@@ -414,7 +414,7 @@ def line_match(repo, digest, created, tags, limit=20):
 
 
 R.match_digest = line_match
-CUBE = (("cubejs/cube", "v1.6"), {"containers": ["formbricks-cube"],
+CUBE = (("cubejs/cube", "v1.6"), {"containers": ["survey-cube"],
                                   "images": {"idc": img(digests=["cubejs/cube@sha256:c74"])}})
 line_hits["sha256:c74"] = "v1.6.74"
 hub_calls.clear()
@@ -454,7 +454,7 @@ check("registry down: the same image keeps its release and its patch, marked sta
       ({k: down["installed"]["idc"][k] for k in ("version", "src")}, down["versions"]["1.6.74"]["patch"],
        down["stale"], down["error"], down["status"]),
       ({"version": "1.6.74", "src": "digest"}, "v1.6.75", True, "registry down", "minor"))
-moved = (("cubejs/cube", "v1.6"), {"containers": ["formbricks-cube"],
+moved = (("cubejs/cube", "v1.6"), {"containers": ["survey-cube"],
                                    "images": {"idc2": img(digests=["cubejs/cube@sha256:c75"])}})
 other = R.keep_last_good([R.analyse(moved, R.digest_cache([good]), now)], [good])[0]
 check("registry down, another image ID meanwhile: no release taken over, the tag's number",
@@ -482,7 +482,7 @@ check("stale merge keeps the last tag_now too",
 
 
 # a repository no registry shows: built or tagged on the server, or private
-# (skopeo's answers on a real host, 2026-10-15, and of other registries)
+# (skopeo's answers as seen on 2026-10-15, and those of other registries)
 def refuse(stderr):
     def list_tags(repo):
         raise R.subprocess.CalledProcessError(1, ["skopeo", "list-tags"], "", stderr)
@@ -491,11 +491,11 @@ def refuse(stderr):
 
 DENIED = ('time="2026-10-15T23:35:49Z" level=fatal msg="Error listing repository tags: fetching tags list: '
           'requested access to the resource is denied"')
-LOCAL = (("hibiscus-server", "2.12.4"), {"containers": ["hibiscus-server"], "images": {"idh": img()}})
+LOCAL = (("intranet-app", "2.12.4"), {"containers": ["intranet-app"], "images": {"idh": img()}})
 R.list_tags = refuse(DENIED)
-hib = R.analyse(LOCAL, {}, now)
+loc = R.analyse(LOCAL, {}, now)
 check("Docker Hub denies a name it does not have: unlisted, the tag still names the installed version",
-      (hib["status"], hib["error"], hib["installed"]["idh"]["version"], "versions" in hib), ("unlisted", DENIED, "2.12.4", False))
+      (loc["status"], loc["error"], loc["installed"]["idh"]["version"], "versions" in loc), ("unlisted", DENIED, "2.12.4", False))
 ANSWERS = {
     "ghcr.io, private": ("fetching tags list: unauthorized: authentication required", "unlisted"),
     "registry without the name": ("fetching tags list: name unknown: repository name not known to registry", "unlisted"),
@@ -511,7 +511,7 @@ check("skopeo's answer decides: not in a registry, or a registry error",
       got, {label: want for label, (_, want) in ANSWERS.items()})
 R.list_tags = lambda repo: (_ for _ in ()).throw(R.subprocess.TimeoutExpired(["skopeo"], R.TIMEOUT))
 check("a timeout is a registry error", R.analyse(LOCAL, {}, now)["status"], "error")
-check("unlisted without an earlier result stays as it is", R.keep_last_good([hib], [])[0], hib)
+check("unlisted without an earlier result stays as it is", R.keep_last_good([loc], [])[0], loc)
 R.list_tags = refuse(DENIED)
 gone = R.keep_last_good([R.analyse((("glitchtip/glitchtip", "latest"), groups[("glitchtip/glitchtip", "latest")]),
                                    {}, now)], [gl])[0]
@@ -521,10 +521,10 @@ check("unlisted sorts after registry errors", sorted(["unlisted", "error", "curr
       ["current", "error", "unlisted"])
 
 # ------------------------------------------------------------ built images
-# An image built on the server (a test host, 2026-10-18: caddy-caddy is
-# xcaddy on caddy:2-builder, copied onto caddy:2): its Dockerfile's bases.
+# An image built on the server (proxy-caddy: Caddy built by xcaddy on
+# caddy:2-builder, copied onto caddy:2): its Dockerfile's bases.
 CADDY = """FROM caddy:2-builder AS builder
-RUN xcaddy build --with github.com/caddy-dns/hetzner/v2
+RUN xcaddy build --with github.com/caddy-dns/cloudflare
 
 FROM caddy:2
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
@@ -573,10 +573,9 @@ hub_asked.clear()
 check("base: a pinned base never moves and asks nobody",
       (R.base_state({"image": "caddy", "tag": "2", "final": True, "pinned": True}, old_caddy)["newer"], hub_asked), (False, []))
 
-# A Java app built FROM eclipse-temurin:21-jre-jammy (vpn-host, 2026-10-18:
-# hibiscus-server). The tag points to 21.0.12.1_1-jre-jammy (the same digest
-# on Docker Hub), pushed for amd64 on 17 October; the build carries
-# Temurin's JAVA_VERSION.
+# A Java app built FROM eclipse-temurin:21-jre-jammy (2026-10-18). The tag
+# points to 21.0.12.1_1-jre-jammy (the same digest on Docker Hub), pushed for
+# amd64 on 17 October; the build carries Temurin's JAVA_VERSION.
 check("base eclipse-temurin: the version tag behind 21-jre-jammy",
       R.best_tag(["21-jre-jammy", "21.0.12.1_1-jre-jammy"]), "21.0.12.1_1-jre-jammy")
 caddy_tags, caddy_now = R.list_tags, R.resolve_tag
@@ -584,13 +583,13 @@ HUB_INFO["eclipse-temurin/21-jre-jammy"] = {"tag_last_pushed": "2026-10-17T05:17
     {"architecture": "amd64", "os": "linux", "last_pushed": "2026-10-17T05:17:32Z"}]}
 R.list_tags = lambda repo: ["21", "21-jre", "21-jre-jammy", "21.0.12.1_1-jre", "21.0.12.1_1-jre-jammy", "21.0.12.1_1-jdk-jammy"]
 R.resolve_tag = lambda repo, tag, tags, prev: {"digest": "sha256:t", "version": "21.0.12.1", "tag": "21.0.12.1_1-jre-jammy"}
-hib = img(TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.12.1+1"], created="2026-10-18T03:10:00Z")
-hib["Architecture"] = "amd64"
-b = R.base_state({"image": "eclipse-temurin", "tag": "21-jre-jammy", "final": True}, hib)
+jre = img(TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.12.1+1"], created="2026-10-18T03:10:00Z")
+jre["Architecture"] = "amd64"
+b = R.base_state({"image": "eclipse-temurin", "tag": "21-jre-jammy", "final": True}, jre)
 check("base eclipse-temurin: the build carries 21.0.12.1, the tag points to it -> current",
       (b["version"], b["now"], b["newer"]), ("21.0.12.1", "21.0.12.1", False))
-hib["Config"]["Env"] = TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.11+10"]
-b = R.base_state({"image": "eclipse-temurin", "tag": "21-jre-jammy", "final": True}, hib)
+jre["Config"]["Env"] = TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.11+10"]
+b = R.base_state({"image": "eclipse-temurin", "tag": "21-jre-jammy", "final": True}, jre)
 check("base eclipse-temurin: built after the push on an older local base (no --pull) -> newer by version",
       (b["version"], b["now"], b["newer"]), ("21.0.11", "21.0.12.1", True))
 june = img(TEMURIN_ENV + ["JAVA_VERSION=jdk-21.0.11+10"], created="2026-06-28T11:02:41Z")
@@ -619,7 +618,7 @@ check("base: a registry error is kept, nothing is claimed", ("error" in b, "newe
 WORK = tempfile.mkdtemp()
 with open(os.path.join(WORK, "Dockerfile"), "w") as f:
     f.write(CADDY)
-COMPOSE_LABELS = {"com.docker.compose.project": "caddy", "com.docker.compose.service": "caddy",
+COMPOSE_LABELS = {"com.docker.compose.project": "proxy", "com.docker.compose.service": "caddy",
                   "com.docker.compose.project.working_dir": WORK,
                   "com.docker.compose.project.config_files": os.path.join(WORK, "docker-compose.yml")}
 composed = []
@@ -632,20 +631,20 @@ def fake_compose(cmd, binary=False):
 
 R.run = fake_compose
 R.list_tags = lambda repo: (_ for _ in ()).throw(R.subprocess.CalledProcessError(1, ["skopeo"], "", DENIED)) \
-    if repo == "caddy-caddy" else ["2", "2-builder", "2.11.7", "latest"]
-built = R.analyse((("caddy-caddy", "latest"), {"containers": ["caddy"], "labels": COMPOSE_LABELS,
+    if repo == "proxy-caddy" else ["2", "2-builder", "2.11.7", "latest"]
+built = R.analyse((("proxy-caddy", "latest"), {"containers": ["proxy"], "labels": COMPOSE_LABELS,
                                                 "images": {"idc": old_caddy}}), {}, now)
 check("radar: unlisted, built here: build time and both bases",
       (built["status"], built["built"], [(x["image"], x["tag"], x["final"], x.get("newer")) for x in built["base"]]),
       ("unlisted", "2026-06-15T18:35:36Z", [("caddy", "2-builder", False, True), ("caddy", "2", True, True)]))
 check("radar: the compose file is read with its project and files",
-      composed[-1], ["docker", "compose", "-p", "caddy", "--project-directory", WORK,
+      composed[-1], ["docker", "compose", "-p", "proxy", "--project-directory", WORK,
                      "-f", os.path.join(WORK, "docker-compose.yml"), "config", "--format", "json"])
-plain = R.analyse((("hibiscus-server", "2.12.4"), {"containers": ["hib"], "labels": {}, "images": {"idh": img()}}), {}, now)
+plain = R.analyse((("intranet-app", "2.12.4"), {"containers": ["intranet"], "labels": {}, "images": {"idh": img()}}), {}, now)
 check("radar: an unlisted image without compose stays as it was", ("base" in plain, "built" in plain), (False, False))
 R.run = lambda cmd, binary=False: json.dumps({"services": {"caddy": {"image": "caddy:2"}}})
 check("radar: a compose service that is not built here has no bases",
-      "base" in R.analyse((("caddy-caddy", "latest"), {"containers": ["caddy"], "labels": COMPOSE_LABELS,
+      "base" in R.analyse((("proxy-caddy", "latest"), {"containers": ["proxy"], "labels": COMPOSE_LABELS,
                                                         "images": {"idc": old_caddy}}), {}, now), False)
 
 # A registry without any release tag (an own image built from its main branch):
@@ -673,7 +672,7 @@ sw_back = RS.keep_last_good([RS.analyse(SW, RS.digest_cache([sw_down]), now, RS.
 check("no release tag, registry back: not stale any more, no error",
       (sw_back["tag_now"]["digest"], "stale" in sw_back, "error" in sw_back), ("sha256:now-latest", False, False))
 
-# A run that reaches no registry at all (build-host, 2026-10-20: the resolver
+# A run that reaches no registry at all (one server, 2026-10-20: the resolver
 # answered "server misbehaving" for every name) is the server's problem, not
 # the registries': the radar tries once more after a pause, and if no registry
 # answers then either, versions.json says so. "unlisted" is an answer (access

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The status for the Status Board (lib/diunstatus.py) counts the rows the
-// page shows: with the fixtures of a real host, the page marks the same
+// page shows: with the fixtures, the page marks the same
 // containers "Update available", "Roll-out pending" and "New version" as
 // test/fixtures/status.json names. test/status_test.py checks that the helper
 // writes exactly that file for the same fixtures.

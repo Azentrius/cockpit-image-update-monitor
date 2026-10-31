@@ -26,23 +26,23 @@ const FILES = {
 };
 const DEPS_OK = JSON.stringify({ root: true, docker: { state: "ok", compose: true },
     diun: { state: "running", events: true }, skopeo: { state: "ok" }, radar: { state: "active" } });
-const PLAN_OLLAMA = { container: "ollama", image: "ollama/ollama:latest", updatable: true, project: "actual",
-    workdir: "/opt/actual", services: ["ollama"], containers: ["ollama"], pulled: false, config_changed: false,
-    dbs: [{ name: "actual-db", kind: "postgres", running: true, size: 52428800 }], free_bytes: 40 * 2 ** 30,
+const PLAN_OLLAMA = { container: "inference", image: "ollama/ollama:latest", updatable: true, project: "budget",
+    workdir: "/opt/budget", services: ["inference"], containers: ["inference"], pulled: false, config_changed: false,
+    dbs: [{ name: "budget-db", kind: "postgres", running: true, size: 52428800 }], free_bytes: 40 * 2 ** 30,
     installed_version: "0.30.11", tag_digits: 0, jump_unknown: false, target_version: "0.40.3", jump: "minor" };
-const PLAN_GLITCH = { container: "glitchtip-postgres", image: "postgres:16-alpine", updatable: true, project: "glitchtip",
-    workdir: "/opt/glitchtip", services: ["postgres"], containers: ["glitchtip-postgres"], pulled: true, config_changed: false,
-    dbs: [{ name: "glitchtip-postgres", kind: "postgres", running: true, size: 1.2e8 }], free_bytes: 40 * 2 ** 30,
+const PLAN_GLITCH = { container: "bugs-postgres", image: "postgres:16-alpine", updatable: true, project: "bugs",
+    workdir: "/opt/bugs", services: ["postgres"], containers: ["bugs-postgres"], pulled: true, config_changed: false,
+    dbs: [{ name: "bugs-postgres", kind: "postgres", running: true, size: 1.2e8 }], free_bytes: 40 * 2 ** 30,
     installed_version: "16.14", tag_digits: 1, jump_unknown: false, target_version: "16.15", jump: "minor" };
 const REPO = "ghcr.io/plausible/community-edition";
-const PLAN_PLAUSIBLE = { container: "plausible", image: REPO + ":v2.1.4", updatable: true, project: "plausible",
-    workdir: "/opt/plausible", services: ["plausible"], containers: ["plausible"], dbs: [], free_bytes: 40 * 2 ** 30,
+const PLAN_PLAUSIBLE = { container: "metrics", image: REPO + ":v2.1.4", updatable: true, project: "metrics",
+    workdir: "/opt/metrics", services: ["metrics"], containers: ["metrics"], dbs: [], free_bytes: 40 * 2 ** 30,
     config_changed: false, pulled: false, installed_version: "2.1.4", tag_digits: 3, jump_unknown: false };
 const TARGET = { "v2.1.5": ["2.1.5", "patch"], "v3.2.1": ["3.2.1", "major"] };
 const dryRun = (tag) => ({ ...PLAN_PLAUSIBLE, target_version: TARGET[tag][0], jump: TARGET[tag][1],
     retag: { tag, from_tag: "v2.1.4", image: REPO + ":" + tag, choice: "newer", level: TARGET[tag][1], possible: true,
-             changes: [{ file: "/opt/plausible/compose.yml", line: 12, old: "    image: " + REPO + ":v2.1.4",
-                         new: "    image: " + REPO + ":" + tag, service: "plausible", sha256: "e".repeat(64) }],
+             changes: [{ file: "/opt/metrics/compose.yml", line: 12, old: "    image: " + REPO + ":v2.1.4",
+                         new: "    image: " + REPO + ":" + tag, service: "metrics", sha256: "e".repeat(64) }],
              fingerprint: "a".repeat(64) } });
 // Answers of the stubbed helpers that have not arrived yet, for every page of this file.
 const pending = new Set();
@@ -98,7 +98,7 @@ const BASE = {
 };
 const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector(".dm-name").textContent === name);
 // The update dialog of a row with the given plan; returns the dialog body.
-async function openUpdate(language, plan, files, name = "ollama") {
+async function openUpdate(language, plan, files, name = "inference") {
     const x = boot(language, { ...BASE, "diun-update.py plan": { out: JSON.stringify(plan) } }, files);
     await settle();
     rowOf(x.d, name).querySelector("button[data-update]").click();
@@ -186,28 +186,28 @@ const noteText = (body) => [...body.querySelectorAll(".dm-notes-slot .dm-dialog-
 
     // 7. A note instead of an error when anything is missing (German and English).
     const states = [
-        ["no source (postgres)", "de", PLAN_GLITCH, null, "glitchtip-postgres",
+        ["no source (postgres)", "de", PLAN_GLITCH, null, "bugs-postgres",
          "Keine Release Notes: Das Image nennt keine Quelle auf GitHub (Label org.opencontainers.image.source), und es ist keine bekannt."],
-        ["not fetched yet", "de", PLAN_OLLAMA, { "/var/lib/diun-radar/releases.json": { generated: "x", repos: {} } }, "ollama",
+        ["not fetched yet", "de", PLAN_OLLAMA, { "/var/lib/diun-radar/releases.json": { generated: "x", repos: {} } }, "inference",
          "Die Release Notes von github.com/ollama/ollama sind noch nicht geholt; der Versions-Radar holt sie bei seinem nächsten Lauf."],
-        ["no releases.json (older radar)", "en", PLAN_OLLAMA, { "/var/lib/diun-radar/releases.json": null }, "ollama",
+        ["no releases.json (older radar)", "en", PLAN_OLLAMA, { "/var/lib/diun-radar/releases.json": null }, "inference",
          "The release notes from github.com/ollama/ollama are not fetched yet; the version radar fetches them on its next run."],
         ["a repository without releases", "en", PLAN_OLLAMA,
-         { "/var/lib/diun-radar/releases.json": { repos: { "ollama/ollama": { status: "missing", checked: "x" } } } }, "ollama",
+         { "/var/lib/diun-radar/releases.json": { repos: { "ollama/ollama": { status: "missing", checked: "x" } } } }, "inference",
          "No release notes: github.com/ollama/ollama has no releases, or it is not public."],
         ["GitHub's limit", "de", PLAN_OLLAMA,
-         { "/var/lib/diun-radar/releases.json": { repos: { "ollama/ollama": { status: "limited", error: "HTTP 403" } } } }, "ollama",
+         { "/var/lib/diun-radar/releases.json": { repos: { "ollama/ollama": { status: "limited", error: "HTTP 403" } } } }, "inference",
          "Die Release Notes von github.com/ollama/ollama konnten nicht geholt werden: Das Limit von GitHub für Anfragen ohne Anmeldung war erreicht. Der Versions-Radar versucht es bei einem späteren Lauf wieder."],
         ["an error", "en", PLAN_OLLAMA,
-         { "/var/lib/diun-radar/releases.json": { repos: { "ollama/ollama": { status: "error", error: "timed out" } } } }, "ollama",
+         { "/var/lib/diun-radar/releases.json": { repos: { "ollama/ollama": { status: "error", error: "timed out" } } } }, "inference",
          "The release notes from github.com/ollama/ollama could not be fetched (timed out). The version radar tries again on its next run."],
-        ["nothing in the range", "en", { ...PLAN_OLLAMA, installed_version: "0.40.3", target_version: "0.40.3.1" }, null, "ollama",
+        ["nothing in the range", "en", { ...PLAN_OLLAMA, installed_version: "0.40.3", target_version: "0.40.3.1" }, null, "inference",
          "No release on github.com/ollama/ollama between 0.40.3 and 0.40.3.1."],
-        ["the installed version unknown", "de", { ...PLAN_OLLAMA, installed_version: null, jump: null }, null, "ollama",
+        ["the installed version unknown", "de", { ...PLAN_OLLAMA, installed_version: null, jump: null }, null, "inference",
          "Keine Release Notes von github.com/ollama/ollama: Die installierte Version ist unbekannt und damit auch die Releases seither."],
-        ["no target, nothing after the installed version", "en", { ...PLAN_OLLAMA, installed_version: "0.40.4", target_version: null, jump: null }, null, "ollama",
+        ["no target, nothing after the installed version", "en", { ...PLAN_OLLAMA, installed_version: "0.40.4", target_version: null, jump: null }, null, "inference",
          "No release on github.com/ollama/ollama after 0.40.4."],
-        ["a broken releases.json", "en", PLAN_OLLAMA, { "/var/lib/diun-radar/releases.json": { repos: "x" } }, "ollama",
+        ["a broken releases.json", "en", PLAN_OLLAMA, { "/var/lib/diun-radar/releases.json": { repos: "x" } }, "inference",
          "The release notes from github.com/ollama/ollama are not fetched yet; the version radar fetches them on its next run."],
     ];
     for (const [label, lang, plan, files, name, want] of states) {
@@ -231,7 +231,7 @@ const noteText = (body) => [...body.querySelectorAll(".dm-notes-slot .dm-dialog-
     // 8. The preview of a version change (stage 2): per choice, the old slot dropped.
     const r = boot("de", { ...BASE, "diun-update.py retag": (cmd) => ({ out: JSON.stringify(dryRun(cmd[3])) }) });
     await settle();
-    rowOf(r.d, "plausible").querySelector("td.az-cell-actions button[data-retag]").click();
+    rowOf(r.d, "metrics").querySelector("td.az-cell-actions button[data-retag]").click();
     await settle();
     const choose = (tag) => { const sel = r.$("dm-retag-select"); sel.value = tag; sel.dispatchEvent(new r.w.Event("change")); };
     choose("v3.2.1");

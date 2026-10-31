@@ -40,7 +40,7 @@ def main():
             "/var/lib/diun-radar/versions.json": radar,
             "/var/lib/diun-radar/releases.json": json.load(open(os.path.join(FIX, "releases.json"))),
             "/var/lib/diun/dismissed.json": None,
-            "/etc/hostname": "docker-host",
+            "/etc/hostname": "web1",
         },
         "inventory": inventory,
         "deps": {"root": True, "docker": {"state": "ok", "compose": True},

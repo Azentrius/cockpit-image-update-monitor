@@ -35,7 +35,7 @@ const files = {
     "/var/lib/diun/events.jsonl": fs.readFileSync(path.join(FIX, "events.jsonl"), "utf8"),
     "/var/lib/diun-radar/versions.json": JSON.parse(fs.readFileSync(path.join(FIX, "versions2.json"), "utf8")),
     "/var/lib/diun/dismissed.json": null,
-    "/etc/hostname": "docker-host",
+    "/etc/hostname": "web1",
 };
 const DEPS = '{"root":true,"docker":{"state":"ok","version":"29.5.2","compose":true},' +
     '"diun":{"state":"running","managed":true,"events":true,"can_install":false,"can_start":false},' +
@@ -120,9 +120,9 @@ function boot({ at = "", hidden = false, holdBackups = false } = {}) {
 (async () => {
     // 1. Opened at a place (the frame is new, its location is the link).
     for (const [link, tab, first] of [
-        ["#/updates/update", "updates", "update ollama"],
-        ["#/updates/rollout", "updates", "pulled docuseal-db"],
-        ["#/updates/new-versions", "updates", "newver actual_server"],
+        ["#/updates/update", "updates", "update inference"],
+        ["#/updates/rollout", "updates", "pulled bugs-postgres"],
+        ["#/updates/new-versions", "updates", "newver booking-db"],
         ["#/backups/history", "backups", "dm-ops-title"],
     ]) {
         const a = boot({ at: link, holdBackups: true });
@@ -152,7 +152,7 @@ function boot({ at = "", hidden = false, holdBackups = false } = {}) {
     assert.deepStrictEqual([b.tab(), b.scrolled], ["backups", ["dm-ops-title"]], "a jump to the history");
     b.jump("#/updates/rollout");
     await flush();
-    assert.deepStrictEqual([b.tab(), b.scrolled.slice(1)], ["updates", ["pulled docuseal-db"]], "a jump to the roll-outs");
+    assert.deepStrictEqual([b.tab(), b.scrolled.slice(1)], ["updates", ["pulled bugs-postgres"]], "a jump to the roll-outs");
     // Chosen on the page: the tab goes into the location, then the link to the history changes it again.
     b.$("dm-tab-btn-backups").click();
     await flush();
@@ -212,7 +212,7 @@ function boot({ at = "", hidden = false, holdBackups = false } = {}) {
     assert.deepStrictEqual([c.tab(), c.scrolled, c.loaded()], ["updates", [], false], "hidden: the tab, nothing else");
     c.hint(false);
     await flush();
-    assert.deepStrictEqual(c.scrolled, ["newver actual_server"], "shown: loaded, then scrolled once");
+    assert.deepStrictEqual(c.scrolled, ["newver booking-db"], "shown: loaded, then scrolled once");
     const d = boot({ hidden: true });
     d.hint(true);
     d.answer();

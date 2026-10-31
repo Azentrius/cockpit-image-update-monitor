@@ -12,7 +12,7 @@
    "state": "info",
    "title": "Updates available",
    "value": "2",
-   "detail": "ollama, prod-mcp-1",
+   "detail": "inference, tools-mcp-1",
    "link": "#/updates/update",
    "checked_at": "2026-10-12T02:50:00Z",
    "stale_after": 86400
@@ -40,7 +40,7 @@
    "state": "info",
    "title": "Roll-out pending",
    "value": "3",
-   "detail": "docuseal-db, glitchtip-postgres, plausible_db",
+   "detail": "bugs-postgres, contracts-db, metrics_db",
    "link": "#/updates/rollout",
    "checked_at": "2026-10-12T02:50:00Z",
    "stale_after": 86400
@@ -50,7 +50,7 @@
    "state": "info",
    "title": "New versions",
    "value": "17",
-   "detail": "actual-ai, actual_server, calcom-db, diun-socket-proxy, docuseal +12",
+   "detail": "booking-db, budget-ai, budget_server, bugs-redis, bugs-web +12",
    "link": "#/updates/new-versions",
    "checked_at": "2026-10-12T02:17:34Z",
    "stale_after": 86400
@@ -61,8 +61,8 @@
   "updates": {
    "checked_at": "2026-10-12T02:50:00Z",
    "names": [
-    "ollama",
-    "prod-mcp-1"
+    "inference",
+    "tools-mcp-1"
    ]
   },
   "failed": {
@@ -76,31 +76,31 @@
   "rollout": {
    "checked_at": "2026-10-12T02:50:00Z",
    "names": [
-    "docuseal-db",
-    "glitchtip-postgres",
-    "plausible_db"
+    "bugs-postgres",
+    "contracts-db",
+    "metrics_db"
    ]
   },
   "new-versions": {
    "checked_at": "2026-10-12T02:17:34Z",
    "names": [
-    "actual-ai",
-    "actual_server",
-    "calcom-db",
+    "booking-db",
+    "budget-ai",
+    "budget_server",
+    "bugs-redis",
+    "bugs-web",
+    "bugs-worker",
+    "cloud-app-1",
+    "cloud-cron-1",
+    "contracts",
     "diun-socket-proxy",
-    "docuseal",
-    "formbricks-cube",
-    "formbricks-hub",
-    "formbricks-redis",
-    "glitchtip-redis",
-    "glitchtip-web",
-    "glitchtip-worker",
-    "hbbr",
-    "hbbs",
-    "nextcloud-family-app-1",
-    "nextcloud-family-cron-1",
-    "plausible",
-    "plausible_events_db"
+    "metrics",
+    "metrics_events_db",
+    "remote-signal",
+    "remote-tunnel",
+    "survey-cube",
+    "survey-hub",
+    "survey-redis"
    ]
   }
  }

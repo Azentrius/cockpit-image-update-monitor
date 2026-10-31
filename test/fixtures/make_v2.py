@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Builds the v2 fixtures (inventory3.jsonl + versions2.json) from
-inventory2.jsonl and the values the new radar reported on a real host
-(2026-10-12, before the postgres roll-out)."""
+inventory2.jsonl and the values a radar reported (2026-10-12, before
+the postgres roll-out). versions2.json has since gained fields this script
+does not write (source, choices, tag_now): running it drops them."""
 import json
 import os
 import re
@@ -46,30 +47,30 @@ BY_TAG = {
 }
 # Installed version per container: (version, src, from_inventory, digest-tag)
 INST = {
-    "nextcloud-family-app-1": ("34.0.3", "env:NEXTCLOUD_VERSION", True, None),
-    "nextcloud-family-cron-1": ("34.0.3", "env:NEXTCLOUD_VERSION", True, None),
-    "nextcloud-family-db-1": ("16.15", "env:PG_VERSION", True, None),
-    "docuseal-db": ("16.14", "env:PG_VERSION", True, None),
-    "plausible_db": ("16.14", "env:PG_VERSION", True, None),
-    "glitchtip-postgres": ("16.14", "env:PG_VERSION", True, None),
-    "nextcloud-family-redis-1": ("7.4.11", "env:REDIS_VERSION", True, None),
-    "docuseal": ("3.1.6", "digest", False, "3.1.6"),
-    "actual-ai": ("2.4.1", "digest", False, "2.4.1"),
-    "ollama": ("0.30.11", "digest", False, "0.30.11"),
-    "hbbs": ("1.1.15", "label", False, None),
-    "hbbr": ("1.1.15", "label", False, None),
-    "calcom": ("6.2.0", "label", False, None),
-    "calcom-db": ("15.18", "env:PG_VERSION", True, None),
-    "formbricks-db": ("17.10", "env:PG_VERSION", True, None),
-    "formbricks-redis": ("9.1.0", "env:VALKEY_VERSION", True, None),
-    "glitchtip-redis": ("9.1.0", "env:VALKEY_VERSION", True, None),
-    "prod-mcp-1": (None, "digest", False, None),
-    "formbricks-app": (None, "digest", False, None),
-    "smtp-relay": ("5.1.0", "digest", False, "5.1.0"),
-    "smtp-relay-2": ("5.1.0", "digest", False, "5.1.0"),
-    "glitchtip-web": ("6.1.8", "env:GLITCHTIP_VERSION", True, None),
-    "glitchtip-worker": ("6.1.8", "env:GLITCHTIP_VERSION", True, None),
-    "formbricks-hub": ("0.4.0", "digest", False, "0.4.0"),
+    "cloud-app-1": ("34.0.3", "env:NEXTCLOUD_VERSION", True, None),
+    "cloud-cron-1": ("34.0.3", "env:NEXTCLOUD_VERSION", True, None),
+    "cloud-db-1": ("16.15", "env:PG_VERSION", True, None),
+    "contracts-db": ("16.14", "env:PG_VERSION", True, None),
+    "metrics_db": ("16.14", "env:PG_VERSION", True, None),
+    "bugs-postgres": ("16.14", "env:PG_VERSION", True, None),
+    "cloud-redis-1": ("7.4.11", "env:REDIS_VERSION", True, None),
+    "contracts": ("3.1.6", "digest", False, "3.1.6"),
+    "budget-ai": ("2.4.1", "digest", False, "2.4.1"),
+    "inference": ("0.30.11", "digest", False, "0.30.11"),
+    "remote-signal": ("1.1.15", "label", False, None),
+    "remote-tunnel": ("1.1.15", "label", False, None),
+    "booking": ("6.2.0", "label", False, None),
+    "booking-db": ("15.18", "env:PG_VERSION", True, None),
+    "survey-db": ("17.10", "env:PG_VERSION", True, None),
+    "survey-redis": ("9.1.0", "env:VALKEY_VERSION", True, None),
+    "bugs-redis": ("9.1.0", "env:VALKEY_VERSION", True, None),
+    "tools-mcp-1": (None, "digest", False, None),
+    "survey-app": (None, "digest", False, None),
+    "mailer": ("5.1.0", "digest", False, "5.1.0"),
+    "mailer-2": ("5.1.0", "digest", False, "5.1.0"),
+    "bugs-web": ("6.1.8", "env:GLITCHTIP_VERSION", True, None),
+    "bugs-worker": ("6.1.8", "env:GLITCHTIP_VERSION", True, None),
+    "survey-hub": ("0.4.0", "digest", False, "0.4.0"),
 }
 
 rows = [json.loads(line) for line in open(os.path.join(HERE, "inventory2.jsonl"))]

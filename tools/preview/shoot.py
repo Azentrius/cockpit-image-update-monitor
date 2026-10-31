@@ -40,7 +40,7 @@ def main():
 
         pg = page(1440, 900, "en")
         pg.screenshot(path=os.path.join(OUT, "updates.png"))
-        pg.click('button[data-update="glitchtip-postgres"]')
+        pg.click('button[data-update="bugs-postgres"]')
         pg.wait_for_timeout(400)
         pg.screenshot(path=os.path.join(OUT, "update-dialog.png"))
         pg.click("#dm-dialog-confirm")
@@ -49,14 +49,14 @@ def main():
 
         # Change version: the field on a version line, its preview below
         pg = page(1440, 900, "en")
-        pg.click('td.az-cell-actions button[data-retag="plausible"]')
+        pg.click('td.az-cell-actions button[data-retag="metrics"]')
         pg.select_option("#dm-retag-select", "v2")
         pg.wait_for_timeout(400)
         pg.screenshot(path=os.path.join(OUT, "version-dialog.png"))
 
         # Change version to a database major: the plan of `dbmajor … --dry-run`
         pg = page(1440, 900, "en")
-        pg.click('td.az-cell-actions button[data-retag="glitchtip-postgres"]')
+        pg.click('td.az-cell-actions button[data-retag="bugs-postgres"]')
         pg.select_option("#dm-retag-select", "17-alpine")
         pg.wait_for_selector("#dm-mj-backup")
         pg.wait_for_timeout(300)
@@ -77,7 +77,7 @@ def main():
 
         pg = page(1440, 900, "en", "dark")
         pg.screenshot(path=os.path.join(OUT, "updates-dark.png"))
-        pg.click('button[data-update="ollama"]')
+        pg.click('button[data-update="inference"]')
         pg.wait_for_timeout(400)
         pg.click("#dm-dialog-confirm")
         pg.wait_for_timeout(1200)
@@ -96,7 +96,7 @@ def main():
             widths[scheme] = pg.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]")
         # The version dialog on a phone: the changed lines wrap instead of scrolling sideways
         pg = page(390, 844, "en")
-        pg.click('td.az-cell-actions button[data-retag="plausible"]')
+        pg.click('td.az-cell-actions button[data-retag="metrics"]')
         pg.select_option("#dm-retag-select", "v3.2.1")
         pg.wait_for_timeout(400)
         pg.screenshot(path=os.path.join(OUT, "version-dialog-phone.png"))

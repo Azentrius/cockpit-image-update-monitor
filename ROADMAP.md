@@ -96,7 +96,7 @@ installed version was unknown and the jump invisible.
 
 **What is updated together** ✅
 - **Overview:** if other running containers of the same compose project use the same image, the row
-  says so under the container name, e.g. “together with glitchtip-web” (at most three names, then
+  says so under the container name, e.g. “together with bugs-web” (at most three names, then
   “+n”). Visible text, not a tooltip, so it works on phones. The inventory knows project and image of
   every container already; no new helper verb is needed.
 - **Dialog:** “Affected containers” splits into groups: recreated (same image), one-off jobs that run

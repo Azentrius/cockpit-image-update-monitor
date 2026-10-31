@@ -154,7 +154,7 @@ def interrupted(argv):
 # ------------------------------------------------------------- fake Docker
 L = {"project": U.L_PROJECT, "service": U.L_SERVICE, "workdir": U.L_WORKDIR,
      "files": U.L_FILES, "hash": U.L_HASH}
-COMPOSE_DIR = os.path.join(TMP, "glitchtip")
+COMPOSE_DIR = os.path.join(TMP, "bugs")
 os.makedirs(COMPOSE_DIR)
 open(os.path.join(COMPOSE_DIR, "compose.yml"), "w").close()
 
@@ -396,8 +396,8 @@ reset_fs()
 fresh_docker()
 D.add(ctn("solo", "nginx:1.27", "sha256:n"))
 D.add(ctn("gone", "nginx:1.27", "sha256:n", project="gone", files="/nonexistent/compose.yml"))
-D.add(ctn("pinned", "nginx@sha256:abc", "sha256:n", project="glitchtip", service="pinned"))
-D.add(ctn("built", "glitchtip-custom:dev", "sha256:b", project="glitchtip", service="built"))
+D.add(ctn("pinned", "nginx@sha256:abc", "sha256:n", project="bugs", service="pinned"))
+D.add(ctn("built", "bugs-custom:dev", "sha256:b", project="bugs", service="built"))
 D.cfg = {"services": {"built": {"build": {"context": "."}}}}
 
 
@@ -455,7 +455,7 @@ D.undefined = set()
 # is recreated (2026-10-17). On the shared network they are no "project".
 for n in ("forgejo-runner", "forgejo-runner-2"):
     D.containers[n]["NetworkSettings"]["Networks"] = {"edge": {}}
-D.add(ctn("caddy", "caddy:2", "sha256:cd", project="caddy", networks=("edge",)))
+D.add(ctn("proxy", "caddy:2", "sha256:cd", project="proxy", networks=("edge",)))
 JOB = "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit"
 D.add(ctn(JOB, "example-ci:1", "sha256:ci", networks=("edge",)))
 D.containers[JOB]["State"]["StartedAt"] = "2026-10-17T10:35:00Z"
@@ -463,7 +463,7 @@ D.add(ctn("FORGEJO-ACTIONS-TASK-2399_WORKFLOW-b1_JOB-done", "example-ci:1", "sha
 p = plan("forgejo-runner")
 check("plan: a runner names the CI jobs that run, not the finished ones", p["ci_jobs"],
       [{"name": JOB, "image": "example-ci:1", "started": "2026-10-17T10:35:00Z"}])
-check("plan: CI jobs are left out of the shared network", p["shared_networks"], [{"network": "edge", "projects": ["caddy"]}])
+check("plan: CI jobs are left out of the shared network", p["shared_networks"], [{"network": "edge", "projects": ["proxy"]}])
 
 fresh_docker()
 PG_ENV = ["PG_MAJOR=16", "PG_VERSION=16.14"]
@@ -471,19 +471,19 @@ D.images = {"sha256:old": {"Id": "sha256:old", "Config": {"Env": PG_ENV}},
             "sha256:new": {"Id": "sha256:new", "Config": {"Env": ["PG_MAJOR=16", "PG_VERSION=16.15"]}},
             "sha256:web": {"Id": "sha256:web", "Config": {"Env": ["GLITCHTIP_VERSION=6.1.8"]}}}
 D.tags = {"postgres:16-alpine": "sha256:new", "glitchtip/glitchtip:latest": "sha256:web"}
-D.add(ctn("glitchtip-postgres", "postgres:16-alpine", "sha256:old", project="glitchtip", service="postgres",
+D.add(ctn("bugs-postgres", "postgres:16-alpine", "sha256:old", project="bugs", service="postgres",
           cmd=["postgres"], env=PG_ENV))
-D.add(ctn("glitchtip-migrate", "postgres:16-alpine", "sha256:old", project="glitchtip", service="migrate",
+D.add(ctn("bugs-migrate", "postgres:16-alpine", "sha256:old", project="bugs", service="migrate",
           entrypoint=["sh", "-c"], cmd=["psql -f /m.sql"], env=PG_ENV, running=False))
-D.add(ctn("glitchtip-redis", "redis:7-alpine", "sha256:r", project="glitchtip", service="redis", cmd=["redis-server"]))
-D.add(ctn("glitchtip-web", "glitchtip/glitchtip:latest", "sha256:web", project="glitchtip", service="web"))
+D.add(ctn("bugs-redis", "redis:7-alpine", "sha256:r", project="bugs", service="redis", cmd=["redis-server"]))
+D.add(ctn("bugs-web", "glitchtip/glitchtip:latest", "sha256:web", project="bugs", service="web"))
 D.hashes = {"migrate": "h-changed"}
-p = plan("glitchtip-postgres")
+p = plan("bugs-postgres")
 check("plan: updatable", (p["updatable"], p["reason"]), (True, None))
 check("plan: services with the same image", (p["services"], p["containers"]),
-      (["migrate", "postgres"], ["glitchtip-migrate", "glitchtip-postgres"]))
+      (["migrate", "postgres"], ["bugs-migrate", "bugs-postgres"]))
 check("plan: databases of the project", sorted((d["name"], d["kind"], d["size"]) for d in p["dbs"]),
-      [("glitchtip-postgres", "postgres", 52428800), ("glitchtip-redis", "unsupported", None)])
+      [("bugs-postgres", "postgres", 52428800), ("bugs-redis", "unsupported", None)])
 check("plan: compose changed + pulled", (p["config_changed"], p["pulled"]), (True, True))
 check("plan: no runner, no look for CI jobs", (p["ci_jobs"], ["docker", "ps", "-q"] in D.calls), ([], False))
 check("plan: version from the variable, the tag fixes one block -> size of the jump known",
@@ -494,15 +494,15 @@ check("jump sizes", [U.jump_of(a, b) for a, b in (("5.0.2", "6.0.2"), ("5.0.2", 
                                                    ("16.14", "16.15"), ("6.1.8", "6.1.8"), (None, "6.0.2"), ("x", "1"))],
       ["major", "minor", "patch", "minor", "same", None, None])
 D.images["sha256:fb"] = {"Id": "sha256:fb", "Config": {"Env": ["NODE_VERSION=24.21.0"]}}
-D.add(ctn("formbricks-app", "ghcr.io/formbricks/formbricks:latest", "sha256:fb", project="glitchtip",
-          service="formbricks"))
-p = plan("formbricks-app")
+D.add(ctn("survey-app", "ghcr.io/formbricks/formbricks:latest", "sha256:fb", project="bugs",
+          service="survey"))
+p = plan("survey-app")
 check("plan: latest + unknown version -> size of the jump unknown",
       (p["installed_version"], p["tag_digits"], p["jump_unknown"]), (None, 0, True))
 with open(U.VERSIONS, "w") as f:
     json.dump({"images": [{"image": "ghcr.io/formbricks/formbricks", "tag": "latest",
                            "installed": {"sha256:fb": {"version": "5.0.2", "src": "digest"}}}]}, f)
-p = plan("formbricks-app")
+p = plan("survey-app")
 check("plan: latest, version known to the radar -> no warning", (p["installed_version"], p["jump_unknown"]),
       ("5.0.2", False))
 check("plan: no tag_now in the radar -> target unknown", (p["target_version"], p["jump"]), (None, None))
@@ -511,24 +511,24 @@ with open(U.VERSIONS, "w") as f:
                            "installed": {"sha256:fb": {"version": "5.0.2", "src": "digest"}},
                            "versions": {"5.0.2": {"major": "6.0.2", "status": "major"}},
                            "tag_now": {"digest": "sha256:t602", "version": "6.0.2", "tag": "6.0.2"}}]}, f)
-p = plan("formbricks-app")
+p = plan("survey-app")
 check("plan: latest points to 6.0.2 now -> a major jump", (p["target_version"], p["jump"]), ("6.0.2", "major"))
 D.images["sha256:fb"]["RepoDigests"] = ["ghcr.io/formbricks/formbricks@sha256:t602"]
-p = plan("formbricks-app")
+p = plan("survey-app")
 check("plan: latest still points to the running build -> same", (p["target_version"], p["jump"]), ("5.0.2", "same"))
-del D.containers["formbricks-app"]
+del D.containers["survey-app"]
 # pgvector:pg17 runs PostgreSQL 17.10 (PG_VERSION) while its tags count
 # pgvector releases: pg17 = 0.8.7-pg17-bookworm is no jump from 17.10.
 PGV_ENV = ["PG_MAJOR=17", "PG_VERSION=17.10"]
 D.images["sha256:pgv"] = {"Id": "sha256:pgv", "Config": {"Env": PGV_ENV}}
-D.add(ctn("formbricks-db", "pgvector/pgvector:pg17", "sha256:pgv", project="glitchtip", service="db",
+D.add(ctn("survey-db", "pgvector/pgvector:pg17", "sha256:pgv", project="bugs", service="db",
           cmd=["postgres"], env=PGV_ENV))
 with open(U.VERSIONS, "w") as f:
     json.dump({"images": [{"image": "pgvector/pgvector", "tag": "pg17",
                            "installed": {"sha256:pgv": {"version": "17.10", "src": "env:PG_VERSION"}},
                            "versions": {"17.10": {"status": "unknown"}},
                            "tag_now": {"digest": "sha256:t087", "version": "0.8.7", "tag": "0.8.7-pg17-bookworm"}}]}, f)
-p = plan("formbricks-db")
+p = plan("survey-db")
 check("plan: the tag points to a version in another numbering -> no target, no jump",
       (p["installed_version"], p["target_version"], p["jump"], p["jump_unknown"]), ("17.10", None, None, False))
 check("same series: only a version the radar found among the tags",
@@ -538,18 +538,18 @@ check("same series: only a version the radar found among the tags",
                                             {"versions": {}}, {}, None)],
       [True, True, False, False, False, False])
 os.unlink(U.VERSIONS)
-del D.containers["formbricks-db"]
+del D.containers["survey-db"]
 
 # ------------------------------------------- what else an update touches
 fresh_docker()
-D.add(ctn("gt-web", "app:1", "sha256:a1", project="gt", service="web", networks=("gt_default", "mailrelay")))
+D.add(ctn("gt-web", "app:1", "sha256:a1", project="gt", service="web", networks=("gt_default", "mailnet")))
 D.add(ctn("gt-worker", "app:1", "sha256:a1", project="gt", service="worker", networks=("gt_default",)))
 D.add(ctn("gt-migrate", "app:1", "sha256:a1", project="gt", service="migrate", running=False))
 D.containers["gt-migrate"]["HostConfig"]["RestartPolicy"]["Name"] = "on-failure"
 D.add(ctn("gt-db", "postgres:16", "sha256:p", project="gt", service="db", cmd=["postgres"]))
 D.add(ctn("gt-side", "side:2", "sha256:s", project="gt", service="side"))
-D.add(ctn("smtp", "boky/postfix:latest", "sha256:m", project="smtp-relay", service="smtp", networks=("mailrelay",)))
-D.add(ctn("lonely", "x:1", "sha256:x", networks=("mailrelay",)))
+D.add(ctn("mailer", "boky/postfix:latest", "sha256:m", project="mailer", service="mailer", networks=("mailnet",)))
+D.add(ctn("lonely", "x:1", "sha256:x", networks=("mailnet",)))
 D.cfg = {"services": {
     "web": {"depends_on": {"db": {"condition": "service_healthy"},
                            "migrate": {"condition": "service_completed_successfully"}}},
@@ -563,7 +563,7 @@ check("relations: what the services wait for", p["depends_on"], [{"service": "db
 check("relations: who waits for them (watched)", p["dependents"], [{"service": "side", "containers": ["gt-side"]}])
 check("relations: a service that does not wait for the job", p["job_order"], [{"job": "migrate", "services": ["worker"]}])
 check("relations: other projects on a shared network",
-      p["shared_networks"], [{"network": "mailrelay", "projects": ["lonely", "smtp-relay"]}])
+      p["shared_networks"], [{"network": "mailnet", "projects": ["lonely", "mailer"]}])
 D.cfg = {"services": {}}
 check("relations: without depends_on nothing waits, so both services get the warning",
       [plan("gt-web")[k] for k in ("depends_on", "dependents", "job_order")],
@@ -700,12 +700,12 @@ D.images = {"sha256:old": {"Id": "sha256:old", "Config": {"Env": PG_ENV}},
             "sha256:new": {"Id": "sha256:new", "Config": {"Env": ["PG_MAJOR=16", "PG_VERSION=16.15"]}},
             "sha256:web": {"Id": "sha256:web", "Config": {"Env": ["GLITCHTIP_VERSION=6.1.8"]}}}
 D.tags = {"postgres:16-alpine": "sha256:new", "glitchtip/glitchtip:latest": "sha256:web"}
-D.add(ctn("glitchtip-postgres", "postgres:16-alpine", "sha256:old", project="glitchtip", service="postgres",
+D.add(ctn("bugs-postgres", "postgres:16-alpine", "sha256:old", project="bugs", service="postgres",
           cmd=["postgres"], env=PG_ENV))
-D.add(ctn("glitchtip-migrate", "postgres:16-alpine", "sha256:old", project="glitchtip", service="migrate",
+D.add(ctn("bugs-migrate", "postgres:16-alpine", "sha256:old", project="bugs", service="migrate",
           entrypoint=["sh", "-c"], cmd=["psql -f /m.sql"], env=PG_ENV, running=False))
-D.add(ctn("glitchtip-redis", "redis:7-alpine", "sha256:r", project="glitchtip", service="redis", cmd=["redis-server"]))
-D.add(ctn("glitchtip-web", "glitchtip/glitchtip:latest", "sha256:web", project="glitchtip", service="web"))
+D.add(ctn("bugs-redis", "redis:7-alpine", "sha256:r", project="bugs", service="redis", cmd=["redis-server"]))
+D.add(ctn("bugs-web", "glitchtip/glitchtip:latest", "sha256:web", project="bugs", service="web"))
 D.hashes = {"migrate": "h-changed"}
 
 # ----------------------------------------------------- arguments, exit codes
@@ -718,25 +718,25 @@ def main_rc(*argv, uid=0):
 
 check("not root -> 77", main_rc("backups", uid=1000), 77)
 check("unknown verb -> 64", main_rc("bogus"), 64)
-check("update with a wrong flag -> 64", main_rc("update", "glitchtip-postgres", "--force"), 64)
+check("update with a wrong flag -> 64", main_rc("update", "bugs-postgres", "--force"), 64)
 check("cleanup with a wrong flag -> 64", main_rc("cleanup", "--all"), 64)
 check("radar with an argument -> 64", main_rc("radar", "now"), 64)
 check("plan: invalid name -> 64", main_rc("plan", "../etc"), 64)
 check("plan: unknown container -> 2", main_rc("plan", "nope"), 2)
 check("rollback: invalid id -> 64", main_rc("rollback", "20261012-0000-x;rm"), 64)
 check("rollback: unknown operation -> 2", main_rc("rollback", "20261012-000000-nope"), 2)
-check("delete-dump: path trick -> 64", main_rc("delete-dump", "glitchtip/../../../etc/20261012-000000_passwd.sql.gz"), 64)
-check("delete-dump: missing -> 2", main_rc("delete-dump", "glitchtip/20261012-000000_glitchtip-postgres.sql.gz"), 2)
+check("delete-dump: path trick -> 64", main_rc("delete-dump", "bugs/../../../etc/20261012-000000_passwd.sql.gz"), 64)
+check("delete-dump: missing -> 2", main_rc("delete-dump", "bugs/20261012-000000_bugs-postgres.sql.gz"), 2)
 check("delete-image: normal tag -> 64", main_rc("delete-image", "postgres:16-alpine"), 64)
 check("delete-image: missing -> 2", main_rc("delete-image", "postgres:rollback-20261012-000000"), 2)
 release_lock()
 D.cfg = {"services": {"web": {"build": "."}}}
-check("update: not updatable -> 2", quiet(U.cmd_update, "glitchtip-web")[0], 2)
+check("update: not updatable -> 2", quiet(U.cmd_update, "bugs-web")[0], 2)
 D.cfg = {"services": {}}
 release_lock()
 held = open(U.LOCK, "w")
 U.fcntl.flock(held, U.fcntl.LOCK_EX | U.fcntl.LOCK_NB)
-check("lock taken -> 75", quiet(U.cmd_update, "glitchtip-postgres")[0], 75)
+check("lock taken -> 75", quiet(U.cmd_update, "bugs-postgres")[0], 75)
 held.close()
 release_lock()
 
@@ -744,55 +744,55 @@ release_lock()
 U.systemctl = radar = Systemctl()
 U.wait_healthy = lambda project, services: (True, [], {})
 DUMP_OK = b"--\n-- PostgreSQL database cluster dump\n--\nhello\n-- PostgreSQL database cluster dump complete\n"
-FakePopen.script = {"glitchtip-postgres": (DUMP_OK, 0)}
+FakePopen.script = {"bugs-postgres": (DUMP_OK, 0)}
 
 # Dump fails -> exit 5 before anything changes
-FakePopen.script = {"glitchtip-postgres": (b"partial", 1)}
+FakePopen.script = {"bugs-postgres": (b"partial", 1)}
 tags_before = dict(D.tags)
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
 check("dump fails -> exit 5", rc, 5)
 check("dump fails -> no tag, no pull, no record",
       (D.tags == tags_before, D.streamed, os.path.exists(U.OPS)), (True, [], False))
-check("dump fails -> no file left", dumps_of("glitchtip"), [])
-FakePopen.script = {"glitchtip-postgres": (b"-- no end marker\n", 0)}
-check("dump without end marker -> exit 5", quiet(U.cmd_update, "glitchtip-postgres")[0], 5)
+check("dump fails -> no file left", dumps_of("bugs"), [])
+FakePopen.script = {"bugs-postgres": (b"-- no end marker\n", 0)}
+check("dump without end marker -> exit 5", quiet(U.cmd_update, "bugs-postgres")[0], 5)
 release_lock()
 
 # Two databases, the second dump fails (wrong password) -> no dump left at all
-D.add(ctn("glitchtip-mariadb", "mariadb:11", "sha256:m", project="glitchtip", service="mariadb",
+D.add(ctn("bugs-mariadb", "mariadb:11", "sha256:m", project="bugs", service="mariadb",
           cmd=["mariadbd"], env=["MARIADB_VERSION=1:11.4.5+maria~ubu2404"]))
-FakePopen.script = {"glitchtip-postgres": (DUMP_OK, 0), "glitchtip-mariadb": (b"", 2)}
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+FakePopen.script = {"bugs-postgres": (DUMP_OK, 0), "bugs-mariadb": (b"", 2)}
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
-check("second dump fails -> exit 5, the first dump removed again", (rc, dumps_of("glitchtip")), (5, []))
+check("second dump fails -> exit 5, the first dump removed again", (rc, dumps_of("bugs")), (5, []))
 check("second dump fails -> message names the database",
-      "Dump of glitchtip-mariadb failed (mariadb-dump: Got error: 1045" in out, True)
-del D.containers["glitchtip-mariadb"]
+      "Dump of bugs-mariadb failed (mariadb-dump: Got error: 1045" in out, True)
+del D.containers["bugs-mariadb"]
 
 # Too little space -> exit 5
-FakePopen.script = {"glitchtip-postgres": (DUMP_OK, 0)}
+FakePopen.script = {"bugs-postgres": (DUMP_OK, 0)}
 U.FREE_MARGIN = 1 << 62
-check("too little space -> exit 5", quiet(U.cmd_update, "glitchtip-postgres")[0], 5)
+check("too little space -> exit 5", quiet(U.cmd_update, "bugs-postgres")[0], 5)
 U.FREE_MARGIN = 1 << 30
 release_lock()
 
 # Successful update: 4 old dumps of this container, 5 of another project,
 # old rollback images of postgres (unused) and redis (other image).
 for day in range(1, 5):
-    touch_dump(f"glitchtip/2026010{day}-030000_glitchtip-postgres.sql.gz")
+    touch_dump(f"bugs/2026010{day}-030000_bugs-postgres.sql.gz")
 for day in range(1, 6):
     touch_dump(f"other/2026010{day}-030000_other-db.sql.gz")
 D.tags["postgres:rollback-20250101-000000"] = "sha256:ancient"
 D.tags["redis:rollback-20250101-000000"] = "sha256:ancient-redis"
 D.pull_to = None                    # the new image was pulled already (tag -> sha256:new)
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
 res = json.loads([ln for ln in out.splitlines() if ln.startswith("@@RESULT ")][-1][9:])
 op = ops()[res["op"]]
 check("update ok -> exit 0", (rc, res["status"]), (0, "ok"))
 check("update: containers on the new image",
-      [D.containers[n]["Image"] for n in ("glitchtip-postgres", "glitchtip-migrate")], ["sha256:new", "sha256:new"])
+      [D.containers[n]["Image"] for n in ("bugs-postgres", "bugs-migrate")], ["sha256:new", "sha256:new"])
 check("update: rollback tag on the old image", D.tags.get(U.norm_ref(res["rollback"])), "sha256:old")
 check("update: up -d --no-deps --pull never for both services",
       [c[c.index("up"):] for c in D.streamed if "up" in c], [["up", "-d", "--no-deps", "--pull", "never", "migrate", "postgres"]])
@@ -802,9 +802,9 @@ check("update: dump readable by root only", oct(os.stat(os.path.join(U.DUMPS, re
 check("history: versions 16.14 -> 16.15", (op["from_version"], op["to_version"]), ("16.14", "16.15"))
 check("result: versions", (res["from_version"], res["to_version"]), ("16.14", "16.15"))
 check("cleanup after update: 3 newest dumps of the container kept",
-      dumps_of("glitchtip"), sorted([os.path.basename(res["dumps"][0]),
-                                    "20260103-030000_glitchtip-postgres.sql.gz",
-                                    "20260104-030000_glitchtip-postgres.sql.gz"]))
+      dumps_of("bugs"), sorted([os.path.basename(res["dumps"][0]),
+                                    "20260103-030000_bugs-postgres.sql.gz",
+                                    "20260104-030000_bugs-postgres.sql.gz"]))
 check("cleanup after update: other projects untouched", len(dumps_of("other")), 5)
 check("cleanup after update: old postgres rollback image removed, redis kept",
       ("postgres:rollback-20250101-000000" in D.tags, "redis:rollback-20250101-000000" in D.tags), (False, True))
@@ -814,7 +814,7 @@ check("output names the radar", "Version radar started" in out, True)
 # Nothing newer -> nochange, rollback tag removed again, no radar run
 radar.calls.clear()
 n_tags = len(D.tags)
-rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
+rc, out = quiet(U.cmd_update, "bugs-postgres", do_dump=False)
 release_lock()
 res = json.loads(out.strip().splitlines()[-1][9:])
 check("nochange -> exit 0", (rc, res["status"]), (0, "nochange"))
@@ -827,12 +827,12 @@ check("nochange: radar not started", radar.calls, [])
 # (2026-10-16) -> exit 5, nothing left behind, no history entry
 D.pull_rc = 1
 D.streamed.clear()
-tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("bugs"), ops()
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
 check("failed pull, old image -> exit 5", rc, 5)
 check("failed pull: no rollback tag, no dump, no history entry, nothing recreated",
-      (D.tags == tags_before, dumps_of("glitchtip"), ops() == ops_before, [c for c in D.streamed if "up" in c]),
+      (D.tags == tags_before, dumps_of("bugs"), ops() == ops_before, [c for c in D.streamed if "up" in c]),
       (True, dumps_before, True, []))
 check("failed pull: says so, not 'no newer image'",
       ("The pull failed and there is no newer image on the server – nothing changed." in out,
@@ -844,8 +844,8 @@ D.pull_rc = 0
 # the run ended as "no newer image" (exit 0). Now: exit 5, nothing left.
 D.registry_down = True
 D.streamed.clear()
-tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("bugs"), ops()
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
 check("registry down, old image -> exit 5, not 'nochange'",
       (rc, "No newer image available" in out, '"status": "nochange"' in out), (5, False, False))
@@ -853,17 +853,17 @@ check("registry down: pulled without --ignore-pull-failures, the error in the me
       (["--ignore-pull-failures" in c for c in D.streamed if "pull" in c],
        'nothing changed. Pull: postgres Error Get "https://registry-1.docker.io/v2/"' in out), ([False], True))
 check("registry down: no rollback tag, no dump, no history entry, nothing recreated",
-      (D.tags == tags_before, dumps_of("glitchtip"), ops() == ops_before, [c for c in D.streamed if "up" in c]),
+      (D.tags == tags_before, dumps_of("bugs"), ops() == ops_before, [c for c in D.streamed if "up" in c]),
       (True, dumps_before, True, []))
 # A newer image on the server already (pulled by hand, or before the registry
 # went down) is still rolled out, with a warning that names it.
 D.images["sha256:prepulled"] = {"Id": "sha256:prepulled", "Config": {"Env": ["PG_VERSION=16.16"]}}
 D.tags["postgres:16-alpine"] = "sha256:prepulled"
-rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
+rc, out = quiet(U.cmd_update, "bugs-postgres", do_dump=False)
 release_lock()
 res = last_result(out)
 check("registry down, newer image on the server -> rolled out, exit 0",
-      (rc, res["status"], res["to_version"], [D.containers[n]["Image"] for n in ("glitchtip-postgres", "glitchtip-migrate")]),
+      (rc, res["status"], res["to_version"], [D.containers[n]["Image"] for n in ("bugs-postgres", "bugs-migrate")]),
       (0, "ok", "16.16", ["sha256:prepulled"] * 2))
 check("registry down, newer image on the server: the warning says so",
       ("Warning: the pull failed (postgres Error Get" in out
@@ -871,7 +871,7 @@ check("registry down, newer image on the server: the warning says so",
 D.registry_down = False
 rc, _ = quiet(U.cmd_rollback, res["op"])
 release_lock()
-check("registry down: its update rolled back", (rc, D.tags["postgres:16-alpine"], D.containers["glitchtip-postgres"]["Image"]),
+check("registry down: its update rolled back", (rc, D.tags["postgres:16-alpine"], D.containers["bugs-postgres"]["Image"]),
       (0, "sha256:new", "sha256:new"))
 
 # Time limits (DOCKER_TIMEOUT, DUMP_TIMEOUT). A pull that does not end is stopped
@@ -879,12 +879,12 @@ check("registry down: its update rolled back", (rc, D.tags["postgres:16-alpine"]
 # its history, output and rollback, and never claims the containers are as they
 # were: the Docker daemon may still be changing them.
 D.pull_raises = U.Timeout(["docker", "compose", "pull", "migrate", "postgres"], 1800, ["postgres Pulling"])
-tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("bugs"), ops()
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
 D.pull_raises = None
 check("pull timeout -> exit 5, nothing left, the daemon may still finish the download",
-      (rc, D.tags == tags_before, dumps_of("glitchtip"), ops() == ops_before,
+      (rc, D.tags == tags_before, dumps_of("bugs"), ops() == ops_before,
        "The pull did not end within 1800 s and was stopped (DOCKER_TIMEOUT" in out, "Docker may still finish" in out),
       (5, True, dumps_before, True, True, True))
 
@@ -902,24 +902,24 @@ def result_or_none(out):
 D.pull_to = ("postgres:16-alpine", "sha256:v40")
 D.images["sha256:v40"] = {"Id": "sha256:v40", "Config": {"Env": ["PG_VERSION=16.40"]}}
 D.streamed.clear()
-tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("bugs"), ops()
 with as_uid(0):
-    rc, out = quiet(U.main, ["pull", "glitchtip-postgres"])
+    rc, out = quiet(U.main, ["pull", "bugs-postgres"])
 release_lock()
 res = result_or_none(out)
 check("pull only: exit 0, status pulled, the version that came",
       (rc, res.get("status"), res.get("to_version")), (0, "pulled", "16.40"))
 check("pull only: the plan's services pulled, nothing recreated, no dump, no history, no rollback copy",
       ([c[c.index("pull") + 1:] for c in D.streamed if "pull" in c], [c for c in D.streamed if "up" in c],
-       dumps_of("glitchtip"), ops() == ops_before, sorted(k for k in D.tags if ":rollback-" in k and k not in tags_before)),
+       dumps_of("bugs"), ops() == ops_before, sorted(k for k in D.tags if ":rollback-" in k and k not in tags_before)),
       ([["migrate", "postgres"]], [], dumps_before, True, []))
 check("pull only: the tag on the new image, the containers still on the old one (roll-out pending)",
-      (D.tags[U.norm_ref("postgres:16-alpine")], U.make_plan("glitchtip-postgres")[0]["pulled"]), ("sha256:v40", True))
+      (D.tags[U.norm_ref("postgres:16-alpine")], U.make_plan("bugs-postgres")[0]["pulled"]), ("sha256:v40", True))
 D.tags.clear()
 D.tags.update(saved_pull[0])
 D.pull_to = None
 with as_uid(0):
-    rc, out = quiet(U.main, ["pull", "glitchtip-postgres"])
+    rc, out = quiet(U.main, ["pull", "bugs-postgres"])
 release_lock()
 check("pull only, nothing newer: exit 0, nochange, said so",
       (rc, result_or_none(out).get("status"), "No newer image available – nothing changed." in out), (0, "nochange", True))
@@ -930,13 +930,13 @@ for label, setup, want in (
     setattr(D, *setup)
     tags_before, ops_before = dict(D.tags), ops()
     with as_uid(0):
-        rc, out = quiet(U.main, ["pull", "glitchtip-postgres"])
+        rc, out = quiet(U.main, ["pull", "bugs-postgres"])
     release_lock()
     setattr(D, setup[0], 0 if setup[0] == "pull_rc" else None)
     check(f"pull only, {label}: exit 5, said so, nothing changed",
           (rc, want in out, D.tags == tags_before, ops() == ops_before), (5, True, True, True))
 with as_uid(0):
-    rc, out = quiet(U.main, ["pull", "glitchtip-postgres", "--now"])
+    rc, out = quiet(U.main, ["pull", "bugs-postgres", "--now"])
 check("pull only: no other arguments", rc, 64)
 D.tags.clear()
 D.tags.update(saved_pull[0])
@@ -946,7 +946,7 @@ D.pull_to = ("postgres:16-alpine", "sha256:v30")
 D.images["sha256:v30"] = {"Id": "sha256:v30", "Config": {"Env": ["PG_VERSION=16.30"]}}
 D.up_raises = U.Timeout(["docker", "compose", "up", "-d", "--no-deps", "--pull", "never", "migrate", "postgres"], 1800)
 with as_uid(0):
-    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+    rc, out = quiet(U.main, ["update", "bugs-postgres", "--no-dump"])
 release_lock()
 D.up_raises = None
 res = last_result(out)
@@ -968,16 +968,16 @@ def dump_hangs(cmd, sink, limit, errfile, grace=10, keep_fds=()):
 
 
 U.copy_out, U.LIMITS["dump"] = dump_hangs, 7
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
 U.copy_out, U.LIMITS["dump"] = real_copy, 14400
 check("dump timeout -> exit 5, the limit named, no partial file left",
-      (rc, "Dump of glitchtip-postgres stopped after 7 s (DUMP_TIMEOUT" in out,
-       [f for f in dumps_of("glitchtip") if f.endswith(".part")], dumps_of("glitchtip") == dumps_before),
+      (rc, "Dump of bugs-postgres stopped after 7 s (DUMP_TIMEOUT" in out,
+       [f for f in dumps_of("bugs") if f.endswith(".part")], dumps_of("bugs") == dumps_before),
       (5, True, [], True))
 D.pull_to = None
 check("after the timeouts: the next update runs (nothing newer now)",
-      quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)[0], 0)
+      quiet(U.cmd_update, "bugs-postgres", do_dump=False)[0], 0)
 release_lock()
 
 # Signals to the helper (SIGTERM, SIGHUP: diunproc.Interrupted, raised where the
@@ -993,27 +993,27 @@ def dump_signalled(cmd, sink, limit, errfile, grace=10, keep_fds=()):
 
 
 U.copy_out = dump_signalled
-tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("glitchtip"), ops()
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+tags_before, dumps_before, ops_before = dict(D.tags), dumps_of("bugs"), ops()
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
 U.copy_out = real_copy
 check("SIGTERM during the dump -> exit 5, the partial dump gone, nothing else left",
       (rc, "Stopped by SIGTERM before any container changed – the dumps begun are deleted, nothing changed." in out,
-       [f for f in dumps_of("glitchtip") if f.endswith(".part")], dumps_of("glitchtip") == dumps_before,
+       [f for f in dumps_of("bugs") if f.endswith(".part")], dumps_of("bugs") == dumps_before,
        D.tags == tags_before, ops() == ops_before), (5, True, [], True, True, True))
 D.pull_raises = U.Interrupted(signal.SIGHUP)
-rc, out = quiet(U.cmd_update, "glitchtip-postgres")
+rc, out = quiet(U.cmd_update, "bugs-postgres")
 release_lock()
 D.pull_raises = None
 check("SIGHUP during the pull -> exit 5, dumps and rollback tag taken back, no history entry",
       (rc, "Stopped by SIGHUP before any container changed – dumps, rollback copy and changed files taken back, "
            "nothing changed. A pull that had begun may still finish in the Docker daemon." in out,
-       D.tags == tags_before, dumps_of("glitchtip") == dumps_before, ops() == ops_before), (5, True, True, True, True))
+       D.tags == tags_before, dumps_of("bugs") == dumps_before, ops() == ops_before), (5, True, True, True, True))
 D.pull_to = ("postgres:16-alpine", "sha256:v31")
 D.images["sha256:v31"] = {"Id": "sha256:v31", "Config": {"Env": ["PG_VERSION=16.31"]}}
 D.up_raises = U.Interrupted(signal.SIGTERM)
 with as_uid(0):
-    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+    rc, out = quiet(U.main, ["update", "bugs-postgres", "--no-dump"])
 release_lock()
 D.up_raises = None
 res = last_result(out)
@@ -1062,7 +1062,7 @@ check("limits out of range or no number -> exit 2 with the allowed range",
 # Through main, as the page calls it (the file belongs to the test's user, so main,
 # as root, refuses it already for that; either way before anything changes).
 with as_uid(0):
-    rc, out = quiet(U.main, ["update", "glitchtip-postgres"])
+    rc, out = quiet(U.main, ["update", "bugs-postgres"])
 release_lock()
 check("a settings file not understood stops an update before anything changes",
       (rc, out.strip().endswith("– nothing changed.")), (2, True))
@@ -1097,21 +1097,21 @@ with open(U.VERSIONS, "w") as f:
 # Failed health check -> exit 4, no cleanup, no radar; then rollback
 D.pull_to = ("postgres:16-alpine", "sha256:newer")
 D.images["sha256:newer"] = {"Id": "sha256:newer", "Config": {"Env": ["PG_VERSION=16.16"]}}
-U.wait_healthy = lambda project, services: (False, ["glitchtip-migrate"], {})
-LOGS["glitchtip-migrate"] = ["running migrations", 'FATAL:  role "glitchtip" does not exist']
-touch_dump("glitchtip/20251231-030000_glitchtip-postgres.sql.gz")
+U.wait_healthy = lambda project, services: (False, ["bugs-migrate"], {})
+LOGS["bugs-migrate"] = ["running migrations", 'FATAL:  role "bugs" does not exist']
+touch_dump("bugs/20251231-030000_bugs-postgres.sql.gz")
 radar.calls.clear()
-rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
+rc, out = quiet(U.cmd_update, "bugs-postgres", do_dump=False)
 release_lock()
 res = json.loads(out.strip().splitlines()[-1][9:])
 check("failed update -> exit 4", (rc, res["status"]), (4, "failed"))
 check("failed update: cause in the result and the history",
       (res["reason"]["container"], res["reason"]["line"], ops()[res["op"]]["reason"]["line"]),
-      ("glitchtip-migrate", 'FATAL:  role "glitchtip" does not exist', 'FATAL:  role "glitchtip" does not exist'))
+      ("bugs-migrate", 'FATAL:  role "bugs" does not exist', 'FATAL:  role "bugs" does not exist'))
 check("failed update: cause in the output",
-      'Most likely cause (glitchtip-migrate): FATAL:  role "glitchtip" does not exist' in out, True)
+      'Most likely cause (bugs-migrate): FATAL:  role "bugs" does not exist' in out, True)
 LOGS.clear()
-check("failed update: no cleanup", "20251231-030000_glitchtip-postgres.sql.gz" in dumps_of("glitchtip"), True)
+check("failed update: no cleanup", "20251231-030000_bugs-postgres.sql.gz" in dumps_of("bugs"), True)
 check("failed update: radar not started", radar.calls, [])
 U.wait_healthy = lambda project, services: (True, [], {})
 rc, out = quiet(U.cmd_rollback, res["op"])
@@ -1126,17 +1126,17 @@ release_lock()
 # compose up fails -> cause from its output; the rollback fails too -> its cause
 D.pull_to = ("postgres:16-alpine", "sha256:newest")
 D.images["sha256:newest"] = {"Id": "sha256:newest", "Config": {"Env": ["PG_VERSION=16.17"]}}
-D.up_rc, D.up_out = 1, ["Container glitchtip-postgres Recreate",
+D.up_rc, D.up_out = 1, ["Container bugs-postgres Recreate",
                         "Error response from daemon: Bind for 0.0.0.0:5432 failed: port is already allocated"]
-rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
+rc, out = quiet(U.cmd_update, "bugs-postgres", do_dump=False)
 release_lock()
 res = json.loads(out.strip().splitlines()[-1][9:])
 check("compose up fails -> exit 4, cause from compose",
       (rc, res["reason"]["source"], res["reason"]["line"]),
       (4, "compose", "Error response from daemon: Bind for 0.0.0.0:5432 failed: port is already allocated"))
 D.up_rc, D.up_out = 0, []
-U.wait_healthy = lambda project, services: (False, ["glitchtip-postgres"], {})
-LOGS["glitchtip-postgres"] = ["FATAL:  database files are incompatible with server"]
+U.wait_healthy = lambda project, services: (False, ["bugs-postgres"], {})
+LOGS["bugs-postgres"] = ["FATAL:  database files are incompatible with server"]
 rc, out = quiet(U.cmd_rollback, res["op"])
 release_lock()
 rres = json.loads(out.strip().splitlines()[-1][9:])
@@ -1145,7 +1145,7 @@ check("failed rollback -> exit 4 with its cause",
 check("failed rollback: cause in the history",
       (ops()[res["op"]]["rollback_status"], ops()[res["op"]]["rollback_reason"]["container"],
        ops()[res["op"]]["reason"]["source"]),
-      ("failed", "glitchtip-postgres", "compose"))
+      ("failed", "bugs-postgres", "compose"))
 LOGS.clear()
 U.wait_healthy = lambda project, services: (True, [], {})
 
@@ -1178,7 +1178,7 @@ def docker_gone(project, services):
 
 U.wait_healthy = docker_gone
 with as_uid(0):
-    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+    rc, out = quiet(U.main, ["update", "bugs-postgres", "--no-dump"])
 release_lock()
 res = last_result(out)
 op = ops()[res["op"]]
@@ -1191,7 +1191,7 @@ U.wait_healthy = lambda project, services: (True, [], {})
 rc, _ = quiet(U.cmd_rollback, res["op"])
 release_lock()
 check("exception after the restart: rollback -> exit 0, the image from before again",
-      (rc, [D.containers[n]["Image"] for n in ("glitchtip-postgres", "glitchtip-migrate")]), (0, ["sha256:new"] * 2))
+      (rc, [D.containers[n]["Image"] for n in ("bugs-postgres", "bugs-migrate")]), (0, ["sha256:new"] * 2))
 
 # A run that ends for good after the restart (killed, power cut) keeps its
 # entry ("running", the page shows "aborted") with the rollback copy.
@@ -1204,11 +1204,11 @@ def killed(project, services):
 
 
 U.wait_healthy = killed
-out = interrupted(["update", "glitchtip-postgres", "--no-dump"])
+out = interrupted(["update", "bugs-postgres", "--no-dump"])
 op = [o for o in ops().values() if o.get("new_id") == "sha256:v21"][0]
 h = history(op["id"])
 check("run ended after the restart: in the history with its rollback copy and its output",
-      (op["status"], D.tags.get(op["rollback"]), D.containers["glitchtip-postgres"]["Image"], h["active"],
+      (op["status"], D.tags.get(op["rollback"]), D.containers["bugs-postgres"]["Image"], h["active"],
        h["can_rollback"], os.path.exists(os.path.join(U.LOGS, op["id"] + ".log"))),
       ("running", "sha256:new", "sha256:v21", False, True, True))
 real_alive, U.helper_alive = U.helper_alive, lambda pid: pid == os.getpid()
@@ -1219,14 +1219,14 @@ U.wait_healthy = lambda project, services: (True, [], {})
 rc, _ = quiet(U.cmd_rollback, op["id"])
 release_lock()
 check("run ended after the restart: rollback -> exit 0, the image from before again",
-      (rc, D.containers["glitchtip-postgres"]["Image"], ops()[op["id"]]["rolled_back"]), (0, "sha256:new", True))
+      (rc, D.containers["bugs-postgres"]["Image"], ops()[op["id"]]["rolled_back"]), (0, "sha256:new", True))
 
 # The compose file names another image since the update (latest -> 2, here
 # 16 -> 17): the rollback put only the old tag back, compose started the other
 # image, and the rollback said "ok". Now refused before anything changes.
 D.pull_to = ("postgres:16-alpine", "sha256:v22")
 D.images["sha256:v22"] = {"Id": "sha256:v22", "Config": {"Env": ["PG_VERSION=16.22"]}}
-rc, out = quiet(U.cmd_update, "glitchtip-postgres", do_dump=False)
+rc, out = quiet(U.cmd_update, "bugs-postgres", do_dump=False)
 release_lock()
 res = last_result(out)
 D.images_from = lambda: {"postgres": "postgres:17-alpine", "migrate": "postgres:16-alpine"}
@@ -1236,7 +1236,7 @@ rc, out = quiet(U.cmd_rollback, res["op"])
 release_lock()
 check("rollback, the compose file names another image now -> exit 5, nothing changed",
       (rc, D.tags == tags_before, [c for c in D.streamed if "up" in c], ops()[res["op"]].get("rolled_back"),
-       D.containers["glitchtip-postgres"]["Image"]), (5, True, [], None, "sha256:v22"))
+       D.containers["bugs-postgres"]["Image"]), (5, True, [], None, "sha256:v22"))
 check("rollback, another image: the message names it",
       "The compose files now give postgres: postgres:17-alpine instead of postgres:16-alpine – nothing changed" in out,
       True)
@@ -1249,23 +1249,23 @@ release_lock()
 rres = last_result(out)
 check("rollback, the containers run another image -> exit 4, failed, not 'ok'",
       (rc, rres["status"], rres["reason"]["source"], rres["reason"]["container"], ops()[res["op"]]["rolled_back"]),
-      (4, "failed", "image", "glitchtip-migrate", False))
+      (4, "failed", "image", "bugs-migrate", False))
 check("rollback, another image: the cause names both",
       rres["reason"]["line"].startswith("runs elsewhere instead of the rollback copy postgres:rollback-"), True)
 D.up_runs = None
 rc, _ = quiet(U.cmd_rollback, res["op"])
 release_lock()
 check("rollback tried again -> exit 0, on the rollback copy",
-      (rc, [D.containers[n]["Image"] for n in ("glitchtip-postgres", "glitchtip-migrate")]), (0, ["sha256:new"] * 2))
+      (rc, [D.containers[n]["Image"] for n in ("bugs-postgres", "bugs-migrate")]), (0, ["sha256:new"] * 2))
 
 # kept output (through main, as the plugin calls it) and the new build's digests
 D.pull_to = ("postgres:16-alpine", "sha256:v18")
 D.images["sha256:v18"] = {"Id": "sha256:v18", "Config": {"Env": ["PG_VERSION=16.18"]},
                           "RepoDigests": ["postgres@sha256:dddd", "docker.io/library/postgres@sha256:dddd"]}
-U.wait_healthy = lambda project, services: (False, ["glitchtip-postgres"], {})
-LOGS["glitchtip-postgres"] = ["Error: kept for the log test"]
+U.wait_healthy = lambda project, services: (False, ["bugs-postgres"], {})
+LOGS["bugs-postgres"] = ["Error: kept for the log test"]
 with as_uid(0):
-    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+    rc, out = quiet(U.main, ["update", "bugs-postgres", "--no-dump"])
 release_lock()
 res = json.loads(out.strip().splitlines()[-1][9:])
 logf = os.path.join(U.LOGS, res["op"] + ".log")
@@ -1296,18 +1296,18 @@ check("backups: which outputs are kept, digests of the new build",
       (o["log"], o["rollback_log"], o["new_digests"]), (True, True, ["sha256:dddd"]))
 check("log: unknown operation -> 2", main_rc("log", "20200101-000000-nope"), 2)
 check("log: invalid id -> 64", main_rc("log", "../../etc/passwd"), 64)
-FakePopen.script = {"glitchtip-postgres": (b"partial", 1)}
+FakePopen.script = {"bugs-postgres": (b"partial", 1)}
 n_logs = len(os.listdir(U.LOGS))
 with as_uid(0):
-    rc, _ = quiet(U.main, ["update", "glitchtip-postgres"])
+    rc, _ = quiet(U.main, ["update", "bugs-postgres"])
 release_lock()
 check("an update that stops before any change keeps no output", (rc, len(os.listdir(U.LOGS))), (5, n_logs))
-FakePopen.script = {"glitchtip-postgres": (DUMP_OK, 0)}
+FakePopen.script = {"bugs-postgres": (DUMP_OK, 0)}
 U.LOG_MAX, real_max = 40, U.LOG_MAX
 D.pull_to = ("postgres:16-alpine", "sha256:v19")
 D.images["sha256:v19"] = {"Id": "sha256:v19", "Config": {"Env": ["PG_VERSION=16.19"]}}
 with as_uid(0):
-    rc, out = quiet(U.main, ["update", "glitchtip-postgres", "--no-dump"])
+    rc, out = quiet(U.main, ["update", "bugs-postgres", "--no-dump"])
 release_lock()
 res = json.loads(out.strip().splitlines()[-1][9:])
 with open(os.path.join(U.LOGS, res["op"] + ".log")) as f:
@@ -1324,20 +1324,20 @@ reset_fs()
 fresh_docker()
 U.systemctl = Systemctl()
 U.wait_healthy = lambda project, services: (True, [], {})
-D.add(ctn("caddy", "caddy-caddy", "sha256:c1", project="caddy", service="caddy"))
-D.add(ctn("nginx", "nginx:1.27", "sha256:n", project="caddy", service="nginx"))
-D.cfg = {"services": {"caddy": {"build": {"context": "."}, "image": "caddy-caddy"}}}
-D.tags = {"caddy-caddy": "sha256:c1", "nginx:1.27": "sha256:n"}
+D.add(ctn("proxy", "proxy-caddy", "sha256:c1", project="proxy", service="caddy"))
+D.add(ctn("nginx", "nginx:1.27", "sha256:n", project="proxy", service="nginx"))
+D.cfg = {"services": {"caddy": {"build": {"context": "."}, "image": "proxy-caddy"}}}
+D.tags = {"proxy-caddy": "sha256:c1", "nginx:1.27": "sha256:n"}
 D.images = {"sha256:c1": {"Id": "sha256:c1", "Config": {"Env": ["CADDY_VERSION=v2.11.4"]}},
             "sha256:c2": {"Id": "sha256:c2", "Config": {"Env": ["CADDY_VERSION=v2.11.7"]}}}
 with open(U.VERSIONS, "w") as f:
-    json.dump({"images": [{"image": "caddy-caddy", "tag": "latest", "status": "unlisted",
+    json.dump({"images": [{"image": "proxy-caddy", "tag": "latest", "status": "unlisted",
                            "base": [{"image": "caddy", "tag": "2-builder", "final": False},
                                     {"image": "caddy", "tag": "2", "final": True, "version": "2.11.4",
                                      "now": "2.11.7", "newer": True}]}]}, f)
-check("rebuild: an update still refuses the built image", plan("caddy")["reason"], "built-locally")
+check("rebuild: an update still refuses the built image", plan("proxy")["reason"], "built-locally")
 with as_uid(0):
-    rc, out = quiet(U.main, ["rebuild", "caddy", "--dry-run"])
+    rc, out = quiet(U.main, ["rebuild", "proxy", "--dry-run"])
 p = json.loads(out)
 check("rebuild --dry-run: updatable, the versions of the final base",
       (rc, p["updatable"], p["build"], p["installed_version"], p["target_version"], p["jump"], p["jump_unknown"]),
@@ -1348,20 +1348,20 @@ with as_uid(0):
 check("rebuild --dry-run: a pulled image is no rebuild", (rc, json.loads(out)["reason"]), (0, "not-built"))
 check("rebuild: invalid name -> 64", main_rc("rebuild", "../x"), 64)
 release_lock()
-check("rebuild: unknown option -> 64", main_rc("rebuild", "caddy", "--now"), 64)
+check("rebuild: unknown option -> 64", main_rc("rebuild", "proxy", "--now"), 64)
 check("rebuild: an image pulled -> 2", main_rc("rebuild", "nginx"), 2)
 release_lock()
 
-D.build_rc, D.build_to = 1, ("caddy-caddy", "sha256:half")
+D.build_rc, D.build_to = 1, ("proxy-caddy", "sha256:half")
 D.build_out = ["#5 ERROR: failed to solve: process \"/bin/sh -c xcaddy build\" did not complete successfully: exit code: 1"]
 n_ops = len(ops())
 with as_uid(0):
-    rc, out = quiet(U.main, ["rebuild", "caddy"])
+    rc, out = quiet(U.main, ["rebuild", "proxy"])
 release_lock()
 check("rebuild fails: exit 5, nothing changed, the build's error named",
       (rc, "The rebuild failed – nothing changed. Build: " in out, "failed to solve" in out), (5, True, True))
 check("rebuild fails: the tag back on the image it named, no rollback tag, the container as it was",
-      (D.tags["caddy-caddy"], [r for r in D.tags if "rollback" in r], D.containers["caddy"]["Image"]),
+      (D.tags["proxy-caddy"], [r for r in D.tags if "rollback" in r], D.containers["proxy"]["Image"]),
       ("sha256:c1", [], "sha256:c1"))
 check("rebuild fails: no compose pull, no up",
       [c for c in D.streamed if "pull" in c or "up" in c], [])
@@ -1369,28 +1369,28 @@ check("rebuild fails: not in the history", len(ops()), n_ops)
 
 D.build_rc, D.build_to, D.streamed = 0, None, []
 with as_uid(0):
-    rc, out = quiet(U.main, ["rebuild", "caddy", "--no-dump"])
+    rc, out = quiet(U.main, ["rebuild", "proxy", "--no-dump"])
 release_lock()
 res = last_result(out)
 check("rebuild with the same image: nothing changed",
       (rc, res["status"], "The rebuild gave the same image – nothing changed." in out,
        [r for r in D.tags if "rollback" in r], ops()[res["op"]]["kind"]), (0, "nochange", True, [], "rebuild"))
 
-D.build_to, D.streamed = ("caddy-caddy", "sha256:c2"), []
+D.build_to, D.streamed = ("proxy-caddy", "sha256:c2"), []
 with as_uid(0):
-    rc, out = quiet(U.main, ["rebuild", "caddy"])
+    rc, out = quiet(U.main, ["rebuild", "proxy"])
 release_lock()
 res = last_result(out)
 op = ops()[res["op"]]
 check("rebuild: exit 0, the new build runs, versions of the final base",
-      (rc, res["status"], D.containers["caddy"]["Image"], res["from_version"], res["to_version"]),
+      (rc, res["status"], D.containers["proxy"]["Image"], res["from_version"], res["to_version"]),
       (0, "ok", "sha256:c2", "2.11.4", "2.11.7"))
 check("rebuild: build --pull of the service, no compose pull, up without pull",
       ([c[c.index("build"):] for c in D.streamed if "build" in c], [c for c in D.streamed if "pull" in c],
        [c[c.index("up"):] for c in D.streamed if "up" in c]),
       ([["build", "--pull", "caddy"]], [], [["up", "-d", "--no-deps", "--pull", "never", "caddy"]]))
 check("rebuild: says so, in the history as a rebuild with its rollback copy",
-      ("Rebuilding caddy-caddy in project caddy: services caddy" in out, "Rebuild successful." in out,
+      ("Rebuilding proxy-caddy in project proxy: services caddy" in out, "Rebuild successful." in out,
        "No supported database container in this project – no dump." in out,
        op["kind"], op["rollback"], D.tags.get(op["rollback"])),
       (True, True, True, "rebuild", res["rollback"], "sha256:c1"))
@@ -1398,12 +1398,12 @@ check("rebuild: the history offers the rollback", history(res["op"])["can_rollba
 with as_uid(0):
     rc, _ = quiet(U.main, ["rollback", res["op"]])
 release_lock()
-check("rebuild rolled back: the old build runs again", (rc, D.containers["caddy"]["Image"]), (0, "sha256:c1"))
+check("rebuild rolled back: the old build runs again", (rc, D.containers["proxy"]["Image"]), (0, "sha256:c1"))
 
 D.build_to, D.build_raises = None, U.Timeout(["docker", "compose", "build", "--pull", "caddy"], 1800, [])
 rb_tags = sorted(r for r in D.tags if "rollback" in r)
 with as_uid(0):
-    rc, out = quiet(U.main, ["rebuild", "caddy"])
+    rc, out = quiet(U.main, ["rebuild", "proxy"])
 release_lock()
 check("rebuild that does not end: exit 5, nothing changed",
       (rc, "The rebuild did not end within 1800 s" in out, sorted(r for r in D.tags if "rollback" in r)),
@@ -1412,7 +1412,7 @@ D.build_raises = None
 
 
 # A service with `build:` and no `image:`: compose names the image after the
-# project it runs in and the service (caddy-caddy), and `docker compose
+# project it runs in and the service (proxy-caddy), and `docker compose
 # config` gives no "image" for it. The rollback must still find that the
 # files give the service its image, and start the build it kept.
 def rebuild_then_rollback(project, service, ref, cfg_service, change=None):
@@ -1441,26 +1441,26 @@ def rebuild_then_rollback(project, service, ref, cfg_service, change=None):
     return rc, after, rc2, D.containers["web-1"]["Image"], out2
 
 
-check("rebuild and rollback of a build without image: (compose's name caddy-caddy)",
-      rebuild_then_rollback("caddy", "caddy", "caddy-caddy", {"build": {"context": "."}})[:4],
+check("rebuild and rollback of a build without image: (compose's name proxy-caddy)",
+      rebuild_then_rollback("proxy", "caddy", "proxy-caddy", {"build": {"context": "."}})[:4],
       (0, "sha256:k2", 0, "sha256:k1"))
 check("rebuild and rollback without image: in a project started under another name (-p edge: edge-caddy)",
       rebuild_then_rollback("edge", "caddy", "edge-caddy", {"build": {"context": "."}})[:4],
       (0, "sha256:k2", 0, "sha256:k1"))
 check("rebuild and rollback with image: as before",
-      rebuild_then_rollback("caddy", "caddy", "acme/caddy:custom", {"build": {"context": "."},
+      rebuild_then_rollback("proxy", "caddy", "acme/caddy:custom", {"build": {"context": "."},
                                                                    "image": "acme/caddy:custom"})[:4],
       (0, "sha256:k2", 0, "sha256:k1"))
-r = rebuild_then_rollback("caddy", "caddy", "caddy-caddy", {"build": {"context": "."}},
+r = rebuild_then_rollback("proxy", "caddy", "proxy-caddy", {"build": {"context": "."}},
                           change=lambda: D.cfg["services"]["caddy"].update(image="acme/caddy:2"))
 check("rollback refused when the files give the built service another image since: exit 5, the rebuild runs on",
-      (r[2], r[3], "The compose files now give caddy: acme/caddy:2 instead of caddy-caddy" in r[4]), (5, "sha256:k2", True))
-r = rebuild_then_rollback("caddy", "caddy", "caddy-caddy", {"build": {"context": "."}},
+      (r[2], r[3], "The compose files now give caddy: acme/caddy:2 instead of proxy-caddy" in r[4]), (5, "sha256:k2", True))
+r = rebuild_then_rollback("proxy", "caddy", "proxy-caddy", {"build": {"context": "."}},
                           change=lambda: D.undefined.add("caddy"))
 check("rollback refused when the files no longer define the built service: exit 5, the rebuild runs on",
-      (r[2], r[3], "The compose files now give caddy: – instead of caddy-caddy" in r[4]), (5, "sha256:k2", True))
-r = rebuild_then_rollback("caddy", "caddy", "caddy-caddy", {"build": {"context": "."}},
-                          change=lambda: D.cfg["services"].update(caddy={"image": "caddy-caddy"}))
+      (r[2], r[3], "The compose files now give caddy: – instead of proxy-caddy" in r[4]), (5, "sha256:k2", True))
+r = rebuild_then_rollback("proxy", "caddy", "proxy-caddy", {"build": {"context": "."}},
+                          change=lambda: D.cfg["services"].update(caddy={"image": "proxy-caddy"}))
 check("rollback of a build whose service now pulls the same name: allowed (the files give that image)",
       r[2:4], (0, "sha256:k1"))
 D.cfg = {"services": {}}
@@ -1586,7 +1586,7 @@ check("iso_time: docker image ls -> ISO 8601",
 check("backups: history with versions, without paths",
       [(o["from_version"], o["to_version"], "workdir" in o, "new_id" in o) for o in bk["ops"]], [("16.3", "16.4", False, False)])
 # Versions the update could not tell (latest without a version variable): the radar's since
-U.record({"id": "20261004-030000-ollama", "ts": "x", "kind": "update", "container": "ollama", "project": "o",
+U.record({"id": "20261004-030000-inference", "ts": "x", "kind": "update", "container": "inference", "project": "o",
           "image": "ollama/ollama:latest", "old_id": "sha256:oll", "new_id": "sha256:oll2",
           "from_version": "0.30.11", "to_version": None, "rollback": None, "dumps": [], "status": "ok"})
 U.record({"id": "20261004-040000-mcp", "ts": "x", "kind": "update", "container": "mcp", "project": "o",
@@ -1599,7 +1599,7 @@ U.record({"id": "20261004-050000-cube", "ts": "x", "kind": "retag", "container":
 vers = lambda: {o["id"]: (o["from_version"], o["to_version"])
                 for o in json.loads(quiet(U.cmd_backups)[1])["ops"] if o["project"] == "o"}
 check("backups: broken radar file -> versions stay unknown", vers(),
-      {"20261004-030000-ollama": ("0.30.11", None), "20261004-040000-mcp": (None, None),
+      {"20261004-030000-inference": ("0.30.11", None), "20261004-040000-mcp": (None, None),
        "20261004-050000-cube": ("1.6.6", "1.6")})
 with open(U.VERSIONS, "w") as f:
     json.dump({"images": [{"image": "ollama/ollama", "tag": "latest",
@@ -1611,10 +1611,10 @@ with open(U.VERSIONS, "w") as f:
                            "installed": {"sha256:cube2": {"version": "1.6.74", "src": "digest"},
                                          "sha256:cube1": {"version": "2.0.0", "src": "digest"}}}]}, f)
 check("backups: missing versions from the radar, a line tag's number refined, others kept", vers(),
-      {"20261004-030000-ollama": ("0.30.11", "0.40.6"), "20261004-040000-mcp": (None, "0.199.4"),
+      {"20261004-030000-inference": ("0.30.11", "0.40.6"), "20261004-040000-mcp": (None, "0.199.4"),
        "20261004-050000-cube": ("1.6.6", "1.6.74")})
 check("backups: the history file itself is not changed",
-      (ops()["20261004-030000-ollama"]["to_version"], ops()["20261004-040000-mcp"]["from_version"]), (None, None))
+      (ops()["20261004-030000-inference"]["to_version"], ops()["20261004-040000-mcp"]["from_version"]), (None, None))
 U.record({"id": "20261006-030000-a-db", "ts": "x", "kind": "update", "container": "a-db", "project": "a",
           "image": "postgres:16", "rollback": None, "dumps": [], "status": "failed",
           "reason": {"container": "a-db", "state": "exited", "exit_code": 1, "oom": False, "source": "log",
@@ -1646,7 +1646,7 @@ check("backups: the rollback copy is gone: marked, no rollback offered",
 check("backups: a failed rollback whose copy is gone: marked as well",
       gone["20261007-050000-d-db"].get("rollback_gone"), True)
 check("backups: no mark where the copy is there, was rolled back, or there never was one",
-      ["rollback_gone" in gone[i] for i in ("20261005-030000-a-db", "20261007-040000-c-db", "20261004-030000-ollama")],
+      ["rollback_gone" in gone[i] for i in ("20261005-030000-a-db", "20261007-040000-c-db", "20261004-030000-inference")],
       [False, False, False])
 check("backups: the copy that is there can still be rolled back", gone["20261005-030000-a-db"]["can_rollback"], True)
 
@@ -1781,54 +1781,54 @@ REC_APP = {"image": "acme/app", "tag": "1.0.0", "db": False, "versions": {"1.0.0
 radar(REC_FB, REC_GT, REC_PL, REC_PG, REC_NC, REC_APP)
 
 # A direct tag in a CRLF file, with quotes and a comment that must stay.
-fb_file = write("fb.yml", 'services:\n  formbricks:\n    image: "ghcr.io/formbricks/formbricks:5.0.2"   # 6 needs AuthZed\n'
+fb_file = write("fb.yml", 'services:\n  survey:\n    image: "ghcr.io/formbricks/formbricks:5.0.2"   # 6 needs AuthZed\n'
                           "    restart: always\n  db:\n    image: pgvector/pgvector:pg17\n", newline="\r\n")
-D.add(ctn("formbricks-app", FB + ":5.0.2", "sha256:fb", project="formbricks", service="formbricks", files=fb_file))
-D.cfg = {"services": {"formbricks": {"image": FB + ":5.0.2"}, "db": {"image": "pgvector/pgvector:pg17"}}}
+D.add(ctn("survey-app", FB + ":5.0.2", "sha256:fb", project="survey", service="survey", files=fb_file))
+D.cfg = {"services": {"survey": {"image": FB + ":5.0.2"}, "db": {"image": "pgvector/pgvector:pg17"}}}
 before = sha(fb_file)
-p = retag("formbricks-app", "5")
+p = retag("survey-app", "5")
 r = p["retag"]
 check("retag: a version line, the compose line before and after (quotes, comment, CRLF file)",
       (r["possible"], r["choice"], r["newest"], r["image"], edits(r)),
       (True, "line", "5.4.5", FB + ":5",
        [("fb.yml", 3, '    image: "ghcr.io/formbricks/formbricks:5.0.2"   # 6 needs AuthZed',
-         '    image: "ghcr.io/formbricks/formbricks:5"   # 6 needs AuthZed', "formbricks")]))
+         '    image: "ghcr.io/formbricks/formbricks:5"   # 6 needs AuthZed', "survey")]))
 check("retag: the line brings its newest version", (p["target_version"], p["jump"], p["jump_unknown"]), ("5.4.5", "minor", False))
 check("retag --dry-run writes nothing; the plan names the file's checksum", (sha(fb_file), r["changes"][0]["sha256"]),
       (before, before))
-p = retag("formbricks-app", "6.0.2")
+p = retag("survey-app", "6.0.2")
 check("retag: a new major is planned (the page asks for a tick box)", (p["retag"]["possible"], p["retag"]["level"], p["jump"]),
       (True, "major", "major"))
-p = retag("formbricks-app", "latest")
+p = retag("survey-app", "latest")
 check("retag: a floating tag -> what it brings is unknown", (p["retag"]["choice"], p["target_version"], p["jump_unknown"]),
       ("floating", None, True))
 check("retag: the configured tag, or one the radar does not offer (older, rc, other word) -> refused",
-      why("formbricks-app", "5.0.2", "4.9.3", "5.4.5-rc.1", "edge"), ["same-tag"] + ["not-offered"] * 3)
+      why("survey-app", "5.0.2", "4.9.3", "5.4.5-rc.1", "edge"), ["same-tag"] + ["not-offered"] * 3)
 radar(REC_GT)
-check("retag: no choices in the radar data -> refused", why("formbricks-app", "5"), ["no-choices"])
+check("retag: no choices in the radar data -> refused", why("survey-app", "5"), ["no-choices"])
 radar(REC_FB, REC_GT, REC_PL, REC_PG, REC_NC, REC_APP)
 check("retag: invalid tag -> 64, without --dry-run -> 64",
-      (main_rc("retag", "formbricks-app", "5;rm", "--dry-run"), main_rc("retag", "formbricks-app", "5")), (64, 64))
+      (main_rc("retag", "survey-app", "5;rm", "--dry-run"), main_rc("retag", "survey-app", "5")), (64, 64))
 with as_uid(0):
-    rc, out = quiet(U.main, ["retag", "formbricks-app", "5", "--dry-run"])
+    rc, out = quiet(U.main, ["retag", "survey-app", "5", "--dry-run"])
 check("retag --dry-run: JSON on stdout, exit 0", (rc, json.loads(out)["retag"]["changes"][0]["line"]), (0, 3))
-del D.containers["formbricks-app"]
+del D.containers["survey-app"]
 
 # Two services of one image; anchors elsewhere in the file do not matter.
 D.images["sha256:gt"] = {"Id": "sha256:gt", "Config": {"Env": ["GLITCHTIP_VERSION=6.1.8"]}}
 gt_file = write("gt.yml", "x-defaults: &defaults\n  restart: unless-stopped\n\nservices:\n  web:\n    <<: *defaults\n"
                           "    image: glitchtip/glitchtip:latest\n  worker:\n    <<: *defaults\n"
                           "    image: glitchtip/glitchtip:latest  # same build\n    command: ./bin/run-celery.sh\n")
-D.add(ctn("glitchtip-web", GT + ":latest", "sha256:gt", project="gt", service="web", files=gt_file))
-D.add(ctn("glitchtip-worker", GT + ":latest", "sha256:gt", project="gt", service="worker", files=gt_file))
+D.add(ctn("bugs-web", GT + ":latest", "sha256:gt", project="gt", service="web", files=gt_file))
+D.add(ctn("bugs-worker", GT + ":latest", "sha256:gt", project="gt", service="worker", files=gt_file))
 D.cfg = {"services": {"web": {"image": GT + ":latest"}, "worker": {"image": GT + ":latest"}}}
-p = retag("glitchtip-web", "6")
+p = retag("bugs-web", "6")
 check("retag: every service of the image changes, anchors elsewhere are fine",
       [(c[1], c[3], c[4]) for c in edits(p["retag"])],
       [(7, "    image: glitchtip/glitchtip:6", "web"), (10, "    image: glitchtip/glitchtip:6  # same build", "worker")])
-p = retag("glitchtip-web", "6.1.8")
+p = retag("bugs-web", "6.1.8")
 check("retag: pin the running version of latest", (p["retag"]["choice"], p["target_version"], p["jump"]), ("pin", "6.1.8", "same"))
-del D.containers["glitchtip-web"], D.containers["glitchtip-worker"]
+del D.containers["bugs-web"], D.containers["bugs-worker"]
 
 # The image inside an anchor: the line belongs to no service.
 an_file = write("anchor.yml", "x-app: &app\n  image: acme/app:1.0.0\n  restart: always\n\nservices:\n  app:\n    <<: *app\n")
@@ -1860,41 +1860,41 @@ del D.containers["ov-app"]
 
 # The tag in a variable of the .env file.
 pl_env = write("pl.env", "# Plausible\nBASE_URL=https://stats.example.org\nPLAUSIBLE_VERSION=v2.1.4  # keep with the db\n")
-pl_file = write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
-D.add(ctn("plausible", PL + ":v2.1.4", "sha256:pl", project="pl", service="plausible", files=pl_file, env_files=pl_env))
-D.cfg = {"services": {"plausible": {"image": PL + ":v2.1.4"}}}
-p = retag("plausible", "v2.1.5")
+pl_file = write("pl.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
+D.add(ctn("metrics", PL + ":v2.1.4", "sha256:pl", project="pl", service="metrics", files=pl_file, env_files=pl_env))
+D.cfg = {"services": {"metrics": {"image": PL + ":v2.1.4"}}}
+p = retag("metrics", "v2.1.5")
 check("retag: a variable of the .env file -> that line changes, the compose file stays",
       (p["retag"]["possible"], p["retag"]["variable"], edits(p["retag"]), p["target_version"], p["jump"]),
       (True, "PLAUSIBLE_VERSION", [("pl.env", 3, "PLAUSIBLE_VERSION=v2.1.4  # keep with the db",
                                     "PLAUSIBLE_VERSION=v2.1.5  # keep with the db", None)], "2.1.5", "patch"))
 write("pl.env", 'PLAUSIBLE_IMAGE="ghcr.io/plausible/community-edition:v2.1.4"\n')
-write("pl.yml", "services:\n  plausible:\n    image: ${PLAUSIBLE_IMAGE}\n")
+write("pl.yml", "services:\n  metrics:\n    image: ${PLAUSIBLE_IMAGE}\n")
 check("retag: a variable holding the whole reference",
-      [c[3] for c in edits(retag("plausible", "v2.1.5")["retag"])], ['PLAUSIBLE_IMAGE="ghcr.io/plausible/community-edition:v2.1.5"'])
+      [c[3] for c in edits(retag("metrics", "v2.1.5")["retag"])], ['PLAUSIBLE_IMAGE="ghcr.io/plausible/community-edition:v2.1.5"'])
 write("pl.env", "PLAUSIBLE_VERSION=v2.1.4\n")
-write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n"
+write("pl.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n"
                 "  cron:\n    image: acme/cron:${PLAUSIBLE_VERSION}\n")
-check("retag: a variable used elsewhere too -> refused", why("plausible", "v2.1.5"), ["variable-shared"])
+check("retag: a variable used elsewhere too -> refused", why("metrics", "v2.1.5"), ["variable-shared"])
 write("pl.env", "PLAUSIBLE_VERSION=v2.1.3\nPLAUSIBLE_VERSION=v2.1.4\n")
-write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
-check("retag: a variable set twice -> refused", why("plausible", "v2.1.5"), ["variable-complex"])
+write("pl.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
+check("retag: a variable set twice -> refused", why("metrics", "v2.1.5"), ["variable-complex"])
 write("pl.env", "BASE_URL=https://stats.example.org\n")
-write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION:-v2.1.4}\n")
-check("retag: only a default in the compose file -> refused", why("plausible", "v2.1.5"), ["variable-complex"])
-write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PV}\n")
-check("retag: a variable that is not in the .env file -> refused", why("plausible", "v2.1.5"), ["variable-complex"])
-del D.containers["plausible"]
-write("pl.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
+write("pl.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION:-v2.1.4}\n")
+check("retag: only a default in the compose file -> refused", why("metrics", "v2.1.5"), ["variable-complex"])
+write("pl.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:${PV}\n")
+check("retag: a variable that is not in the .env file -> refused", why("metrics", "v2.1.5"), ["variable-complex"])
+del D.containers["metrics"]
+write("pl.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
 default_env = os.path.join(COMPOSE_DIR, ".env")
 with open(default_env, "w") as f:
     f.write("PLAUSIBLE_VERSION=v2.1.4\n")
-D.add(ctn("plausible", PL + ":v2.1.4", "sha256:pl", project="pl", service="plausible", files=pl_file))
+D.add(ctn("metrics", PL + ":v2.1.4", "sha256:pl", project="pl", service="metrics", files=pl_file))
 check("retag: no env file label -> the .env of the project directory, as compose reads it",
-      [(c["file"], c["new"]) for c in retag("plausible", "v2.1.5")["retag"]["changes"]],
+      [(c["file"], c["new"]) for c in retag("metrics", "v2.1.5")["retag"]["changes"]],
       [(default_env, "PLAUSIBLE_VERSION=v2.1.5")])
 os.unlink(default_env)
-del D.containers["plausible"]
+del D.containers["metrics"]
 
 # Databases keep their major; Nextcloud goes one major at a time.
 pg_file = write("pg.yml", "services:\n  db:\n    image: postgres:16-alpine\n")
@@ -1915,7 +1915,7 @@ check("retag: Nextcloud two majors ahead or to an unknown version -> refused",
       why("nc", "36.0.0-apache", "36-apache", "stable-apache"), ["major-skip"] * 3)
 check("retag: Nextcloud one major ahead", (retag("nc", "35.0.1-apache")["retag"]["possible"]), True)
 del D.containers["nc"]
-D.add(ctn("pinned2", "nginx@sha256:abc", "sha256:n", project="glitchtip", service="pinned2"))
+D.add(ctn("pinned2", "nginx@sha256:abc", "sha256:n", project="bugs", service="pinned2"))
 check("retag: what cannot be updated cannot be retagged either", why("pinned2", "1.27"), ["digest-pinned"])
 del D.containers["pinned2"]
 os.unlink(U.VERSIONS)
@@ -1975,32 +1975,32 @@ for i in ("fb", "fb503", "fb545", "pl", "pl215"):
     D.images["sha256:" + i] = {"Id": "sha256:" + i, "Config": {"Env": []}}
 D.tags.update({FB + ":5.0.2": "sha256:fb", FB + ":5.0.3": "sha256:fb503", FB + ":5.4.5": "sha256:fb545",
                PL + ":v2.1.4": "sha256:pl", PL + ":v2.1.5": "sha256:pl215"})
-FB_TEXT = ('services:\n  formbricks:\n    image: "ghcr.io/formbricks/formbricks:5.0.2"   # 6 needs AuthZed\n'
+FB_TEXT = ('services:\n  survey:\n    image: "ghcr.io/formbricks/formbricks:5.0.2"   # 6 needs AuthZed\n'
            "    restart: always\n  migrate:\n    image: ghcr.io/formbricks/formbricks:5.0.2\n"
            "    command: migrate\n")
 fb_file = write("fbx.yml", FB_TEXT, newline="\r\n")
 os.chmod(fb_file, 0o640)
 FB_BEFORE = raw(fb_file)
-D.add(ctn("formbricks-app", FB + ":5.0.2", "sha256:fb", project="fbx", service="formbricks", files=fb_file))
-D.add(ctn("formbricks-migrate", FB + ":5.0.2", "sha256:fb", project="fbx", service="migrate", files=fb_file,
+D.add(ctn("survey-app", FB + ":5.0.2", "sha256:fb", project="fbx", service="survey", files=fb_file))
+D.add(ctn("survey-migrate", FB + ":5.0.2", "sha256:fb", project="fbx", service="migrate", files=fb_file,
           running=False))
 D.images_from = compose_images([fb_file])
-fp = retag("formbricks-app", "5.4.5")["retag"]["fingerprint"]
+fp = retag("survey-app", "5.4.5")["retag"]["fingerprint"]
 check("retag: the dry run gives a fingerprint", bool(U.FP_RE.match(fp or "")), True)
 check("retag: invalid fingerprint -> 64, unknown flag -> 64",
-      (main_rc("retag", "formbricks-app", "5.4.5", "--expect", "abc"),
-       main_rc("retag", "formbricks-app", "5.4.5", "--expect", fp, "--force")), (64, 64))
-rc, res, out = apply("formbricks-app", "5.4.5", "0" * 64)
+      (main_rc("retag", "survey-app", "5.4.5", "--expect", "abc"),
+       main_rc("retag", "survey-app", "5.4.5", "--expect", fp, "--force")), (64, 64))
+rc, res, out = apply("survey-app", "5.4.5", "0" * 64)
 check("retag: another fingerprint than the preview -> exit 5, nothing written or left",
       (rc, raw(fb_file) == FB_BEFORE, leftovers()), (5, True, ([], [], 0)))
 with open(fb_file, "ab") as f:
     f.write(b"# edited after the preview\r\n")
-rc, res, out = apply("formbricks-app", "5.4.5", fp)
+rc, res, out = apply("survey-app", "5.4.5", fp)
 check("retag: a file edited after the preview -> exit 5, nothing changed", (rc, leftovers()), (5, ([], [], 0)))
 with open(fb_file, "wb") as f:
     f.write(FB_BEFORE)
 
-rc, res, out = apply("formbricks-app", "5.4.5", fp)
+rc, res, out = apply("survey-app", "5.4.5", fp)
 op = ops()[res["op"]]
 check("retag: exit 0, status ok, the new tag in the result and the history",
       (rc, res["status"], res["image"], op["kind"], op["from_tag"], op["to_tag"], op["from_version"], op["to_version"]),
@@ -2025,7 +2025,7 @@ with contextlib.redirect_stdout(io.StringIO()) as buf:
 hist = [o for o in json.loads(buf.getvalue())["ops"] if o["id"] == res["op"]][0]
 check("retag: backups lists it as rollable, without the backup file paths",
       (hist["can_rollback"], "backup_files" in hist, hist["to_tag"]), (True, False, "5.4.5"))
-check("retag: the same tag again -> refused (exit 5)", apply("formbricks-app", "5.4.5", fp)[0], 5)
+check("retag: the same tag again -> refused (exit 5)", apply("survey-app", "5.4.5", fp)[0], 5)
 
 with as_uid(0):
     rc, out = quiet(U.main, ["rollback", res["op"]])
@@ -2034,8 +2034,8 @@ check("retag rollback: exit 0, the file byte-identical again, the containers on 
       (rc, raw(fb_file) == FB_BEFORE, sorted((c["Config"]["Image"], c["Image"]) for c in D.containers.values())),
       (0, True, [(FB + ":5.0.2", "sha256:fb")] * 2))
 
-fp = retag("formbricks-app", "5.0.3")["retag"]["fingerprint"]
-rc, res, out = apply("formbricks-app", "5.0.3", fp)
+fp = retag("survey-app", "5.0.3")["retag"]["fingerprint"]
+rc, res, out = apply("survey-app", "5.0.3", fp)
 with open(fb_file, "ab") as f:
     f.write(b"# edited after the change\r\n")
 edited = raw(fb_file)
@@ -2053,27 +2053,27 @@ os.unlink(U.OPS)
 for t in [t for t in D.tags if ":rollback-" in t]:
     del D.tags[t]
 
-D.images_from = lambda: {"formbricks": FB + ":5.0.2", "migrate": FB + ":5.4.5"}
-fp = retag("formbricks-app", "5.4.5")["retag"]["fingerprint"]
-rc, res, out = apply("formbricks-app", "5.4.5", fp)
+D.images_from = lambda: {"survey": FB + ":5.0.2", "migrate": FB + ":5.4.5"}
+fp = retag("survey-app", "5.4.5")["retag"]["fingerprint"]
+rc, res, out = apply("survey-app", "5.4.5", fp)
 check("retag: compose config does not give the new image -> exit 5, file restored, nothing left",
       (rc, raw(fb_file) == FB_BEFORE, leftovers(), "files restored" in out), (5, True, ([], [], 0), True))
 D.images_from = compose_images([fb_file])
 del D.tags[FB + ":5.0.3"]
-fp = retag("formbricks-app", "5.0.3")["retag"]["fingerprint"]
-rc, res, out = apply("formbricks-app", "5.0.3", fp)
+fp = retag("survey-app", "5.0.3")["retag"]["fingerprint"]
+rc, res, out = apply("survey-app", "5.0.3", fp)
 check("retag: the new image cannot be pulled -> exit 5, file restored, nothing left",
       (rc, raw(fb_file) == FB_BEFORE, leftovers()), (5, True, ([], [], 0)))
 
 # The helper itself stops after the file was written, before a container
 # changed (here in the pull): the file comes back, nothing is left, and the
 # entry it had in the history is marked discarded (hidden, no output kept).
-fp = retag("formbricks-app", "5.4.5")["retag"]["fingerprint"]
+fp = retag("survey-app", "5.4.5")["retag"]["fingerprint"]
 logs_before = sorted(os.listdir(U.LOGS))
 D.pull_raises = OSError("docker: connection reset by peer")
 with contextlib.redirect_stdout(io.StringIO()), as_uid(0):
     try:
-        U.main(["retag", "formbricks-app", "5.4.5", "--expect", fp, "--no-dump"])
+        U.main(["retag", "survey-app", "5.4.5", "--expect", fp, "--no-dump"])
         raised = None
     except OSError as e:
         raised = str(e)
@@ -2089,15 +2089,15 @@ with open(U.OPS) as f:
 # A tag change that ends for good after the restart keeps its entry with the
 # file copies; a rollback that fails after putting the file back can be tried
 # again, and then leaves the file as it is.
-fp = retag("formbricks-app", "5.4.5")["retag"]["fingerprint"]
+fp = retag("survey-app", "5.4.5")["retag"]["fingerprint"]
 U.wait_healthy = killed
-interrupted(["retag", "formbricks-app", "5.4.5", "--expect", fp, "--no-dump"])
+interrupted(["retag", "survey-app", "5.4.5", "--expect", fp, "--no-dump"])
 op = [o for o in ops().values() if o["status"] == "running"][0]
 check("retag ended after the restart: in the history with its file copies, the containers on the new tag",
       (op["to_tag"], len(op["backup_files"]), history(op["id"])["can_rollback"], raw(fb_file) == FB_BEFORE,
        sorted((c["Config"]["Image"], c["Image"]) for c in D.containers.values())),
       ("5.4.5", 1, True, False, [(FB + ":5.4.5", "sha256:fb545")] * 2))
-U.wait_healthy = lambda project, services: (False, ["formbricks-app"], {})
+U.wait_healthy = lambda project, services: (False, ["survey-app"], {})
 with as_uid(0):
     rc1, _ = quiet(U.main, ["rollback", op["id"]])
 release_lock()
@@ -2111,30 +2111,30 @@ check("retag rollback tried again, the file back already -> exit 0, file untouch
       (rc2, raw(fb_file) == FB_BEFORE, "Restored:" in out2,
        sorted((c["Config"]["Image"], c["Image"]) for c in D.containers.values())),
       (0, True, False, [(FB + ":5.0.2", "sha256:fb")] * 2))
-del D.containers["formbricks-app"], D.containers["formbricks-migrate"]
+del D.containers["survey-app"], D.containers["survey-migrate"]
 
 # The tag in a variable of the .env file: that file changes and comes back.
 pl_env = write("plx.env", "PLAUSIBLE_VERSION=v2.1.4  # keep with the db\n")
-pl_file = write("plx.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
+pl_file = write("plx.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:${PLAUSIBLE_VERSION}\n")
 ENV_BEFORE, PLY_BEFORE = raw(pl_env), raw(pl_file)
-D.add(ctn("plausible", PL + ":v2.1.4", "sha256:pl", project="plx", service="plausible", files=pl_file,
+D.add(ctn("metrics", PL + ":v2.1.4", "sha256:pl", project="plx", service="metrics", files=pl_file,
           env_files=pl_env))
 D.images_from = compose_images([pl_file], pl_env)
-fp = retag("plausible", "v2.1.5")["retag"]["fingerprint"]
-rc, res, out = apply("plausible", "v2.1.5", fp)
+fp = retag("metrics", "v2.1.5")["retag"]["fingerprint"]
+rc, res, out = apply("metrics", "v2.1.5", fp)
 check("retag via .env: only the variable's line changes, the container runs the new tag",
-      (rc, raw(pl_env), raw(pl_file) == PLY_BEFORE, D.containers["plausible"]["Config"]["Image"]),
+      (rc, raw(pl_env), raw(pl_file) == PLY_BEFORE, D.containers["metrics"]["Config"]["Image"]),
       (0, b"PLAUSIBLE_VERSION=v2.1.5  # keep with the db\n", True, PL + ":v2.1.5"))
 # Once the .env is back, compose must give the old image. Here the compose file
 # names a tag of its own since the change: the .env is written back as it was
 # before this try, and nothing else changes.
 with open(pl_file, "w") as f:
-    f.write("services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:v2.1.5\n")
+    f.write("services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:v2.1.5\n")
 with as_uid(0):
     rc2, out2 = quiet(U.main, ["rollback", res["op"]])
 release_lock()
 check("retag rollback: another image once the .env is back -> exit 5, the .env as before the try",
-      (rc2, raw(pl_env), D.containers["plausible"]["Image"], "instead of " + PL + ":v2.1.4 – nothing changed" in out2),
+      (rc2, raw(pl_env), D.containers["metrics"]["Image"], "instead of " + PL + ":v2.1.4 – nothing changed" in out2),
       (5, b"PLAUSIBLE_VERSION=v2.1.5  # keep with the db\n", "sha256:pl215", True))
 with open(pl_file, "wb") as f:
     f.write(PLY_BEFORE)
@@ -2142,30 +2142,30 @@ with as_uid(0):
     rc, out = quiet(U.main, ["rollback", res["op"]])
 release_lock()
 check("retag via .env: rollback restores the .env byte-identical",
-      (rc, raw(pl_env) == ENV_BEFORE, D.containers["plausible"]["Image"]), (0, True, "sha256:pl"))
-del D.containers["plausible"]
+      (rc, raw(pl_env) == ENV_BEFORE, D.containers["metrics"]["Image"]), (0, True, "sha256:pl"))
+del D.containers["metrics"]
 
 # An override file: only it changes, the base file stays; the rollback puts it back.
-ov_base = write("ovx.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:v2.0.0\n"
+ov_base = write("ovx.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:v2.0.0\n"
                            "    restart: always\n")
-ov_over = write("ovx.override.yml", "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:v2.1.4\n")
+ov_over = write("ovx.override.yml", "services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:v2.1.4\n")
 BASE_BEFORE, OVER_BEFORE = raw(ov_base), raw(ov_over)
-D.add(ctn("plausible", PL + ":v2.1.4", "sha256:pl", project="ovx", service="plausible", files=ov_base + "," + ov_over))
+D.add(ctn("metrics", PL + ":v2.1.4", "sha256:pl", project="ovx", service="metrics", files=ov_base + "," + ov_over))
 D.images_from = compose_images([ov_base, ov_over])
-fp = retag("plausible", "v2.1.5")["retag"]["fingerprint"]
-rc, res, out = apply("plausible", "v2.1.5", fp)
+fp = retag("metrics", "v2.1.5")["retag"]["fingerprint"]
+rc, res, out = apply("metrics", "v2.1.5", fp)
 check("retag with an override file: only its line changes, the container runs the new tag",
-      (rc, raw(ov_base) == BASE_BEFORE, raw(ov_over), D.containers["plausible"]["Config"]["Image"],
+      (rc, raw(ov_base) == BASE_BEFORE, raw(ov_over), D.containers["metrics"]["Config"]["Image"],
        [os.path.basename(x["path"]) for x in ops()[res["op"]]["backup_files"]]),
-      (0, True, b"services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:v2.1.5\n", PL + ":v2.1.5",
+      (0, True, b"services:\n  metrics:\n    image: ghcr.io/plausible/community-edition:v2.1.5\n", PL + ":v2.1.5",
        ["ovx.override.yml"]))
 with as_uid(0):
     rc, out = quiet(U.main, ["rollback", res["op"]])
 release_lock()
 check("retag with an override file: rollback restores it byte-identical",
-      (rc, raw(ov_over) == OVER_BEFORE, raw(ov_base) == BASE_BEFORE, D.containers["plausible"]["Image"]),
+      (rc, raw(ov_over) == OVER_BEFORE, raw(ov_base) == BASE_BEFORE, D.containers["metrics"]["Image"]),
       (0, True, True, "sha256:pl"))
-del D.containers["plausible"]
+del D.containers["metrics"]
 D.images_from = None
 os.unlink(U.VERSIONS)
 
