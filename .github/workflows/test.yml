@@ -1,8 +1,12 @@
 name: test
 
+# A pull request runs once (pull_request), a push only on main, where the release looks for its
+# run; any other branch by hand (Actions › test › Run workflow).
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

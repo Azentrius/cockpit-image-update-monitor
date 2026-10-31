@@ -30,7 +30,7 @@ python3 tools/preview/build.py   # the page with test data: tools/preview/out/di
 The offline tests need no Docker, no root and no network. The plugin tests wait until the stubbed
 helpers have answered and the page has handled it (`settle()`, `flush()`), never for a number of
 milliseconds; a state in between is checked behind an answer the test releases itself. The `test`
-workflow runs the lint, the tests and the package build on every push and pull request; it has to be
+workflow runs the lint, the tests and the package build on every pull request and every push to `main`; it has to be
 green before a merge.
 
 ## End-to-end test
@@ -49,8 +49,9 @@ It works in its own compose projects `imgupd-test`, `imgupd-test-my`, `imgupd-te
 local registry on port 5000, `E2E_REGISTRY_PORT`), `imgupd-test-major` and `imgupd-test-mdb` (the
 database majors) and `imgupd-test-build` (the rebuild), touches nothing else and cleans up on exit; a
 run that passed fails if anything of it is left behind. `E2E_MYSQL=0` skips the MariaDB and MySQL
-parts. CI runs it on a GitHub runner on every push and before every release, and on every push with
-the `.rpm` installed in Rocky Linux 9 and 10 VMs with SELinux enforcing (job `e2e-el`,
+parts. CI runs it on a GitHub runner on every pull request and every push to `main`, so before every
+release too, and also with the `.rpm` installed in Rocky Linux 9 and 10 VMs with SELinux enforcing
+(job `e2e-el`,
 `tools/vm.sh`; a pilot, not yet a required check). Where the package is installed, the radar runs
 after every update and rollback and writes `versions.json` anew: the test waits for it before it
 writes a radar record of its own, and writes the record again before every plan that reads it. A
