@@ -51,8 +51,8 @@ installed version into releases.json next to the output file, for the update
 and version change dialogs.
 
 An image no registry shows gets the status "unlisted" instead of "error": it
-was built or tagged on this server (hibiscus-server:2.12.4 means
-docker.io/library/hibiscus-server, which does not exist), or it is private
+was built or tagged on this server (intranet-app:2.12.4 means
+docker.io/library/intranet-app, which does not exist), or it is private
 and the radar has no login. There is nothing newer to find for it.
 
 Lives outside /var/lib/diun on purpose: that directory is writable from the
@@ -450,7 +450,7 @@ def newest_plain(tags):
 
 # --------------------------------------------------------- built images ----
 # An image built on this server (compose `build:`) is in no registry, but the
-# images its Dockerfile starts FROM are: caddy-caddy is Caddy with a DNS plugin
+# images its Dockerfile starts FROM are: proxy-caddy is Caddy with a DNS plugin
 # built by xcaddy on caddy:2-builder and copied onto caddy:2. When those move
 # on after the build, rebuilding brings the new base.
 def parse_ts(s):
@@ -835,7 +835,7 @@ RETRY_PAUSE = 30            # seconds before the one retry of a run that reached
 
 def reached_none(recs):
     """No registry answered this run: every image ended in a registry error.
-    That is the server's DNS or network, not the registries (build-host,
+    That is the server's DNS or network, not the registries (a CI host,
     2026-10-20: the resolver answered "server misbehaving" for every name).
     "unlisted" is an answer (access denied), so it counts as reached."""
     return bool(recs) and all(r.get("status") == "error" for r in recs)
