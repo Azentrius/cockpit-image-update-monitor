@@ -112,7 +112,7 @@ jobs:
 
       - name: Packages (.deb, .rpm) and source archive
         run: |
-          sudo apt-get update -qq
+          sudo sh tools/apt-update.sh
           sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
           make packages
           make dist
