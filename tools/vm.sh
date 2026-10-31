@@ -57,7 +57,9 @@ start() {
     mkdir -p "$cache" "$dir"
     if ! echo "$sum  $cache/$name" | sha256sum -c --status 2> /dev/null; then
         echo "Downloading $name"
-        curl -fsSL --retry 3 --retry-delay 10 --max-time 900 -o "$cache/$name.part" "$url"
+        # --retry-all-errors: Rocky's mirror once broke a download off with curl's error 92 (an
+        # HTTP/2 stream error), which --retry alone does not count as transient.
+        curl -fsSL --retry 3 --retry-delay 10 --retry-all-errors --max-time 900 -o "$cache/$name.part" "$url"
         mv "$cache/$name.part" "$cache/$name"
     fi
     echo "$sum  $cache/$name" | sha256sum -c - || die "$name does not match its pinned SHA-256"
