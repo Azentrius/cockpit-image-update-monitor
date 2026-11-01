@@ -757,7 +757,7 @@ written, with its `facts`):
 
 | Item | State | Counts |
 |---|---|---|
-| `updates` | `info` with containers, else `ok`; `none` while Diun has written no event | the rows the page marks “Update available”: Diun's newest event of the image and tag names another digest than the one running, not dismissed and not the same build (`sameBuild`) |
+| `updates` | `info` with containers, else `ok`; `none` while Diun has written no event | the rows the page marks “Update available”: Diun's newest event of the image and tag names another digest than the one running, not dismissed and no newer build than the one running (`notNewerBuild`) |
 | `failed` | `danger` with entries, else `ok` | the `update` and `retag` runs of the history that failed and were not rolled back, whose rollback failed, or that ended without their last line (`running` while no process runs it: aborted), as long as no later run settled them. A run stands for what `make_plan` grouped: its `services` in its compose project and compose files (`workdir`, `files`), and the containers it names. A later run (any outcome, also one still in progress) settles only those services in the same files (or where the files are not recorded) and the containers it names: a success of another service, another tag of the image or the same image in other compose files settles nothing; a later run of the same services, also a tag change, does. A run partly settled is named by a container still affected, with the services still affected. Entries without `services` (older versions) stand for the containers they name, and they settle no services |
 | `radar` | `ok`; `warning` when `versions.json` is older than 24 hours (the page's “outdated”) or its time is unreadable, or (since 0.22.0) when its last run reached no registry (`no_registry`; title “Version radar reached no registry”, the detail points to DNS and the network, never the error itself, which can name addresses); `none` without `versions.json` | `value` is the age (“2 h”, “3 days”) |
 | `rollout` | `info` with containers, else `ok` | the rows “Roll-out pending” (`pulled`) |
@@ -974,11 +974,13 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   follow its tag, so Update cannot bring what Diun saw (the plan says `digest-pinned`). Service
   containers of CI jobs produce such events. The registry link (`hub_link`) is the image's, from any of
   its events. Up to 0.13.0 the newest event of the image counted for every tag.
-- A new digest is no update when the event's `created` is the running image's `created` (to the
-  second, any time zone; `builtAt`, `sameBuild`): Docker Hub publishes the list of platforms of an
-  official image again when it adds one (`nextcloud:apache` got riscv64, 2026-10-16), and the list's
-  digest changes while the amd64 build stays. A date before 1980 counts for nothing: reproducible
-  builds set a fixed one (1970-01-01).
+- A new digest is no update when the event's `created` is the running image's `created` or earlier
+  (to the second, any time zone; `builtAt`, `notNewerBuild`). The same build: Docker Hub publishes
+  the list of platforms of an official image again when it adds one (`nextcloud:apache` got riscv64,
+  2026-10-16), and the list's digest changes while the amd64 build stays. An earlier build (since
+  0.27.2): Diun looks every few hours, and a container updated after its look may run a build pushed
+  later (`mobsf:latest`, 2026-11-01: Diun saw the 20:42 build at 23:00, the 22:56 build came at
+  23:02). A date before 1980 counts for nothing: reproducible builds set a fixed one (1970-01-01).
 
 ## Plugin internals
 

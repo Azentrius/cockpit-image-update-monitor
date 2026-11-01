@@ -134,6 +134,11 @@ check("the same build under a new digest (Docker's and Diun's time, another zone
             [event("acme/app:latest", "sha256:b", created=c)])["update"]
        for c in ("2026-10-15 19:00:50.089 +0000 UTC", "2026-10-15 21:00:50 +0200", "2026-10-15T19:00:51Z")],
       [[], [], ["app"]])
+check("an older build than the one that runs (Diun looked before the update): no update; "
+      "without the running image's build time an update",
+      [rows([dict(app, created=c)], [event("acme/app:latest", "sha256:b", created="2026-11-01 20:42:34.049 +0000 UTC")])["update"]
+       for c in ("2026-11-01T22:56:21.203Z", "")],
+      [[], ["app"]])
 check("a build date before 1980 proves nothing",
       rows([dict(app, created="1970-01-01T00:00:00Z")],
            [event("acme/app:latest", "sha256:b", created="1970-01-01 00:00:00 +0000 UTC")])["update"], ["app"])

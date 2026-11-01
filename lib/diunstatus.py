@@ -219,11 +219,12 @@ def events_by_tag(text):
     return by_tag, seen
 
 
-def same_build(ev, ctn):
-    """Diun's new digest is the build that runs (sameBuild): a new list of
-    platforms under the same tag."""
+def not_newer_build(ev, ctn):
+    """Diun's new digest is no newer build than the one that runs
+    (notNewerBuild): the same build under a new list of platforms, or an older
+    one that Diun saw before the container was updated."""
     a, b = seconds_of(ev.get("created")), seconds_of(ctn.get("created"))
-    return a is not None and a == b and a > EPOCH_1980
+    return a is not None and b is not None and a <= b and a > EPOCH_1980
 
 
 def refines(found, version):
@@ -279,7 +280,7 @@ def page_rows(containers, by_tag, dismissed, versions):
         if c.get("pulled"):
             kind = "pulled"
         elif (ev and ev.get("digest") and c.get("digest") and ev["digest"] != c["digest"]
-              and not dismissed.get(ev_key(ev)) and not same_build(ev, c)):
+              and not dismissed.get(ev_key(ev)) and not not_newer_build(ev, c)):
             kind = "update"
         elif radar_ok and has_news(recs.get(key), installed_of(c, recs.get(key))):
             kind = "newver"
