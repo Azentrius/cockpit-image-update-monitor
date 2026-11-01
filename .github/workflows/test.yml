@@ -29,7 +29,7 @@ jobs:
         run: make check
       - name: Packages (.deb, .rpm) with valid AppStream data, built twice to the same bytes
         run: |
-          sudo apt-get update -qq
+          sudo sh tools/apt-update.sh
           sudo apt-get install -y -qq --no-install-recommends rpm appstream > /dev/null
           appstreamcli validate --no-net packaging/*.metainfo.xml
           make packages
@@ -173,7 +173,7 @@ jobs:
           persist-credentials: false
       - name: Packages
         run: |
-          sudo apt-get update -qq
+          sudo sh tools/apt-update.sh
           sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
           make packages
       - name: Install, check and remove on ${{ matrix.image }}
@@ -297,7 +297,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ matrix.image }}
         run: |
-          sudo apt-get update -qq
+          sudo sh tools/apt-update.sh
           sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
           make packages
           version=$(sh tools/check-version.sh)
@@ -341,7 +341,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sudo apt-get update -qq
+          sudo sh tools/apt-update.sh
           sudo apt-get install -y -qq --no-install-recommends cockpit-ws cockpit-system cockpit-bridge rpm > /dev/null
           sudo systemctl start cockpit.socket
           make packages
@@ -437,7 +437,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sudo apt-get update -qq
+          sudo sh tools/apt-update.sh
           sudo apt-get install -y -qq --no-install-recommends rpm qemu-system-x86 qemu-utils cloud-image-utils > /dev/null
           make packages
           sh tools/upgrade-base.sh prev >> "$GITHUB_ENV"
