@@ -40,7 +40,7 @@ if [ -d /run/systemd/system ]; then
     done
     # A new version may change the format of the radar's data: refresh it, two minutes from now.
     # The same apt run can restart systemd-resolved or the network, and a run in that moment
-    # reaches no registry (build-host, 2026-10-20). Without systemd-run: at once, as before.
+    # reaches no registry (seen on a CI host, 2026-10-20). Without systemd-run: at once, as before.
     if systemctl is-enabled --quiet diun-radar.timer 2> /dev/null \
         && ! systemctl is-active --quiet diun-radar-after-install.timer; then
         systemd-run --quiet --unit=diun-radar-after-install --on-active=120 --timer-property=AccuracySec=10s \

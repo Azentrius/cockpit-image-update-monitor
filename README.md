@@ -170,7 +170,7 @@ version pinned there (`FROM caddy:2.11.4`) stays.
 
 | Rebuild in the row (phone) | The plan of a rebuild |
 |---|---|
-| ![An image built on the server with a newer base: Rebuild in its row, on a phone](docs/img/rebuild-phone.png) | ![Rebuild caddy: the base images, newer than the build, then the plan](docs/img/rebuild-dialog.png) |
+| ![An image built on the server with a newer base: Rebuild in its row, on a phone](docs/img/rebuild-phone.png) | ![Rebuild proxy: the base images, newer than the build, then the plan](docs/img/rebuild-dialog.png) |
 
 ```mermaid
 sequenceDiagram

@@ -81,7 +81,7 @@
    "image": "onlyoffice/documentserver",
    "tag": "9.4.0.1",
    "containers": [
-    "onlyoffice-ds"
+    "editor"
    ],
    "db": false,
    "reach": [],
@@ -90,7 +90,7 @@
     "via": "known"
    },
    "installed": {
-    "sha256:onlyoffice-ds": {
+    "sha256:editor": {
      "version": "9.4.0.1",
      "src": "tag"
     }
@@ -118,8 +118,8 @@
    "image": "nextcloud",
    "tag": "apache",
    "containers": [
-    "nextcloud-family-app-1",
-    "nextcloud-family-cron-1"
+    "cloud-app-1",
+    "cloud-cron-1"
    ],
    "db": false,
    "reach": [
@@ -132,11 +132,11 @@
     "via": "known"
    },
    "installed": {
-    "sha256:nextcloud-family-app-1": {
+    "sha256:cloud-app-1": {
      "version": "34.0.3",
      "src": "env:NEXTCLOUD_VERSION"
     },
-    "sha256:nextcloud-family-cron-1": {
+    "sha256:cloud-cron-1": {
      "version": "34.0.3",
      "src": "env:NEXTCLOUD_VERSION"
     }
@@ -194,10 +194,10 @@
    "image": "postgres",
    "tag": "16-alpine",
    "containers": [
-    "nextcloud-family-db-1",
-    "docuseal-db",
-    "plausible_db",
-    "glitchtip-postgres"
+    "cloud-db-1",
+    "contracts-db",
+    "metrics_db",
+    "bugs-postgres"
    ],
    "db": true,
    "reach": [
@@ -205,7 +205,7 @@
     "minor"
    ],
    "installed": {
-    "sha256:nextcloud-family-db-1": {
+    "sha256:cloud-db-1": {
      "version": "16.15",
      "src": "env:PG_VERSION"
     },
@@ -282,7 +282,7 @@
    "image": "redis",
    "tag": "7-alpine",
    "containers": [
-    "nextcloud-family-redis-1"
+    "cloud-redis-1"
    ],
    "db": true,
    "reach": [
@@ -294,7 +294,7 @@
     "via": "known"
    },
    "installed": {
-    "sha256:nextcloud-family-redis-1": {
+    "sha256:cloud-redis-1": {
      "version": "7.4.11",
      "src": "env:REDIS_VERSION"
     }
@@ -322,7 +322,7 @@
    "image": "docuseal/docuseal",
    "tag": "latest",
    "containers": [
-    "docuseal"
+    "contracts"
    ],
    "db": false,
    "reach": [
@@ -335,7 +335,7 @@
     "via": "known"
    },
    "installed": {
-    "sha256:docuseal": {
+    "sha256:contracts": {
      "version": "3.1.6",
      "src": "digest",
      "tag": "3.1.6",
@@ -385,7 +385,7 @@
    "image": "docker.io/sakowicz/actual-ai",
    "tag": "latest",
    "containers": [
-    "actual-ai"
+    "budget-ai"
    ],
    "db": false,
    "reach": [
@@ -398,7 +398,7 @@
     "via": "known"
    },
    "installed": {
-    "sha256:actual-ai": {
+    "sha256:budget-ai": {
      "version": "2.4.1",
      "src": "digest",
      "tag": "2.4.1",
@@ -422,7 +422,7 @@
    "image": "ollama/ollama",
    "tag": "latest",
    "containers": [
-    "ollama"
+    "inference"
    ],
    "db": false,
    "reach": [
@@ -435,7 +435,7 @@
     "via": "known"
    },
    "installed": {
-    "sha256:ollama": {
+    "sha256:inference": {
      "version": "0.30.11",
      "src": "digest",
      "tag": "0.30.11",
@@ -485,7 +485,7 @@
    "image": "actualbudget/actual-server",
    "tag": "26.6.0",
    "containers": [
-    "actual_server"
+    "budget_server"
    ],
    "db": false,
    "reach": [],
@@ -494,7 +494,7 @@
     "via": "known"
    },
    "installed": {
-    "sha256:actual_server": {
+    "sha256:budget_server": {
      "version": "26.6.0",
      "src": "tag"
     }
@@ -522,7 +522,7 @@
    "image": "ghcr.io/plausible/community-edition",
    "tag": "v2.1.4",
    "containers": [
-    "plausible"
+    "metrics"
    ],
    "db": false,
    "reach": [],
@@ -531,7 +531,7 @@
     "via": "label"
    },
    "installed": {
-    "sha256:plausible": {
+    "sha256:metrics": {
      "version": "2.1.4",
      "src": "tag"
     }
@@ -593,7 +593,7 @@
    "image": "clickhouse/clickhouse-server",
    "tag": "24.3.3.102-alpine",
    "containers": [
-    "plausible_events_db"
+    "metrics_events_db"
    ],
    "db": true,
    "reach": [],
@@ -602,7 +602,7 @@
     "via": "known"
    },
    "installed": {
-    "sha256:plausible_events_db": {
+    "sha256:metrics_events_db": {
      "version": "24.3.3.102",
      "src": "tag"
     }
@@ -630,8 +630,8 @@
    "image": "rustdesk/rustdesk-server",
    "tag": "latest",
    "containers": [
-    "hbbs",
-    "hbbr"
+    "remote-signal",
+    "remote-tunnel"
    ],
    "db": false,
    "reach": [
@@ -644,11 +644,11 @@
     "via": "label"
    },
    "installed": {
-    "sha256:hbbs": {
+    "sha256:remote-signal": {
      "version": "1.1.15",
      "src": "label"
     },
-    "sha256:hbbr": {
+    "sha256:remote-tunnel": {
      "version": "1.1.15",
      "src": "label"
     }
@@ -670,7 +670,7 @@
    "image": "calcom/cal.com",
    "tag": "latest",
    "containers": [
-    "calcom"
+    "booking"
    ],
    "db": false,
    "reach": [
@@ -683,7 +683,7 @@
     "via": "label"
    },
    "installed": {
-    "sha256:calcom": {
+    "sha256:booking": {
      "version": "6.2.0",
      "src": "label"
     }
@@ -705,7 +705,7 @@
    "image": "postgres",
    "tag": "15-alpine",
    "containers": [
-    "calcom-db"
+    "booking-db"
    ],
    "db": true,
    "reach": [
@@ -713,7 +713,7 @@
     "minor"
    ],
    "installed": {
-    "sha256:calcom-db": {
+    "sha256:booking-db": {
      "version": "15.18",
      "src": "env:PG_VERSION"
     }
@@ -741,7 +741,7 @@
    "image": "cubejs/cube",
    "tag": "v1.6.6",
    "containers": [
-    "formbricks-cube"
+    "survey-cube"
    ],
    "db": false,
    "reach": [],
@@ -750,7 +750,7 @@
     "via": "label"
    },
    "installed": {
-    "sha256:formbricks-cube": {
+    "sha256:survey-cube": {
      "version": "1.6.6",
      "src": "tag"
     }
@@ -778,7 +778,7 @@
    "image": "pgvector/pgvector",
    "tag": "pg17",
    "containers": [
-    "formbricks-db"
+    "survey-db"
    ],
    "db": true,
    "reach": [
@@ -786,7 +786,7 @@
     "minor"
    ],
    "installed": {
-    "sha256:formbricks-db": {
+    "sha256:survey-db": {
      "version": "17.10",
      "src": "env:PG_VERSION"
     }
@@ -815,8 +815,8 @@
    "image": "valkey/valkey",
    "tag": "latest",
    "containers": [
-    "formbricks-redis",
-    "glitchtip-redis"
+    "survey-redis",
+    "bugs-redis"
    ],
    "db": true,
    "reach": [
@@ -829,11 +829,11 @@
     "via": "label"
    },
    "installed": {
-    "sha256:formbricks-redis": {
+    "sha256:survey-redis": {
      "version": "9.1.0",
      "src": "env:VALKEY_VERSION"
     },
-    "sha256:glitchtip-redis": {
+    "sha256:bugs-redis": {
      "version": "9.1.0",
      "src": "env:VALKEY_VERSION"
     }
@@ -855,7 +855,7 @@
    "image": "ghcr.io/cbcoutinho/nextcloud-mcp-server",
    "tag": "latest",
    "containers": [
-    "prod-mcp-1"
+    "tools-mcp-1"
    ],
    "db": false,
    "reach": [
@@ -868,7 +868,7 @@
     "via": "label"
    },
    "installed": {
-    "sha256:prod-mcp-1": {
+    "sha256:tools-mcp-1": {
      "version": null,
      "src": "digest",
      "tag": null,
@@ -884,7 +884,7 @@
    "image": "ghcr.io/formbricks/formbricks",
    "tag": "latest",
    "containers": [
-    "formbricks-app"
+    "survey-app"
    ],
    "db": false,
    "reach": [
@@ -897,7 +897,7 @@
     "via": "ghcr"
    },
    "installed": {
-    "sha256:formbricks-app": {
+    "sha256:survey-app": {
      "version": null,
      "src": "digest",
      "tag": null,
@@ -918,8 +918,8 @@
    "image": "boky/postfix",
    "tag": "latest",
    "containers": [
-    "smtp-relay-2",
-    "smtp-relay"
+    "mailer-2",
+    "mailer"
    ],
    "db": false,
    "reach": [
@@ -932,13 +932,13 @@
     "via": "known"
    },
    "installed": {
-    "sha256:smtp-relay-2": {
+    "sha256:mailer-2": {
      "version": "5.1.0",
      "src": "digest",
      "tag": "5.1.0",
      "ts": "2026-10-12T02:17:34Z"
     },
-    "sha256:smtp-relay": {
+    "sha256:mailer": {
      "version": "5.1.0",
      "src": "digest",
      "tag": "5.1.0",
@@ -962,8 +962,8 @@
    "image": "glitchtip/glitchtip",
    "tag": "latest",
    "containers": [
-    "glitchtip-web",
-    "glitchtip-worker"
+    "bugs-web",
+    "bugs-worker"
    ],
    "db": false,
    "reach": [
@@ -972,11 +972,11 @@
     "major"
    ],
    "installed": {
-    "sha256:glitchtip-web": {
+    "sha256:bugs-web": {
      "version": "6.1.8",
      "src": "env:GLITCHTIP_VERSION"
     },
-    "sha256:glitchtip-worker": {
+    "sha256:bugs-worker": {
      "version": "6.1.8",
      "src": "env:GLITCHTIP_VERSION"
     }
@@ -998,7 +998,7 @@
    "image": "ghcr.io/formbricks/hub",
    "tag": "latest",
    "containers": [
-    "formbricks-hub"
+    "survey-hub"
    ],
    "db": false,
    "reach": [
@@ -1011,7 +1011,7 @@
     "via": "ghcr"
    },
    "installed": {
-    "sha256:formbricks-hub": {
+    "sha256:survey-hub": {
      "version": "0.4.0",
      "src": "digest",
      "tag": "0.4.0",

@@ -9,9 +9,9 @@ state and the summary in English and German, the contract's shape, the file
 without root, its arguments, and the writers: the radar run and the hook
 after update, rollback and cleanup. Also the manifest's menu entry.
 
-The fixture test/fixtures/status.json is this module's output for the real
-host data of the other fixtures; test/status-rows.js checks that the page
-shows the same rows. `python3 status_test.py --write-fixture` writes it anew.
+The fixture test/fixtures/status.json is this module's output for the data
+of the other fixtures; test/status-rows.js checks that the page shows the
+same rows. `python3 status_test.py --write-fixture` writes it anew.
 No Docker, no root, no network."""
 import contextlib
 import importlib.util
@@ -89,7 +89,7 @@ def ctn(name, image, tag, digest="sha256:run", **kw):
 
 
 def event(image, digest, ts="2026-10-11T10:00:00Z", created=""):
-    return json.dumps({"ts": ts, "status": "update", "hostname": "docker-host", "provider": "docker",
+    return json.dumps({"ts": ts, "status": "update", "hostname": "web1", "provider": "docker",
                        "image": image, "digest": digest, "created": created, "platform": "linux/amd64"})
 
 
@@ -175,8 +175,8 @@ cube_rec = {"image": "cubejs/cube", "tag": "v1.6", "db": False,
             "versions": {"1.6.74": {"status": "current"}, "1.6": {"patch": "v1.6.80", "status": "patch"}}}
 check("a line tag refined by the radar: its release is compared, not the tag's number",
       rows([cube], versions=radar(cube_rec))["newver"], [])
-built = ctn("web", "hibiscus-server", "2.12.4", digest="")
-base = {"image": "hibiscus-server", "tag": "2.12.4", "status": "unlisted", "db": False}
+built = ctn("web", "intranet-app", "2.12.4", digest="")
+base = {"image": "intranet-app", "tag": "2.12.4", "status": "unlisted", "db": False}
 check("built here: a newer base is a new version, a pinned one or an error is not",
       [rows([built], versions=radar(dict(base, base=b)))["newver"]
        for b in ([{"image": "caddy", "tag": "2", "newer": True}],
@@ -452,13 +452,13 @@ check("English: no German left", sorted({t for t in english if GERMAN_RE.search(
 check("the German check finds German",
       all(GERMAN_RE.search(t) for t in ("Ausrollen ausstehend", "3 Tage", "< 1 Std.", "Neue Versionen")), True)
 
-# ------------------------------------------------------- the fixture of real host data
+# ------------------------------------------------------- status.json of the fixtures
 fx = fixture_doc()
 with open(os.path.join(FIX, "status.json"), encoding="utf-8") as f:
     stored = json.load(f)
-check("test/fixtures/status.json is the status of the real host data (python3 status_test.py --write-fixture)",
+check("test/fixtures/status.json is the status of the other fixtures (python3 status_test.py --write-fixture)",
       dict(fx, version=None), dict(stored, version=None))
-check("fixture: what the page shows on that host",
+check("fixture: what the page shows for them",
       (fx["state"], fx["summary"]), ("info", "2 updates available, 3 roll-outs pending, 17 new versions"))
 
 # ------------------------------------------------------- the file and `status`

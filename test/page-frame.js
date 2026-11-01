@@ -22,7 +22,7 @@ const files = {
     "/var/lib/diun/events.jsonl": fs.readFileSync(path.join(FIX, "events.jsonl"), "utf8"),
     "/var/lib/diun-radar/versions.json": JSON.parse(fs.readFileSync(path.join(FIX, "versions2.json"), "utf8")),
     "/var/lib/diun/dismissed.json": null,
-    "/etc/hostname": "docker-host\n",
+    "/etc/hostname": "web1\n",
 };
 const DEPS = { root: true, docker: { state: "ok", compose: true }, diun: { state: "running", events: true },
                skopeo: { state: "missing", can_install: true }, radar: { state: "active", running: false },
@@ -152,11 +152,11 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     await flush();
     const rows = [...b.d.querySelectorAll("#dm-rows tr")];
     const status = (name) => rows.find((tr) => tr.querySelector(".dm-name").textContent === name).querySelector('td[data-label="Status"] .az-label');
-    const want = { ollama: ["az-label az-label--info", "info-circle", "Update verfügbar"],
-                   "glitchtip-postgres": ["az-label az-label--info", "info-circle", "Ausrollen ausstehend"],
-                   plausible: ["az-label az-label--info", "info-circle", "Neue Version"],
-                   calcom: ["az-label az-label--success", "check-circle", "Aktuell"],
-                   "formbricks-app": ["az-label", "ban", "Unbekannt"] };
+    const want = { inference: ["az-label az-label--info", "info-circle", "Update verfügbar"],
+                   "bugs-postgres": ["az-label az-label--info", "info-circle", "Ausrollen ausstehend"],
+                   metrics: ["az-label az-label--info", "info-circle", "Neue Version"],
+                   booking: ["az-label az-label--success", "check-circle", "Aktuell"],
+                   "survey-app": ["az-label", "ban", "Unbekannt"] };
     for (const [name, [cls, ic, text]] of Object.entries(want)) {
         const l = status(name);
         console.log(`status ${name.padEnd(19)} ${l.className.padEnd(26)} ${iconOf(l).padEnd(13)} ${l.textContent}`);
@@ -166,10 +166,10 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert(!/LOCAL_ICONS|M256 8C119\.034/.test(js), "every icon comes from the shared icons.js");
 
     // 4. Buttons per place
-    const upd = b.d.querySelector('button[data-update="ollama"]');
+    const upd = b.d.querySelector('button[data-update="inference"]');
     assert.strictEqual(upd.className, "az-btn az-btn--secondary az-btn--sm");
     assert.deepStrictEqual([iconOf(upd), upd.textContent], ["arrow-circle-up", "Update"]);
-    const roll = b.d.querySelector('button[data-update="glitchtip-postgres"]');
+    const roll = b.d.querySelector('button[data-update="bugs-postgres"]');
     assert.deepStrictEqual([iconOf(roll), roll.textContent], ["arrow-circle-up", "Image ausrollen"]);
     const dis = b.d.querySelector("button[data-key]");
     console.log("\ndismiss:", dis.className, iconOf(dis), dis.getAttribute("aria-label"), "|", dis.title);
@@ -204,7 +204,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     const made = new Date("2026-10-12T03:15:00+02:00").toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
     assert.deepStrictEqual([...imgCells].slice(1, 3).map((x) => x.textContent.trim()), [made, "262,25 MiB"]);
     const cause = b.d.querySelector("#dm-ops .dm-op-reason");
-    assert(cause && cause.textContent.startsWith("formbricks-app: Error: Invalid environment variables"),
+    assert(cause && cause.textContent.startsWith("survey-app: Error: Invalid environment variables"),
            "failed update: its cause under the result");
     const clean = b.d.getElementById("dm-cleanup-btn");
     assert.deepStrictEqual([clean.className, iconOf(clean)], ["az-btn az-btn--secondary az-btn--sm", "trash"]);
@@ -213,7 +213,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert.deepStrictEqual(bare.map((x) => x.id || x.className), []);
 
     // 5. Dialog: the main action filled, Cancel a link; delete confirms in danger
-    b.d.querySelector('button[data-update="ollama"]').click();
+    b.d.querySelector('button[data-update="inference"]').click();
     await flush();
     const confirm = b.d.getElementById("dm-dialog-confirm"), cancel = b.d.getElementById("dm-dialog-cancel");
     console.log("\nupdate dialog:", confirm.className, "|", cancel.className, cancel.textContent);
@@ -239,7 +239,7 @@ const key = (w, el, k) => el.dispatchEvent(new w.KeyboardEvent("keydown", { key:
     assert.deepStrictEqual([source.textContent, source.getAttribute("href"), source.previousElementSibling.id],
         ["Quellcode", "https://github.com/Azentrius/cockpit-image-update-monitor", "dm-sig-host"], "the source link comes last");
     assert.strictEqual(b.d.getElementById("dm-sig-version").textContent, `Image Update Monitor ${VERSION}`);
-    assert.deepStrictEqual([b.d.getElementById("dm-sig-host").textContent, b.d.getElementById("dm-sig-host").hidden], ["docker-host", false]);
+    assert.deepStrictEqual([b.d.getElementById("dm-sig-host").textContent, b.d.getElementById("dm-sig-host").hidden], ["web1", false]);
     const e = boot("en", { files: { ...files, "/etc/hostname": null } });
     await flush();
     assert.strictEqual(e.d.getElementById("dm-sig-version").textContent, `Image Update Monitor ${VERSION}`);

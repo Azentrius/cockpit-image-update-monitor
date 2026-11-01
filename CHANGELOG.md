@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.26.1 – 2026-10-31
+
+Updates work on RHEL, Rocky Linux and AlmaLinux, and the radar and the cleanup no longer leave
+SELinux denials in the audit log there.
+
+**Upgrading:** nothing to do. The package installs the changed units and reloads systemd as before.
+
+- **Updates without `/var/backups`.** The plan of an update read the free space of
+  `/var/backups/image-updates` or, before the first update, of `/var/backups`. Only Debian and
+  Ubuntu have that folder: on RHEL and its rebuilds every plan stopped with an error before anything
+  changed, and with it the update dialog and every update. The plan now reads the free space of the
+  nearest folder that exists; the first update creates the backup folder as before.
+- **SELinux.** `diun-radar.service` and `diun-cleanup.service` no longer set `NoNewPrivileges`. With
+  SELinux enforcing it kept the docker command out of its domain (`container_runtime_t`): docker ran
+  all the same, but every call left a denial in the audit log, about 900 in one test run, which
+  Cockpit's SELinux page and setroubleshoot show as alerts. Both jobs run as root, so the flag added
+  nothing to the rest of their hardening, which stays as it was.
+- **Tests.** CI runs both end-to-end tests in Rocky Linux 9 and 10 VMs with SELinux enforcing and
+  Docker from Docker's repository for RHEL (job `e2e-el`): the helpers as the `.rpm` installs them,
+  then the page in a real Cockpit session, upgraded with `dnf` from the release before. The
+  end-to-end test waits for the package's radar before it writes radar records of its own.
+  `test/update_test.py` plans without the backup folder and its parent. The release waits up to 40
+  minutes for the tests, since the VM job takes about half an hour.
+
 ## 0.26.0 – 2026-10-25
 
 The dump before an update keeps the database password out of the process list, and the menu entry

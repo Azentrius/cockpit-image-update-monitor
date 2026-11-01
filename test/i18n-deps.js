@@ -109,7 +109,7 @@ function boot({ language, deps = DEPS_OK, install } = {}) {
     console.log("EN: German leftovers:", found.length ? found : "none");
     assert.deepStrictEqual(found, []);
     console.log("EN meta:", en.d.getElementById("dm-meta").textContent);
-    const enRow = [...en.d.querySelectorAll("#dm-rows tr")].find((tr) => tr.textContent.includes("plausible_db"));
+    const enRow = [...en.d.querySelectorAll("#dm-rows tr")].find((tr) => tr.textContent.includes("metrics_db"));
     console.log("EN row :", [...enRow.querySelectorAll("td")].map((td) => `${td.dataset.label}=${td.textContent.trim()}`).join(" | "));
 
     // 3. Requirements missing -> panel with the right items and buttons (German)

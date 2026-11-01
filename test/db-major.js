@@ -23,22 +23,22 @@ const FILES = {
 const inventory = fs.readFileSync(path.join(FIX, "inventory3.jsonl"), "utf8");
 const DEPS_OK = JSON.stringify({ root: true, docker: { state: "ok", compose: true },
     diun: { state: "running", events: true }, skopeo: { state: "ok" }, radar: { state: "active" } });
-const KEPT = { where: "Volume glitchtip_pgdata-pg16-20261021-010000", bytes: 120000000, major: 16, can_release: true };
-const OP = { id: "20261021-010000-glitchtip-postgres", ts: "2026-10-20T23:00:00Z", kind: "dbmajor", container: "glitchtip-postgres",
+const KEPT = { where: "Volume bugs_pgdata-pg16-20261021-010000", bytes: 120000000, major: 16, can_release: true };
+const OP = { id: "20261021-010000-bugs-postgres", ts: "2026-10-20T23:00:00Z", kind: "dbmajor", container: "bugs-postgres",
     image: "postgres:16-alpine", services: ["postgres"], from_major: 16, to_major: 17, from_version: "16.14", to_version: "17.11",
     rollback: "postgres:rollback-20261021-010000", dumps: [], status: "ok", can_rollback: true, kept: KEPT };
 const BACKUPS = { dir: "/var/backups/image-updates", free_bytes: 40 * 2 ** 30, dump_bytes: 0, dumps: [], images: [], ops: [OP] };
-const plan = (tag, major) => ({ container: "glitchtip-postgres", image: "postgres:16-alpine", updatable: true, project: "glitchtip",
-    workdir: "/opt/glitchtip", services: ["postgres"], containers: ["glitchtip-postgres"], pulled: false, config_changed: false,
-    dbs: [{ name: "glitchtip-postgres", kind: "postgres", running: true, size: 120000000 }], free_bytes: 40 * 2 ** 30,
+const plan = (tag, major) => ({ container: "bugs-postgres", image: "postgres:16-alpine", updatable: true, project: "bugs",
+    workdir: "/opt/bugs", services: ["postgres"], containers: ["bugs-postgres"], pulled: false, config_changed: false,
+    dbs: [{ name: "bugs-postgres", kind: "postgres", running: true, size: 120000000 }], free_bytes: 40 * 2 ** 30,
     installed_version: "16.14", tag_digits: 1, jump_unknown: false, target_version: tag.replace("-alpine", ""), jump: "major",
-    depends_on: [], dependents: [{ service: "web", containers: ["glitchtip-web"] }], jobs: [], job_order: [], shared_networks: [],
+    depends_on: [], dependents: [{ service: "web", containers: ["bugs-web"] }], jobs: [], job_order: [], shared_networks: [],
     retag: { tag, from_tag: "16-alpine", image: "postgres:" + tag, choice: "newer", level: "major", possible: true,
-             changes: [{ file: "/opt/glitchtip/docker-compose.yml", line: 5, old: "    image: postgres:16-alpine",
+             changes: [{ file: "/opt/bugs/docker-compose.yml", line: 5, old: "    image: postgres:16-alpine",
                          new: "    image: postgres:" + tag, service: "postgres" }], fingerprint: "a".repeat(64) },
     major });
 const MAJOR17 = { possible: true, reason: null, detail: null, from_major: 16, to_major: 17,
-    data: { type: "volume", name: "glitchtip_pgdata", driver: "local", source: "/var/lib/docker/volumes/glitchtip_pgdata/_data",
+    data: { type: "volume", name: "bugs_pgdata", driver: "local", source: "/var/lib/docker/volumes/bugs_pgdata/_data",
             destination: "/var/lib/postgresql/data" }, pgdata: "/var/lib/postgresql/data", stop: ["web", "worker"],
     extensions: ["pg_trgm"], data_bytes: 120000000, data_free: 40 * 2 ** 30, fingerprint: "b".repeat(64) };
 const MAJOR18 = { possible: false, reason: "major-pgdata", detail: "/var/lib/postgresql/18/docker | /var/lib/postgresql/data" };
@@ -98,12 +98,12 @@ const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => t
 (async () => {
     for (const [lang, title, button, ok] of [
         ["de", "Datenbank-Major: PostgreSQL 16 → 17", "Datenbank-Major ausführen",
-         "Datenbank-Major erfolgreich: 16.14 → 17.11. Die alten Daten bleiben in Volume glitchtip_pgdata-pg16-20261021-010000, bis Sie sie im Reiter Backups freigeben."],
+         "Datenbank-Major erfolgreich: 16.14 → 17.11. Die alten Daten bleiben in Volume bugs_pgdata-pg16-20261021-010000, bis Sie sie im Reiter Backups freigeben."],
         ["en", "Database major: PostgreSQL 16 → 17", "Run database major",
-         "Database major successful: 16.14 → 17.11. The old data is kept in Volume glitchtip_pgdata-pg16-20261021-010000 until you release it on the Backups tab."]]) {
+         "Database major successful: 16.14 → 17.11. The old data is kept in Volume bugs_pgdata-pg16-20261021-010000 until you release it on the Backups tab."]]) {
         const x = boot(lang, BASE);
         await settle();
-        rowOf(x.d, "glitchtip-postgres").querySelector("button[data-retag]").click();
+        rowOf(x.d, "bugs-postgres").querySelector("button[data-retag]").click();
         await settle();
         const sel = x.$("dm-retag-select");
         const majors = [...sel.querySelectorAll("option[data-major]")].map((o) => o.value);
@@ -116,14 +116,14 @@ const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => t
         console.log(`18 (${lang}):`, why);
         assert(/\/var\/lib\/postgresql\/18\/docker/.test(why) && /PGDATA: \/var\/lib\/postgresql\/data/.test(why), why);
         assert(x.$("dm-dialog-confirm").disabled);
-        assert.deepStrictEqual(x.calls.at(-1).slice(1), ["dbmajor", "glitchtip-postgres", "18.6-alpine", "--dry-run"]);
+        assert.deepStrictEqual(x.calls.at(-1).slice(1), ["dbmajor", "bugs-postgres", "18.6-alpine", "--dry-run"]);
         // 17: the plan of the major, no dump tick box, three tick boxes before the button.
         await choose("17.11-alpine");
         const pv = x.$("dm-retag-preview");
         assert.strictEqual(pv.querySelector(".az-alert__title").textContent, title);
         const kv = [...pv.querySelectorAll(".dm-kv")[0].querySelectorAll("li")].map((li) => li.textContent);
         console.log(`17 (${lang}):`, kv.join(" | "));
-        assert(kv[0].includes("glitchtip_pgdata") && kv[2].includes("web") && kv[2].includes("worker") && kv[3].includes("pg_trgm"), kv.join(" | "));
+        assert(kv[0].includes("bugs_pgdata") && kv[2].includes("web") && kv[2].includes("worker") && kv[3].includes("pg_trgm"), kv.join(" | "));
         assert.strictEqual(pv.querySelector("#dm-dump-check"), null, "a major always dumps");
         const gates = [...pv.querySelectorAll(".dm-gate")];
         assert.deepStrictEqual(gates.map((g) => g.id).sort(), ["dm-major-check", "dm-mj-backup", "dm-mj-downtime"]);
@@ -137,7 +137,7 @@ const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => t
         confirm.click();
         await settle();
         assert.deepStrictEqual(x.calls.find((c) => c[1] === "dbmajor" && c[4] === "--expect").slice(1),
-                               ["dbmajor", "glitchtip-postgres", "17.11-alpine", "--expect", "b".repeat(64)]);
+                               ["dbmajor", "bugs-postgres", "17.11-alpine", "--expect", "b".repeat(64)]);
         assert.strictEqual(x.$("dm-dialog-result").textContent, ok);
         x.$("dm-dialog-cancel").click();
     }
@@ -150,7 +150,7 @@ const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => t
          "Zu wenig Platz für den Probelauf in Dockers Verzeichnis /var/lib/docker: 100 MiB frei, 1.11 GiB nötig."]]) {
         const r = boot(lang, { ...BASE, "diun-update.py dbmajor": (cmd) => ({ out: JSON.stringify(plan(cmd[3], major)) }) });
         await settle();
-        rowOf(r.d, "glitchtip-postgres").querySelector("button[data-retag]").click();
+        rowOf(r.d, "bugs-postgres").querySelector("button[data-retag]").click();
         await settle();
         const sel = r.$("dm-retag-select");
         sel.value = "17.11-alpine";
@@ -248,7 +248,7 @@ const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => t
     await settle();
     b.d.querySelector("#dm-ops button[data-release]").click();
     console.log("release:", b.$("dm-dialog-desc").textContent);
-    assert(b.$("dm-dialog-desc").textContent.startsWith("Löscht die Daten von PostgreSQL 16 in Volume glitchtip_pgdata-pg16-20261021-010000"));
+    assert(b.$("dm-dialog-desc").textContent.startsWith("Löscht die Daten von PostgreSQL 16 in Volume bugs_pgdata-pg16-20261021-010000"));
     b.$("dm-dialog-confirm").click();
     await settle();
     assert.deepStrictEqual(b.calls.find((c) => c[1] === "delete-olddata").slice(1), ["delete-olddata", OP.id]);

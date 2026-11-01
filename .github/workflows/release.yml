@@ -1,5 +1,5 @@
 # Makes a release on request: Actions › release › Run workflow (on main).
-# Checks the version, requires the test workflow to have passed for this commit (waiting up to 20
+# Checks the version, requires the test workflow to have passed for this commit (waiting up to 40
 # minutes for it), runs the tests, builds the .deb and .rpm packages and the source archive and
 # creates the tag vVERSION with a GitHub release (packages, archive, SHA256SUMS, signed build
 # provenance, notes from CHANGELOG.md).
@@ -30,7 +30,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 70
     steps:
       - name: Only from main
         if: github.ref != 'refs/heads/main'
@@ -65,13 +65,14 @@ jobs:
       # also the end-to-end test, the installs, the upgrade and the real Cockpit session. The run
       # may still be going, and for a while after it ends the list of runs can show it unfinished
       # or not at all (Update Gaps 0.3.0: 20 seconds after the run ended). So ask every 20 seconds,
-      # for at most 20 minutes; a finished run without success stops the release at once.
+      # for at most 40 minutes (the job e2e-el alone takes up to half an hour, in its Rocky Linux
+      # VMs); a finished run without success stops the release at once.
       - name: The test workflow passed for this commit
-        timeout-minutes: 22
+        timeout-minutes: 42
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          limit=$(( $(date +%s) + 1200 ))
+          limit=$(( $(date +%s) + 2400 ))
           while :; do
             run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow test.yml --commit "$GITHUB_SHA" \
               --event push --limit 1 --json status,conclusion,url \
@@ -87,7 +88,7 @@ jobs:
             esac
             state=${state%/}
             if [ "$(date +%s)" -ge "$limit" ]; then
-              echo "::error::The test workflow has not passed for $GITHUB_SHA within 20 minutes (${state:-no run}). Wait for it, then start the release again."
+              echo "::error::The test workflow has not passed for $GITHUB_SHA within 40 minutes (${state:-no run}). Wait for it, then start the release again."
               exit 1
             fi
             echo "Waiting for the test workflow (${state:-no run listed yet})."
@@ -112,7 +113,7 @@ jobs:
 
       - name: Packages (.deb, .rpm) and source archive
         run: |
-          sudo apt-get update -qq
+          sudo sh tools/apt-update.sh
           sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
           make packages
           make dist

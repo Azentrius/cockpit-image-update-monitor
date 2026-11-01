@@ -120,12 +120,12 @@ until it has ended as well (exit 75 meanwhile). Check with `docker ps` before ac
 ### Inventory – one line per running container
 
 ```json
-{"name": "glitchtip-postgres", "image": "postgres", "tag": "16-alpine",
+{"name": "bugs-postgres", "image": "postgres", "tag": "16-alpine",
  "digest": "sha256:16bc…", "imgid": "sha256:16bc…",
  "version": "16.14", "version_src": "env:PG_VERSION",
  "tagid": "sha256:7218…", "pulled": true, "pulled_version": "16.15",
- "project": "glitchtip", "service": "glitchtip-postgres", "managed": true,
- "files": ["/opt/glitchtip/docker-compose.yml"], "ci_job": false, "created": "2026-08-14T02:11:09.512433187Z",
+ "project": "bugs", "service": "bugs-postgres", "managed": true,
+ "files": ["/opt/bugs/docker-compose.yml"], "ci_job": false, "created": "2026-08-14T02:11:09.512433187Z",
  "revision": ""}
 ```
 
@@ -156,7 +156,7 @@ until it has ended as well (exit 75 meanwhile). Check with `docker ps` before ac
 {"generated": "2026-10-12T02:17:34Z",
  "images": [{
    "image": "postgres", "tag": "16-alpine",
-   "containers": ["docuseal-db", "glitchtip-postgres"],
+   "containers": ["contracts-db", "bugs-postgres"],
    "db": true,
    "reach": ["patch", "minor"],
    "installed": {
@@ -196,7 +196,7 @@ until it has ended as well (exit 75 meanwhile). Check with `docker ps` before ac
 | `tag_now.pushed` / `tag_now.after` | only for a tag without numbers (`latest`, `main`) whose digest no version tag shares, and only on Docker Hub, the one registry that says when a tag was pushed: `after` = the newest release (`newest`) as `{"tag": "v4.5.3", "pushed": "…"}` and `pushed` = when the tag itself was pushed, at least a day later (two builds of one release are minutes apart). MobSF builds `latest` from its development branch. Asked again on every run, also while the digest stays the same. Missing in data from older radars. |
 | `status` | `major`, `minor`, `patch`, `current`, `unknown`, `error` or `unlisted`, for sorting and for the table. |
 | `stale` / `error` | registry error in this run. The rest of the entry comes from the last good run. In `installed` the new entry wins per image ID, except where it only read the tag's number: without the tag list a line tag cannot be told from an exact one, so the last good entry for the same image ID stays when it names that release or the same number (since 0.19.0; `kept_installed`). Nothing moves to another image ID. |
-| `status: "unlisted"` | (since 0.12.2) no registry shows the repository; skopeo answers `requested access to the resource is denied` (Docker Hub, for names it does not have and for private ones), `unauthorized` or `name unknown`. The image was built or tagged on the server (`hibiscus-server:2.12.4` means `docker.io/library/hibiscus-server`), or it is private and the radar has no login. Only `installed` and `error` are set. With a good earlier run the entry is kept like a registry error (`stale`). Timeouts, rate limits and server errors stay `error`. |
+| `status: "unlisted"` | (since 0.12.2) no registry shows the repository; skopeo answers `requested access to the resource is denied` (Docker Hub, for names it does not have and for private ones), `unauthorized` or `name unknown`. The image was built or tagged on the server (`intranet-app:2.12.4` means `docker.io/library/intranet-app`), or it is private and the radar has no login. Only `installed` and `error` are set. With a good earlier run the entry is kept like a registry error (`stale`). Timeouts, rate limits and server errors stay `error`. |
 | `no_registry` | (top level, since 0.22.0) only when the run reached no registry, not even on its second try: `{"error": <the most frequent error>, "images": <count>}`. Every image ended in a registry error (`unlisted` is an answer and counts as reached); the radar waited `RETRY_PAUSE` (30 s) and tried all of them once more. The entries are then the last good ones, marked `stale`. The page adds “(no registry reached)” to the header with the error in its tooltip; the Status Board's `radar` item warns. |
 | `built` / `base` | only for an `unlisted` image built on this server (a compose service with `build:`): `built` is the build time of the running image, `base` the images its Dockerfile starts `FROM` (read through `docker compose config`; stage names, `scratch` and unfilled variables left out; global `ARG` defaults filled in), each `{"image", "tag", "final", "version", "now", "pushed", "newer"}` or with `"pinned": true` (`FROM x@sha256:…`, never newer) or `"error"`. `final` marks the base of the image that runs; `version` is what the build carries (that base's version variable, final base only); `now` what the tag points to (`tag_now` rules, an exact tag is its own version); `pushed` when the registry got it for this server's platform (Docker Hub per platform, so a new list of platforms changes nothing; other registries: the image's creation time). `newer`: pushed more than an hour after the build, or `now` above `version`. Missing in data from older radars. |
 
@@ -259,13 +259,13 @@ How the page shows it: see *Release notes* under [Plugin internals](#plugin-inte
 ### `plan` (diun-update.py)
 
 ```json
-{"container": "glitchtip-web", "image": "glitchtip/glitchtip:latest",
+{"container": "bugs-web", "image": "glitchtip/glitchtip:latest",
  "updatable": true, "reason": null,
- "project": "glitchtip", "workdir": "/opt/glitchtip",
- "services": ["glitchtip-migrate", "glitchtip-web", "glitchtip-worker"],
- "containers": ["glitchtip-migrate", "glitchtip-web", "glitchtip-worker"],
- "dbs": [{"name": "glitchtip-postgres", "kind": "postgres", "running": true, "size": 162529280},
-         {"name": "glitchtip-redis", "kind": "unsupported", "running": true, "size": null}],
+ "project": "bugs", "workdir": "/opt/bugs",
+ "services": ["bugs-migrate", "bugs-web", "bugs-worker"],
+ "containers": ["bugs-migrate", "bugs-web", "bugs-worker"],
+ "dbs": [{"name": "bugs-postgres", "kind": "postgres", "running": true, "size": 162529280},
+         {"name": "bugs-redis", "kind": "unsupported", "running": true, "size": null}],
  "free_bytes": 84654432256, "config_changed": false, "pulled": false, "old_image": "sha256:…",
  "installed_version": "6.1.8", "tag_digits": 0, "jump_unknown": false}
 ```
@@ -330,10 +330,10 @@ plus:
 "retag": {"tag": "5", "from_tag": "5.0.2", "image": "ghcr.io/formbricks/formbricks:5",
           "choice": "line", "level": null, "newest": "5.4.5",
           "possible": true, "reason": null, "detail": null, "variable": null,
-          "changes": [{"file": "/opt/formbricks/docker-compose.yml", "line": 105,
+          "changes": [{"file": "/opt/survey/docker-compose.yml", "line": 105,
                        "old": "    image: ghcr.io/formbricks/formbricks:5.0.2",
                        "new": "    image: ghcr.io/formbricks/formbricks:5",
-                       "service": "formbricks", "sha256": "…"}],
+                       "service": "survey", "sha256": "…"}],
           "git": null, "fingerprint": "…"}
 ```
 
@@ -403,8 +403,8 @@ since 0.25.0 a MariaDB major (11 → 12) the same way (“MariaDB” below says 
 
 ```json
 "major": {"possible": true, "reason": null, "detail": null, "from_major": 16, "to_major": 17,
-          "data": {"type": "volume", "name": "glitchtip_pgdata", "driver": "local",
-                   "source": "/var/lib/docker/volumes/glitchtip_pgdata/_data",
+          "data": {"type": "volume", "name": "bugs_pgdata", "driver": "local",
+                   "source": "/var/lib/docker/volumes/bugs_pgdata/_data",
                    "destination": "/var/lib/postgresql/data"},
           "pgdata": "/var/lib/postgresql/data", "stop": ["web", "worker"], "extensions": ["pgcrypto"],
           "data_bytes": 162529280, "data_free": 84654432256, "fingerprint": "…64 hex…"}
@@ -665,7 +665,7 @@ with `op`. The versions can be `null` (unknown).
 `reason` (since 0.8.0), the most likely cause of a failed update or rollback:
 
 ```json
-{"container": "formbricks-app", "state": "restarting", "exit_code": 1, "oom": false, "source": "log",
+{"container": "survey-app", "state": "restarting", "exit_code": 1, "oom": false, "source": "log",
  "line": "Error: Invalid environment variables: - AUTHZED_ENABLED: Formbricks v6 requires …"}
 ```
 
@@ -695,7 +695,7 @@ It finds the command in `plugin/manifest.json`:
 "azentrius": {"status": ["/usr/lib/cockpit-image-updates/diun-update.py", "status"]}
 ```
 
-The answer, here for the real host data of `test/fixtures/` (`test/fixtures/status.json`, the file as
+The answer, here for the data of `test/fixtures/` (`test/fixtures/status.json`, the file as
 written, with its `facts`):
 
 ```json
@@ -704,17 +704,17 @@ written, with its `facts`):
  "summary": "2 updates available, 3 roll-outs pending, 17 new versions",
  "items": [
    {"id": "updates", "state": "info", "title": "Updates available", "value": "2",
-    "detail": "ollama, prod-mcp-1", "link": "#/updates/update", "checked_at": "2026-10-12T02:50:00Z",
+    "detail": "inference, tools-mcp-1", "link": "#/updates/update", "checked_at": "2026-10-12T02:50:00Z",
     "stale_after": 86400},
    {"id": "failed", "state": "ok", "title": "Failed updates", "value": "0", "link": "#/backups/history",
     "checked_at": "2026-10-12T02:50:00Z", "stale_after": 86400},
    {"id": "radar", "state": "ok", "title": "Version radar", "value": "< 1 h", "link": "#/updates",
     "checked_at": "2026-10-12T02:17:34Z", "stale_after": 86400},
    {"id": "rollout", "state": "info", "title": "Roll-out pending", "value": "3",
-    "detail": "docuseal-db, glitchtip-postgres, plausible_db", "link": "#/updates/rollout",
+    "detail": "bugs-postgres, contracts-db, metrics_db", "link": "#/updates/rollout",
     "checked_at": "2026-10-12T02:50:00Z", "stale_after": 86400},
    {"id": "new-versions", "state": "info", "title": "New versions", "value": "17",
-    "detail": "actual-ai, actual_server, calcom-db, diun-socket-proxy, docuseal +12",
+    "detail": "booking-db, budget-ai, budget_server, bugs-redis, bugs-web +12",
     "link": "#/updates/new-versions", "checked_at": "2026-10-12T02:17:34Z", "stale_after": 86400}]}
 ```
 
@@ -889,7 +889,7 @@ bytes (`docker image inspect`, `null` if Docker does not say) and `created` is I
 
 ```json
 "cleanup": {"keep_dumps": 3, "image_days": 14, "file": "/etc/image-updates.conf",
-            "error": null, "dumps": ["glitchtip/20260901-031500_glitchtip-postgres.sql.gz"],
+            "error": null, "dumps": ["bugs/20260901-031500_bugs-postgres.sql.gz"],
             "images": ["postgres:rollback-20260901-031500"], "bytes": 2936012}
 ```
 
@@ -919,7 +919,7 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
 ### Diun event (`events.jsonl`)
 
 ```json
-{"ts": "2026-10-11T10:00:16Z", "status": "update", "hostname": "docker-host", "provider": "docker",
+{"ts": "2026-10-11T10:00:16Z", "status": "update", "hostname": "web1", "provider": "docker",
  "image": "docker.io/ollama/ollama:latest", "digest": "sha256:…", "created": "…",
  "platform": "linux/amd64", "hub_link": "https://hub.docker.com/r/ollama/ollama"}
 ```
@@ -1191,8 +1191,8 @@ roll-outs pending, 17 new versions”).
 | `test/db-major.js` | the database major in the page: PostgreSQL majors with a target selectable, a tag that follows every major locked, 18 refused with what to change, the plan of a major (data, stopped services, extensions, no dump tick box), all tick boxes before the button, the command with the fingerprint, the result; the release from the history; German and English; since 0.25.0 the refusals for roles with an MD5 password and for too little room for the trial run, in both languages, and a MariaDB major (its majors offered, MySQL's locked, the plan with the engine and the data directory and without extensions, the run, the history naming the engine) |
 | `test/notes_test.py` | `diunnotes.py` with a fake GitHub (a request to the real one fails it): the source (known, also against a label, the labels in their forms, the second image of a tag, ghcr.io, other hosts, names GitHub would not take), versions of interest per record and per source, releases of an answer (drafts, pre-releases, tags without a version, cut text, links, kinds of tags), which of them (by version not by date, the image's kind of tag, newer than installed, `KEEP` and `more`), when a source is asked again (`RECHECK`, `TTL`, a newer or older version, `missing`, errors), GitHub's limit (403 none left, 403 `Retry-After`, 429: no further request, the last answer kept), a server error, no network, `RESERVE`, `MAX_REQUESTS`; the radar run writing `source` and `releases.json` (644), GitHub down (the last releases kept), a broken module or label not failing the run |
 | `test/inv_test.py` | inventory with fake Docker, compose files per container, CI job containers, build time, source revision |
-| `test/status_test.py` | `diunstatus.py` and `diun-update.py status`: the page's rules for the rows (Diun's event of the tag, `docker.io/library/`, another tag, a digest reference, dismissed, the same build in Docker's and Diun's time, a date before 1980, the newest event, roll-out first, CI jobs, no digest, a newer patch, a database major, `by_tag`, an empty comparison, a line tag refined by the radar, the base of an image built here), failed updates from the history (rolled back, a failed rollback also as written up to 0.18.0, aborted, still running, `discarded`; which later run settles which: another service and tag of the same project, the same image in other compose files or another directory, a retry and a tag change of the same services, overlapping groups, rollbacks and aborted runs next to an unrelated success, entries without services; the resulting state, summary and detail), the radar's age, state and summary in English and German with plurals, the contract's shape, no German in English, the fixture `status.json` of real host data, `status` without the file, with an unreadable one, from the file in German, the radar's age judged when asked, the history as root and the file without root, Docker not answering (the last file stays), `events.jsonl` as a link or a pipe and a large one, the arguments (exit 64, no root needed), the write after `rollback` and `cleanup` (silent) and none after `--dry-run`, a wrong call or without root, the radar run writing it and not failing for it; the `link` of every item in every state and language, and a link the Status Board would not take caught by the shape check |
-| `test/status-rows.js` | the page with the fixtures of a real host marks exactly the containers “Update available”, “Roll-out pending” and “New version” that `test/fixtures/status.json` names |
+| `test/status_test.py` | `diunstatus.py` and `diun-update.py status`: the page's rules for the rows (Diun's event of the tag, `docker.io/library/`, another tag, a digest reference, dismissed, the same build in Docker's and Diun's time, a date before 1980, the newest event, roll-out first, CI jobs, no digest, a newer patch, a database major, `by_tag`, an empty comparison, a line tag refined by the radar, the base of an image built here), failed updates from the history (rolled back, a failed rollback also as written up to 0.18.0, aborted, still running, `discarded`; which later run settles which: another service and tag of the same project, the same image in other compose files or another directory, a retry and a tag change of the same services, overlapping groups, rollbacks and aborted runs next to an unrelated success, entries without services; the resulting state, summary and detail), the radar's age, state and summary in English and German with plurals, the contract's shape, no German in English, the fixture `status.json`, `status` without the file, with an unreadable one, from the file in German, the radar's age judged when asked, the history as root and the file without root, Docker not answering (the last file stays), `events.jsonl` as a link or a pipe and a large one, the arguments (exit 64, no root needed), the write after `rollback` and `cleanup` (silent) and none after `--dry-run`, a wrong call or without root, the radar run writing it and not failing for it; the `link` of every item in every state and language, and a link the Status Board would not take caught by the shape check |
+| `test/status-rows.js` | the page with the fixtures marks exactly the containers “Update available”, “Roll-out pending” and “New version” that `test/fixtures/status.json` names |
 | `test/menu-status.js` | the status icon in Cockpit's menu with `i18n.js`, `menu-status.js` and the page's scripts: preloaded and hidden, the icon from `status.json` (`superuser: "try"`) and nothing else read or run, shown, the page loads (once); opened directly; German; a changed file, the same again (not sent), a missing and an unreadable file; the radar turning outdated while the session stays open (the check at 24 hours); no answer at all (the page starts after 3 seconds); state and tooltip equal state and summary of `diunstatus.document()` for the same facts, in English and German (the fixture, failed updates with an outdated radar, singular forms, nothing to do, no Diun and no radar, an unreadable radar time, a time with an offset, a run that reached no registry, also outdated and next to a failed update, odd values) |
 | `test/places.js` | where the Status Board's links lead, with `i18n.js`, `menu-status.js` and the page's scripts: each place opened directly (its tab at once, its first row once the rows are there, the history once it is there), while the page stays loaded (`locationchanged`), a tab chosen with the mouse or the keyboard going into the location and the link back to the place before, a reload that scrolls nowhere, no place, paths that are no place (also `constructor`, `toString`), no row of that status, the page loaded hidden (the location before and after the shell's hint, loaded at a place), and every link of `test/fixtures/status.json`: the Status Board's rule, its place, the rows its item counts |
 | `test/proc_test.py` | `diunproc` with real child processes: a silent hang, endless output, children that ignore SIGTERM (the group killed), a dump that hangs, the next command after a timeout; signals: no handler changed on import, `on_signals` restores the handlers before it, `held` defers a signal; a helper that holds a lock gets SIGTERM or SIGHUP while its command runs (silent and printing, `stream` and `copy`) and keeps the lock until the stop has reached the command (synchronised through FIFOs), children that ignore SIGTERM with SIGTERM and SIGHUP again during the cleanup (SIGKILL after the grace time, repeats only counted), the next operation afterwards, SIGKILL (the command runs on and keeps the lock until it ends) |
@@ -1220,6 +1220,9 @@ roll-outs pending, 17 new versions”).
 | `test/package-upgrade.sh` | CI (job `upgrade`), in a throw-away Debian 13, Fedora 43, Rocky Linux 9 or 10 or AlmaLinux 9 or 10 container: the release from `tools/upgrade-base.sh` (checked against `SHA256SUMS` and its build provenance), data a server has, this build over it; the version went up by the package manager's own comparison, the package database names this build, the files on disk are this build's byte for byte (`dpkg --verify` and `diff` against the `.deb`, `rpm -V` and the digests of the `.rpm`), the data unchanged, removed again with the data kept. Without an older release it says so and checks a fresh install |
 | `test/cockpit-setup.sh`, `test/cockpit-session.py` | CI (job `cockpit`), a real Cockpit with systemd and Docker on a throw-away GitHub runner, Playwright with Chromium through Cockpit's login: this build installed with apt over the release before, the page reloaded and logged in again after the upgrade (the new version, `i18n.js` of this build); the page in Cockpit's menu; since 0.21.0 right after each login the page loaded hidden for the menu and not started, and the menu's status icon (the shell's `sessionStorage` and the icon) as `diun-update.py status` gives it, after the login, after the radar runs, the roll-out and the rollback, and in German for the user without sudo before the page is opened; no JavaScript error and no failed request of the add-on's files or frame, and no other kind of error than Cockpit shows on its own (a login before the add-on is installed is the baseline; on Ubuntu 24.04 Cockpit 314 answers `*/po.js` and `*/po.manifest.js` with 404 on every page; the page's own request for Red Hat Mono, which that Cockpit does not ship, was caught this way; the page of the release before is checked only for loading, its errors are listed apart in the report); with administrative access (a sudo user) and without (a user without sudo, German browser: the hint, no actions); skopeo and the radar set up from the page (timer on, a first run), “Run radar now” (a new run); a throw-away compose project (a local registry, busybox 1.36.1 running, 1.37.0 pulled under the same tag): “Roll out image” with its plan, live output and result, the container on the new image, then the rollback from the history; since 0.23.0 the Status Board's links, `cockpit.jump` from the loaded page to its places (the tab, the address, no reload) and back to the history after a tab chosen on the page. Versions, steps and results in the job summary and the artifact `cockpit-session` (with screenshots). The same session runs in the job `e2e-el` in the Rocky Linux VMs, after the end-to-end test and the removal of the package: `dnf` instead of `apt` (`NEW_PKG` and `OLD_PKG` name a `.deb` or an `.rpm`, the `.rpm`'s `%post` stands in for the postinst), the administrator in `wheel`, the machine's `cockpit.socket` on 9090 forwarded to the runner, the browser on the runner through `PLAYWRIGHT_WS` (`playwright run-server`, tunnelled into the machine); report and screenshots in the artifacts `e2e-rocky-9` and `e2e-rocky-10` |
 | `tools/vm.sh` | not a test: the throw-away Rocky Linux 9 or 10 VM of the job `e2e-el` (the pinned cloud image under KVM, SELinux enforcing, ports forwarded and tunnelled, the SELinux denials after a mark, the logs); the same file in every Azentrius add-on |
+| `tools/apt-update.sh` | not a test: `apt-get update` on a CI runner with time limits and three tries, so that a mirror that hangs costs minutes instead of the job (the same file as in Cron Jobs) |
 
-The fixtures in `test/fixtures/` come from a real host. Host names are removed; `make_v2.py` builds
-`inventory3.jsonl` and `versions2.json` from `inventory2.jsonl`.
+The fixtures in `test/fixtures/` describe a made-up Docker host (`web1`): invented container,
+project and path names, with real images, tags and versions. `make_v2.py` builds `inventory3.jsonl`
+and `versions2.json` from `inventory2.jsonl`, except for the fields `versions2.json` has gained
+since (`source`, `choices`, `tag_now`).
