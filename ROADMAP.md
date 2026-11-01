@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-23 (0.25.0). Each stage is cut so that it is useful on its own and brings its own tests. The order
+As of 2026-11-01 (0.26.1). Each stage is cut so that it is useful on its own and brings its own tests. The order
 is the recommendation.
 
 **Guardrails for every stage** (they keep applying unchanged):
@@ -214,6 +214,44 @@ installed and the target version. Where it differs from the plan below:
   “breaking”, “migration”, “deprecated” are highlighted.
 - **Done when** the notes between two versions appear for the images on the reference host. If they are
   missing, a clear note appears instead of an error.
+
+---
+
+## Stage 3.1 – What the update round of 2026-11-01 showed
+
+**Seen on the reference hosts:** about 30 updates from the page, among them five PostgreSQL majors
+(15 → 17 and 16 → 17, volumes and a bind mount), tag changes to line tags and one failed major of an
+app with its rollback. Everything worked as designed: the trial runs, the counts, the login checks and
+the rollback, which put back the compose file byte for byte and the old image ID. These points are where
+the add-on says too little or protects too little.
+
+- **SQLite files are not saved.** ntfy (its user database, schema 9 → 10) and the Nextcloud MCP server
+  (Alembic migrations) migrated their SQLite files on the first start of the new image. A rollback then
+  puts the old image on a migrated file. Proposal: the plan finds SQLite files in the mounts of the
+  services (by their file header, with a size limit), the update copies them next to the dumps while the
+  containers are stopped, and the rollback puts them back. At least the dialog names them and warns.
+- **A major of an app is noticed only when it fails.** *Change version* offered Formbricks 5.4 → 6;
+  version 6 refuses to start without SpiceDB (`AUTHZED_*`). The restart loop was caught, the reason taken
+  from the log and the rollback worked; the data stayed untouched only because version 6 checks its
+  environment before its migrations. Proposal: a tag change to a newer major of an app gets a warning box
+  as a database major does, with the release notes marked “breaking” at the top and a tick box.
+- **The new version stays empty after an update.** For images without a version label (docuseal,
+  ollama, ntfy, sharewerk, cube, Forgejo, the Nextcloud MCP server) `to_version` is `null` until the
+  next radar run fills it in. Proposal: look up the new digest at once (the radar's digest cache or one
+  tag listing), or at least say “filled in by the next radar run” instead of an empty cell.
+- **A skipped login check is not said.** A PostgreSQL major without `POSTGRES_PASSWORD` in the
+  container's environment (Glitchtip) skips the login check after the restore silently. Proposal: say
+  so in the output and in the history (“login check skipped: no `POSTGRES_PASSWORD`”).
+- **“Configuration changed” without the difference.** On one host two projects (`forgejo-runner`,
+  `pomerium`) show `config_changed`, although their compose files are older than their containers and
+  Docker was not updated; the cause is unknown, likely variables of the shell that created them. An
+  update would roll out a configuration nobody has seen. Proposal: the plan names what would change
+  between `docker compose config` and the running container: image, command, volumes, ports, networks
+  and the names (never the values) of environment variables.
+- **Expected error lines after a database major.** After every PostgreSQL major the new server logs
+  `ERROR: role "<user>" already exists`: the dump creates the role again that the image created on its
+  first start, and the helper ignores exactly this line. Proposal: say so in the output after the
+  restore and in the README, so that a look into the database log does not alarm.
 
 ---
 
