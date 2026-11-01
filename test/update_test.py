@@ -182,6 +182,10 @@ class Docker:
         self.cfg = {"services": {}}
         self.compose_err = None
         self.hashes = {}
+        self.resolved = {}           # hashes of the output of `config` given on stdin (`-f -`):
+                                     # compose before 5.5.0 hashes env_file services only so as `up` does
+        self.stdin_err = None        # what `config --hash` on stdin fails with
+        self.fed = []                # (cmd, data) of every command given data on stdin
         self.calls, self.streamed = [], []
         self.rmi_refuse = set()
         self.pull_to = None          # (ref, image id) the next pull moves the tag to
@@ -212,6 +216,11 @@ class Docker:
                 return "", 1, self.compose_err
             if "--hash" in cmd:
                 svcs = cmd[cmd.index("--hash") + 1].split(",")
+                if any(cmd[i:i + 2] == ["-f", "-"] for i in range(len(cmd))):
+                    if self.stdin_err:
+                        return "", 1, self.stdin_err
+                    return "".join(f"{s} {self.resolved.get(s, self.hashes.get(s, 'h-' + s))}\n"
+                                   for s in svcs), 0, ""
                 return "".join(f"{s} {self.hashes.get(s, 'h-' + s)}\n" for s in svcs), 0, ""
             if self.images_from:
                 return json.dumps({"services": {s: {"image": i} for s, i in self.images_from().items()}}), 0, ""
@@ -279,8 +288,10 @@ class Docker:
         name = cmd[cmd.index("-p") + 1] if "-p" in cmd else None
         return {**self.cfg, "name": name, "services": svcs}
 
-    def run(self, cmd, check=True, capture=True, timeout=600):
+    def run(self, cmd, check=True, capture=True, timeout=600, data=None):
         self.calls.append(list(cmd))
+        if data is not None:
+            self.fed.append((list(cmd), data))
         out, rc, err = self.handle(list(cmd))
         if check and rc != 0:
             raise subprocess.CalledProcessError(rc, cmd, out, err)
@@ -489,6 +500,22 @@ check("plan: services with the same image", (p["services"], p["containers"]),
 check("plan: databases of the project", sorted((d["name"], d["kind"], d["size"]) for d in p["dbs"]),
       [("bugs-postgres", "postgres", 52428800), ("bugs-redis", "unsupported", None)])
 check("plan: compose changed + pulled", (p["config_changed"], p["pulled"]), (True, True))
+fed = [(c[c.index("--hash") + 1], sorted(json.loads(d)["services"])) for c, d in D.fed
+       if c[-2] == "--hash" and ["-f", "-"] == c[c.index("-f"):c.index("-f") + 2]]
+check("plan: a differing hash is asked again of the output of `config` on stdin, for that service only",
+      fed, [("migrate", ["migrate", "postgres", "redis", "web"])])
+# compose before 5.5.0: `config --hash` ignores env_file (docker/compose#14001); the output of
+# `config` has it merged and hashes as `up` labelled the container
+D.hashes, D.resolved, D.fed = {"migrate": "h-without-env-file"}, {"migrate": "h-migrate"}, []
+check("plan: env_file service, `config --hash` differs, the resolved configuration matches -> unchanged",
+      plan("bugs-postgres")["config_changed"], False)
+D.stdin_err = "unknown shorthand flag"
+check("plan: the second hash fails -> the first answer stands", plan("bugs-postgres")["config_changed"], True)
+D.hashes, D.resolved, D.stdin_err, D.fed = {}, {}, None, []
+check("plan: every hash the label's -> unchanged, nothing asked again",
+      (plan("bugs-postgres")["config_changed"], D.fed), (False, []))
+D.hashes = {"migrate": "h-changed"}
+p = plan("bugs-postgres")
 check("plan: no runner, no look for CI jobs", (p["ci_jobs"], ["docker", "ps", "-q"] in D.calls), ([], False))
 check("plan: version from the variable, the tag fixes one block -> size of the jump known",
       (p["installed_version"], p["tag_digits"], p["jump_unknown"]), ("16.14", 1, False))

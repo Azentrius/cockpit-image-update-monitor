@@ -252,12 +252,11 @@ the add-on says too little or protects too little.
 - **A skipped login check is not said.** A PostgreSQL major without `POSTGRES_PASSWORD` in the
   container's environment (Glitchtip) skips the login check after the restore silently. Proposal: say
   so in the output and in the history (“login check skipped: no `POSTGRES_PASSWORD`”).
-- **“Configuration changed” without the difference.** On one host two projects (`forgejo-runner`,
-  `pomerium`) show `config_changed`, although their compose files are older than their containers and
-  Docker was not updated; the cause is unknown, likely variables of the shell that created them. An
-  update would roll out a configuration nobody has seen. Proposal: the plan names what would change
+- **“Compose file changed” without the difference.** The plan says only *that* the configuration
+  changed, so an update rolls out a change nobody has seen. Proposal: the plan names what would change
   between `docker compose config` and the running container: image, command, volumes, ports, networks
-  and the names (never the values) of environment variables.
+  and the names (never the values) of environment variables. (On one host every service with an
+  `env_file` showed the warning without any change: compose's own hash before 5.5.0, fixed in 0.27.0.)
 - **Expected error lines after a database major.** After every PostgreSQL major the new server logs
   `ERROR: role "<user>" already exists`: the dump creates the role again that the image created on its
   first start, and the helper ignores exactly this line. Proposal: say so in the output after the

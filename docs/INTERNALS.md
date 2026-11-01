@@ -290,7 +290,11 @@ How the page shows it: see *Release notes* under [Plugin internals](#plugin-inte
     redis/valkey/mongo/clickhouse … (no dump).
   - `size`: Postgres only, sum of `pg_database_size`.
 - `config_changed`: `docker compose config --hash` differs from the label
-  `com.docker.compose.config-hash`. The change is rolled out as well.
+  `com.docker.compose.config-hash`. The change is rolled out as well. Before compose 5.5.0 that
+  command hashes a service without its `env_file` merged into the environment, unlike `up`
+  (docker/compose#14001), so a service whose hash differs is hashed once more from the output of
+  `docker compose config` given on standard input (`-f -`; compose escapes every `$` in it); the
+  configuration has changed only if that hash differs too.
 - `installed_version` (since 0.8.0): the version of the running image, as in the history
   (`from_version`, see below); `null` if unknown.
 - `tag_digits`: how many version blocks the configured tag fixes (`diunlib.tag_digits`): `latest` 0,

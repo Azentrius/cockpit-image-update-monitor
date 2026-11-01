@@ -182,8 +182,8 @@ class Abort(Exception):
 
 
 # --------------------------------------------------------------- helpers ----
-def run(cmd, check=True, capture=True, timeout=600):
-    p = subprocess.run(cmd, capture_output=capture, text=True, timeout=timeout)
+def run(cmd, check=True, capture=True, timeout=600, data=None):
+    p = subprocess.run(cmd, input=data, capture_output=capture, text=True, timeout=timeout)
     if check and p.returncode != 0:
         raise subprocess.CalledProcessError(p.returncode, cmd, p.stdout, p.stderr)
     return p.stdout if capture else ""
@@ -495,14 +495,40 @@ def compose_ctx(c):
     }
 
 
-def compose_cmd(ctx):
+def compose_cmd(ctx, files=None):
+    """files: other compose files than the project's ("-": standard input)."""
     cmd = ["docker", "compose", "-p", ctx["project"], "--project-directory", ctx["workdir"]]
-    for f in ctx["files"]:
+    for f in ctx["files"] if files is None else files:
         cmd += ["-f", f]
     for e in ctx["env_files"]:
         if os.path.exists(e):
             cmd += ["--env-file", e]
     return cmd
+
+
+def config_changed(ctx, services, same, resolved):
+    """Has the configuration of these containers changed since compose created
+    them? `docker compose config --hash` against their L_HASH. Before compose
+    5.5.0 that command hashed a service without its env_file merged into the
+    environment, unlike `up` (docker/compose#14001), and every service with an
+    env_file looked changed. A service whose hash differs is hashed once more
+    from `resolved`, the output of `config` (the environment merged, every `$`
+    escaped by compose) given as the compose file; it has changed only if that
+    hash differs as well."""
+    def differ(out, among):
+        current = dict(line.split()[:2] for line in out.splitlines() if len(line.split()) >= 2)
+        labels = [m["Config"]["Labels"] or {} for m in same]
+        return sorted({lbl.get(L_SERVICE) for lbl in labels if lbl.get(L_SERVICE) in among
+                       and current.get(lbl.get(L_SERVICE)) not in (None, lbl.get(L_HASH))})
+
+    changed = differ(run(compose_cmd(ctx) + ["config", "--hash", ",".join(services)]), services)
+    if changed:
+        try:
+            changed = differ(run(compose_cmd(ctx, files=["-"]) + ["config", "--hash", ",".join(changed)],
+                                 data=resolved), changed)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            pass        # the first answer stands
+    return bool(changed)
 
 
 def same_files(a, b):
@@ -567,7 +593,8 @@ def make_plan(name, build=False):
     plan["containers"] = sorted(m["Name"].lstrip("/") for m in same)
 
     try:
-        cfg = json.loads(run(compose_cmd(ctx) + ["config", "--format", "json"]))
+        resolved = run(compose_cmd(ctx) + ["config", "--format", "json"])
+        cfg = json.loads(resolved)
     except subprocess.CalledProcessError as e:
         plan["reason"] = "compose-config-error"
         plan["detail"] = (e.stderr or "").strip()[-400:]
@@ -590,12 +617,7 @@ def make_plan(name, build=False):
 
     # Has the compose file changed since these containers were created?
     try:
-        out = run(compose_cmd(ctx) + ["config", "--hash", ",".join(services)])
-        current = dict(line.split()[:2] for line in out.splitlines() if len(line.split()) >= 2)
-        for m in same:
-            lbl = m["Config"]["Labels"] or {}
-            if current.get(lbl.get(L_SERVICE)) not in (None, lbl.get(L_HASH)):
-                plan["config_changed"] = True
+        plan["config_changed"] = config_changed(ctx, services, same, resolved)
     except Exception:
         pass
 

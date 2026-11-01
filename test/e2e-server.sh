@@ -327,8 +327,11 @@ services:
   db:
     image: imgupd-test/pg:16
     container_name: imgupd-test-db
+    env_file: e2e.env
     environment:
       POSTGRES_PASSWORD: test-only
+    labels:
+      e2e.dollar: "\$\$HOME stays as it is"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
@@ -356,6 +359,7 @@ echo "NEW=$NEW"
 
 echo "=== 1. Start the test project on the old image ==="
 mkdir -p "$D"
+printf 'E2E_FROM_ENV_FILE=yes\n' > "$D/e2e.env"
 write_compose "sleep infinity"
 docker tag "$OLD" imgupd-test/pg:16
 docker tag "$OLD" imgupd-test/side:1
@@ -376,6 +380,17 @@ PG_STATE0=$(pg_state imgupd-test-db)
 echo "Postgres test data: $PG_STATE0" | tr '\n' ' '; echo
 check "Postgres test data in place" '[ "$(echo "$PG_STATE0" | wc -l)" = 8 ] && echo "$PG_STATE0" | grep -q "^1|Äpfel und Birnen|1.50;2|kiwi|NULL;3|mango|3.25$"'
 check "Containers run on OLD" '[ "$(img_of imgupd-test-db)" = "$OLD" ] && [ "$(img_of imgupd-test-app)" = "$OLD" ]'
+
+echo "=== 1a. The configuration as started: a service with an env_file and a \$\$ is unchanged ==="
+# Before compose 5.5.0 `config --hash` hashes a service without its env_file
+# merged (docker/compose#14001; the runner has 2.38, the Rocky machines 5.x).
+# That is no change of the configuration, but a changed env_file is one.
+CC=$(jget "$(python3 $H plan imgupd-test-db)" 'd["config_changed"]')
+check "Plan right after the start: configuration unchanged ($CC)" '[ "$CC" = False ]'
+printf 'E2E_FROM_ENV_FILE=changed\n' > "$D/e2e.env"
+CC=$(jget "$(python3 $H plan imgupd-test-db)" 'd["config_changed"]')
+check "Plan after the env_file changed: configuration changed ($CC)" '[ "$CC" = True ]'
+printf 'E2E_FROM_ENV_FILE=yes\n' > "$D/e2e.env"
 
 echo "=== 2. 'Pull' a newer image (move the tag) + change compose (app exits) ==="
 docker tag "$NEW" imgupd-test/pg:16
