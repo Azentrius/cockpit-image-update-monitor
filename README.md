@@ -97,7 +97,7 @@ Each level is a label with the level as a word (Patch, Minor, Major) and the ver
 |---|---|
 | hint (`info-circle`) | The configured tag delivers this version **with the Update button** (e.g. `latest` → everything, `16-alpine` → 16.x). |
 | without judgement, no icon | Reachable only by **changing the tag in the compose file** (e.g. `v2.1.4` → `v2.1.5`). A click on the label opens [*Change version*](#change-version-stage-2) with that tag. |
-| without judgement, `ban` | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. PostgreSQL and MariaDB majors run from *Change version* (⇄) as a [database major](#database-majors-stage-5). |
+| without judgement, `ban` | **Database major** (e.g. Postgres 16 → 18): needs a migration (dump/restore or `pg_upgrade`), not just an image swap. Does not count as “New version”. PostgreSQL and MariaDB majors run from *Change version* (⇄) as a [database major](#database-majors-stage-5), Redis, Valkey and KeyDB majors as a tag change that saves the data first (since 0.27.0). |
 
 > **Careful with `latest` and similar tags:** they deliver major versions on update too. If Nextcloud `apache` shows “Major 35.0.1” as a hint, a click on *Update* jumps from 34 to 35. Read the release notes before such jumps (Nextcloud allows only one major step at a time).
 
@@ -275,7 +275,9 @@ Another tag in the compose file, chosen in the page: **Change version** (⇄) in
 | Patch / minor / major versions | `5.0.3`, `5.4.5`, `6.0.2` | exactly this version |
 | Follows every release | `latest` | every new release, majors included (a tick box confirms it) |
 
-Only versions in the scheme of the installed version are offered and none older: going back is the rollback's job. A newer PostgreSQL or MariaDB major with a known version is offered as a [database major](#database-majors-stage-5). Other database majors (MySQL, Redis …), a database tag that follows every major, and Nextcloud jumps over more than one major are listed but locked, with the reason.
+Only versions in the scheme of the installed version are offered and none older: going back is the rollback's job. A newer PostgreSQL or MariaDB major with a known version is offered as a [database major](#database-majors-stage-5). Other database majors (MySQL, ClickHouse …), a database tag that follows every major, and Nextcloud jumps over more than one major are listed but locked, with the reason.
+
+**Key-value stores** (since 0.27.0): Redis, Valkey and KeyDB read the files of an older major when they start, so a newer major with a known version is a tag change of its own (“new major, the data is saved first”). The preview names the data directory (a volume or bind mount at `/data`, or Bitnami's) and its size. Before the restart the add-on stops the store, so that it writes its files, and packs that directory into `/var/backups/image-updates/data/`; a rollback stops it again and puts the copy back, because an older major may not read what a newer one wrote. What the store writes after the change is lost in a rollback. The copy is deleted together with its rollback image.
 
 **Show first.** For each choice the helper plans the change and writes nothing (`retag … --dry-run`): every line before and after, with file and line number, then the plan of an update (what is recreated, dumps, dependencies, what the tag brings). Where the tag is written:
 - `image: repo:5.0.2` → that line, for every service of the image, in whichever compose file (override files too);
@@ -339,6 +341,7 @@ Anything that fails before the database stops leaves nothing changed. Later the 
 | Output of each update and rollback | `/var/backups/image-updates/logs/<op-id>.log` (`.rollback.log`) | 0600 |
 | Rollback images | local Docker tags `<repo>:rollback-<YYYYMMDD-HHMMSS>` | – |
 | Copies of files a tag change wrote | `/var/backups/image-updates/compose/<project>/<YYYYMMDD-HHMMSS>/<n>_<file>` | file 0600, folder 0700 |
+| Data of a key-value store before its new major | `/var/backups/image-updates/data/<project>/<YYYYMMDD-HHMMSS>_<container>.tar`, deleted together with the rollback image | file 0600, folder 0700 |
 | Old data of a database major | a Docker volume `<volume>-pg16-<stamp>` (or `-mariadb11-`) next to a named volume, a directory `<path>.pg16-<stamp>` next to a bind mount | as the original |
 
 - **Output:** *Show output* in the history opens what an update and its rollback printed.
@@ -525,7 +528,7 @@ tested system by itself.
 
 | | Systems | What is checked |
 |---|---|---|
-| **Tested** | Ubuntu 24.04 (GitHub runner) with Docker Engine and Compose from the runner image | every helper against the real Docker Engine: updates, rollbacks, pulls against a registry, dumps and their restore into Postgres 16, MariaDB 11 and MySQL 8, tag changes, database majors (PostgreSQL 16 → 17, also stopped while the data moves, and MariaDB 11 → 12) with their rollbacks, rebuilds of images built on the host (job `e2e`, also before every release) |
+| **Tested** | Ubuntu 24.04 (GitHub runner) with Docker Engine and Compose from the runner image | every helper against the real Docker Engine: updates, rollbacks, pulls against a registry, dumps and their restore into Postgres 16, MariaDB 11 and MySQL 8, tag changes, database majors (PostgreSQL 16 → 17, also stopped while the data moves, and MariaDB 11 → 12) with their rollbacks, a Redis 7 → 8 tag change with its data, rebuilds of images built on the host (job `e2e`, also before every release) |
 | **Tested** | Ubuntu 24.04 (GitHub runner) with Ubuntu's Cockpit, systemd and Docker | the page in a real Cockpit session in Chromium (job `cockpit`): installed with apt over the release before, reloaded and logged in again after that upgrade, found in the menu, no JavaScript or resource errors of the add-on (and none in Cockpit beyond those it shows without the add-on), with and without administrative access, skopeo and the radar set up from the page and a radar run, an update with its live output and result and its rollback on a throw-away compose project; versions, steps and screenshots in the job summary and the artifact `cockpit-session` |
 | **Tested** | Rocky Linux 9.8 and 10.2 (for RHEL 9 and 10) in VMs with SELinux enforcing, with Docker Engine, Buildx and Compose from Docker's repository for RHEL (`docker-ce`, with the classic image store, overlay2, as on the runner) and the distribution's Cockpit and skopeo | the tests of the two rows above, with the `.rpm` (job `e2e-el`, `tools/vm.sh`; a pilot, not yet a required check): every helper as the package installs it, then the package removed; the page in a real Cockpit session (the machine's `cockpit.socket`, the browser on the runner), installed with `dnf` over the release before; no SELinux denial from the start of each test to its end |
 | **Tested** | Python 3.8 and 3.12 | the helper tests (fake Docker) on 3.12; on 3.8, the oldest supported, all of them but `status_test.py` and `deps_check_test.py` (job `python-min`) |
@@ -752,7 +755,7 @@ python3 tools/preview/build.py      # -> tools/preview/out/diun/index.html?lang=
 python3 tools/preview/shoot.py      # screenshots light, dark and phone to docs/img (needs playwright + chromium)
 ```
 
-**End-to-end on a real host** (creates the throw-away compose projects `imgupd-test`, `imgupd-test-my`, `imgupd-test-reg`, `imgupd-test-major`, `imgupd-test-mdb` and `imgupd-test-build`, touches nothing else, cleans up afterwards and fails if anything of it is left; only on a throw-away host or VM, see [CONTRIBUTING.md](CONTRIBUTING.md)):
+**End-to-end on a real host** (creates the throw-away compose projects `imgupd-test`, `imgupd-test-my`, `imgupd-test-reg`, `imgupd-test-major`, `imgupd-test-mdb`, `imgupd-test-kv` and `imgupd-test-build`, touches nothing else, cleans up afterwards and fails if anything of it is left; only on a throw-away host or VM, see [CONTRIBUTING.md](CONTRIBUTING.md)):
 
 ```bash
 sudo OLD_IMAGE=postgres:16.14-alpine NEW_IMAGE=postgres:16.15-alpine bash test/e2e-server.sh
@@ -776,6 +779,7 @@ The test checks:
 - tag changes in the compose file, through `.env` and in an override file, with their rollbacks; the refusals for a shared variable and an anchor
 - `status` for the Status Board after a failed update, as root and without root
 - database majors (sections 17 to 17d): PostgreSQL 16 → 17 with test data, an extension and a role (an MD5 role refused, the trial run, the login check, the rollback, the release, a second major), majors stopped by SIGTERM and SIGKILL while they move the data and their rollbacks, MariaDB 11 → 12 with its rollback and release
+- a key-value store's major (section 17e): Redis 7 → 8 as a tag change, its data directory saved first and put back by the rollback, the copy deleted with its rollback image
 - the rebuild of an image built on the host (sections 18 and 18b): a failing build changing nothing, the newer base through `--pull`, the rollback, also for a service with `build:` and no `image:`
 
 The changes are in [CHANGELOG.md](CHANGELOG.md).
@@ -801,7 +805,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - **Database majors:** PostgreSQL (since 0.23.0) and MariaDB (since 0.25.0) majors by dump and restore
   (stage 5): in *Change version*, for one database whose data lies in a named volume or a bind mount.
   PostgreSQL 18 needs `PGDATA` in the compose file. MySQL majors, pgvector's `pg17` tags and
-  `pg_upgrade` (faster for large databases) are not supported; such majors stay manual.
+  `pg_upgrade` (faster for large databases) are not supported; such majors stay manual. Redis, Valkey
+  and KeyDB majors (since 0.27.0) are tag changes that save the data directory first; a directory
+  elsewhere than `/data` (or Bitnami's) is not found and not saved, the preview says so.
 - **Release notes** come only from releases on GitHub, for images whose repository is known (list, label, ghcr.io). Projects that publish them elsewhere (postgres, GitLab) get a note instead. Without a login GitHub allows 60 requests per hour per address; the radar shares that with anything else on the server.
 - **Tag changes** the add-on cannot make safely (YAML anchors, `include:`, a variable used elsewhere or built from several) stay manual; the dialog names the reason.
 - **Floating tags:** what the tag points to is resolved through the registry only when a version tag has the same digest. Builds without a version tag (e.g. from the main branch) have no version number; then the plan warns that the size of the jump is unknown. The overview calls such a build up to date when the container runs it and the registry has no release tags, or (on Docker Hub) when it was pushed after the newest release.

@@ -230,8 +230,8 @@
                        files: [...new Set((op.changes || []).map((c) => c.file))].join(", ") };
         confirmAndRun({
             title: t("rb.title", { name: op.container }),
-            desc: t(op.kind === "retag" ? "rb.descRetag" : op.kind === "dbmajor" ? "rb.descMajor" : "rb.desc",
-                    { ...vars, engine: engineName(op.engine), from: op.from_major, to: op.to_major }),
+            desc: t(op.kind === "retag" ? (op.data_copy ? "rb.descStore" : "rb.descRetag") : op.kind === "dbmajor" ? "rb.descMajor" : "rb.desc",
+                    { ...vars, engine: op.kind === "retag" ? op.store || "?" : engineName(op.engine), from: op.from_major, to: op.to_major }),
             confirm: { label: t("rb.button"), argv: () => [UPDATE_CMD, "rollback", op.id] },
             onDone: (o) => {
                 if (o.ok) { dlg.result(t("rb.ok"), true); return true; }

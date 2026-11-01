@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.27.0 – 2026-11-01
+
+Redis, Valkey and KeyDB can move to a newer major in *Change version*, with their data saved for the
+rollback.
+
+**Upgrading:** nothing to do.
+
+- **Key-value store majors.** Up to now every major of a database other than PostgreSQL and MariaDB
+  was locked, Redis 7 → 8 too, although Redis, Valkey and KeyDB read the files of an older major when
+  they start and need no migration. A newer major with a known version is now a tag change of its own
+  (“new major, the data is saved first”). Its preview names the data directory (a volume or bind mount
+  at `/data`, or Bitnami's) and its size; the major's tick box applies as for every new major. A tag
+  that follows every release stays locked.
+- **The data is saved first.** Before the restart the add-on stops the store, so that it writes its
+  files and nothing changes them, and packs its data directory into
+  `/var/backups/image-updates/data/<project>/<stamp>_<container>.tar` (owners, modes and links kept,
+  root only). Too little space stops the change before the store stops; a failed stop or pack starts
+  the store again and leaves nothing behind. Without a mounted directory nothing is saved, and the
+  output says so.
+- **Rollback.** An older major may not read what a newer one wrote, so the rollback stops the store,
+  puts the copy back and only then starts the old image. What the store wrote after the change is
+  lost; the rollback dialog says so. Without its copy, or when the container keeps its data elsewhere
+  now, the rollback stops before anything changes. The history shows the size of the copy, or “Data
+  copy gone”.
+- **Cleanup.** The copy is deleted together with its rollback image, by the cleanup rules and by
+  *Delete* in the backups tab: without that image there is no rollback to use it for.
+- **Tests.** `test/update_test.py` covers the plan, the copy, the rollback, a missing copy, data
+  that moved, the cleanup, a failed stop or pack, too little space, nothing mounted and an unsafe copy;
+  `test/version-change.js` the choice, the preview, the history and the rollback dialog;
+  `test/e2e-server.sh` a real Redis 7 moved to 8 and rolled back with its key.
+
 ## 0.26.1 – 2026-10-31
 
 Updates work on RHEL, Rocky Linux and AlmaLinux, and the radar and the cleanup no longer leave
