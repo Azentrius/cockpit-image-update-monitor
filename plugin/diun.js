@@ -54,7 +54,7 @@
     // The one place for the version (SemVer). index.html loads every script and
     // stylesheet of the add-on with ?v=VERSION; tools/check-version.sh keeps
     // them in step.
-    const VERSION = "0.26.1";
+    const VERSION = "0.27.0";
 
     // --- All parts loaded? -------------------------------------------------
     // Each script of the page, by a name it gives the namespace. Cockpit's

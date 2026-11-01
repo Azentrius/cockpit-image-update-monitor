@@ -22,7 +22,8 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 5. clean up this project by the rules (see cleanup)
                                 6. start the version radar in the background
   rollback <op-id>              point the tag back at the rollback image and
-                                recreate the same services (data is NOT restored)
+                                recreate the same services (data is NOT restored,
+                                except a key-value store's copy of a tag change)
   log <op-id>                   read-only: the kept output of that update (and
                                 of its rollback)
   backups                       read-only: dumps, rollback images, history and
@@ -49,6 +50,11 @@ Called by the plugin via cockpit.spawn with a FIXED set of commands only:
                                 written (atomically), `docker compose config`
                                 checked, then the update steps 3 to 6 with the
                                 new tag. A rollback restores the files.
+                                A newer major of a key-value store (Redis,
+                                Valkey, KeyDB) is a tag change as well: before
+                                the restart the store is stopped and its data
+                                directory packed into data/<project>/; the
+                                rollback puts that copy back.
 
   dbmajor <container> <tag> --dry-run
                                 read-only: the plan of a database major
@@ -83,6 +89,9 @@ they showed. Images built locally or pinned by digest are not updated.
 Everything the addon writes lives in /var/backups/image-updates (root only):
   dumps/<project>/<stamp>_<container>.sql.gz
   compose/<project>/<stamp>/    the files a tag change wrote, as they were
+  data/<project>/<stamp>_<container>.tar
+                                a key-value store's data before its new major,
+                                removed together with the rollback image
   operations.jsonl              one JSON line per update / tag change / rollback
   logs/<op-id>.log              output of the update (.rollback.log: of its rollback)
 
@@ -110,6 +119,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from contextlib import contextmanager
@@ -962,7 +972,8 @@ def make_retag(name, new_tag, db_major=False):
     rt = plan["retag"] = {"tag": new_tag, "from_tag": old_tag, "image": repo + ":" + new_tag,
                           "choice": None, "level": None, "newest": None,
                           "possible": False, "reason": None, "detail": None,
-                          "variable": None, "changes": [], "git": None, "fingerprint": None}
+                          "variable": None, "changes": [], "git": None, "fingerprint": None,
+                          "store": None}
 
     def refuse(reason, detail=None):
         rt["reason"], rt["detail"] = reason, detail
@@ -989,8 +1000,13 @@ def make_retag(name, new_tag, db_major=False):
         return nums_of(v)[0]
 
     # A database major needs a migration (stage 5); a floating tag can bring one.
+    # A key-value store reads an older major's files when it starts: a newer
+    # major is a tag change that saves its data for the rollback (save_store).
     if rec.get("db") and (target is None or major(target) != major(installed)) and not db_major:
-        return refuse("db-major")
+        store = store_of(repo)
+        if not (store and target is not None and major(target) > major(installed)):
+            return refuse("db-major")
+        rt["store"] = store_plan(plan, store)
     # Nextcloud upgrades one major version per step only.
     if NEXTCLOUD_RE.search(norm_ref(repo)) and (target is None or major(target) - major(installed) > 1):
         return refuse("major-skip")
@@ -1663,7 +1679,8 @@ def cmd_retag(name, new_tag, expect, do_dump=True):
 
 def discard(op):
     """A run that stops before any container changed leaves nothing behind:
-    no rollback tag, no dumps. A signal meanwhile waits until it is done."""
+    no rollback tag, no dumps, no data copies. A signal meanwhile waits until
+    it is done."""
     with held():
         if op.get("rollback"):
             run(["docker", "rmi", op["rollback"]], check=False)
@@ -1671,6 +1688,11 @@ def discard(op):
             try:
                 remove_dump(rel)
             except (Abort, OSError):
+                pass
+        for x in op.get("data_copies") or []:
+            try:
+                drop_copy(x.get("copy"))
+            except OSError:
                 pass
 
 
@@ -1899,6 +1921,9 @@ def roll_out(name, plan, ctx, do_dump, retag=None, build=False):
         op["to_version"] = version_of(new_ref, new_id) or (built_version(ref, new_id) if build else None)
         # In the history before the containers change (see above).
         record(op, log=op_id + ".log")
+        # 3b. A key-value store's new major: stop it and pack its files.
+        if retag and retag.get("store"):
+            save_store(op, base, retag["store"], st)
     except Abort:
         raise
     except Interrupted as e:
@@ -1960,6 +1985,207 @@ def roll_out(name, plan, ctx, do_dump, retag=None, build=False):
         say(f"{e.name}: Aufräumen und Radar-Start übersprungen.", f"{e.name}: cleanup and radar start skipped.")
     result(op=op_id, status="ok", rollback=rb, dumps=op["dumps"], **versions)
     return 0
+
+
+# ------------------------------------------------- key-value store majors ----
+# Redis, Valkey and KeyDB read the files of an older major when they start: a
+# newer major needs no migration and is a tag change (stage 2). An older major
+# may not read what a newer one wrote, though. So the change stops the store,
+# packs its data directory into data/<project>/<stamp>_<container>.tar, and the
+# rollback puts that copy back before the old image starts. The copy goes with
+# the rollback image: without that image there is no rollback to use it for.
+STORE_RE = re.compile(r"(^|/)(redis|valkey|keydb)$")
+STORE_NAMES = {"redis": "Redis", "valkey": "Valkey", "keydb": "KeyDB"}
+STORE_DIRS = ("/data", "/bitnami/redis/data", "/bitnami/valkey/data")    # the official images, Bitnami's
+COPY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}/\d{8}-\d{6}_[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.tar$")
+
+
+def store_of(repo):
+    """'redis', 'valkey' or 'keydb' for an image of such a store, else None."""
+    m = STORE_RE.search(norm_ref(repo))
+    return m.group(2) if m else None
+
+
+def store_mount(c):
+    """The volume or bind mount of container c at one of STORE_DIRS:
+    {"type", "source", "destination"}, or None (nothing kept, e.g. tmpfs)."""
+    for m in c.get("Mounts") or []:
+        if m.get("Destination") in STORE_DIRS and m.get("Type") in ("volume", "bind") and m.get("Source"):
+            return {"type": m["Type"], "source": m["Source"], "destination": m["Destination"]}
+    return None
+
+
+def tree_bytes(path):
+    """Bytes of the files below path (links not followed), None if it is no directory."""
+    if not os.path.isdir(path):
+        return None
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(root, f)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def store_plan(plan, store):
+    """retag.store: the store and, per container of the plan, the directory
+    the tag change packs ("source" None: nothing mounted, nothing to keep)."""
+    items = []
+    for n in plan["containers"]:
+        m = store_mount(inspect(n)) or {"type": None, "source": None, "destination": None}
+        items.append({"container": n, **m, "bytes": tree_bytes(m["source"]) if m["source"] else None})
+    return {"engine": store, "name": STORE_NAMES[store], "items": items,
+            "bytes": sum(i["bytes"] or 0 for i in items)}
+
+
+def copy_path(rel):
+    """The file of a data copy, rel = <project>/<stamp>_<container>.tar below
+    data/; None if rel is not one."""
+    if not isinstance(rel, str) or not COPY_RE.match(rel):
+        return None
+    top = os.path.realpath(os.path.join(BASE, "data"))
+    path = os.path.realpath(os.path.join(top, rel))
+    return path if path.startswith(top + os.sep) else None
+
+
+def pack_dir(src, project, name):
+    """A tar of the directory src with owners, modes and links, written as
+    data/<project>/<name>.tar (root only). Returns <project>/<name>.tar."""
+    rel = f"{project}/{name}.tar"
+    if not NAME_RE.match(project) or not copy_path(rel):
+        raise Abort(64, f"Ungültiger Name der Datenkopie: {rel}", f"Invalid name of the data copy: {rel}")
+    top = os.path.join(BASE, "data")
+    d = os.path.join(top, project)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    for x in (top, d):
+        os.chmod(x, 0o700)
+    path = os.path.join(d, name + ".tar")
+    part = path + ".part"
+    try:
+        fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            with tarfile.open(fileobj=f, mode="w") as tar:
+                tar.add(src, arcname=".")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(part, path)
+    except BaseException:
+        try:
+            os.unlink(part)
+        except OSError:
+            pass
+        raise
+    return rel
+
+
+def unpack_dir(path, dst):
+    """Empty the directory dst and unpack a copy of pack_dir into it, owners
+    and modes as they were. The members are checked first: nothing outside
+    dst, only files, directories and links."""
+    with tarfile.open(path) as tar:
+        members = tar.getmembers()
+        for m in members:
+            n = os.path.normpath(m.name)
+            if os.path.isabs(m.name) or n == ".." or n.startswith("../") or \
+                    not (m.isreg() or m.isdir() or m.issym() or m.islnk()):
+                raise ValueError(f"{os.path.basename(path)}: {m.name}")
+        for e in os.listdir(dst):
+            p = os.path.join(dst, e)
+            if os.path.isdir(p) and not os.path.islink(p):
+                shutil.rmtree(p)
+            else:
+                os.unlink(p)
+        # The "tar" filter where Python has it (3.12, backports): it keeps owners and modes,
+        # which the default from 3.14 on ("data") would not.
+        kw = {"filter": "tar"} if hasattr(tarfile, "tar_filter") else {}
+        tar.extractall(dst, members=members, numeric_owner=True, **kw)
+
+
+def drop_copy(rel):
+    """Delete one data copy (and what is left of writing it), and its project
+    folder once empty. True if the copy was there."""
+    path = copy_path(rel)
+    if not path:
+        return False
+    there = os.path.isfile(path)
+    for p in (path, path + ".part"):
+        try:
+            os.unlink(p)
+        except FileNotFoundError:
+            pass
+    for d in (os.path.dirname(path), os.path.dirname(os.path.dirname(path))):
+        try:
+            os.rmdir(d)
+        except OSError:
+            break
+    return there
+
+
+def drop_copies_of(ref):
+    """After the rollback image ref is gone: the data copies of its runs."""
+    for o in load_ops().values():
+        if o.get("rollback") and norm_ref(o["rollback"]) == norm_ref(ref):
+            for x in o.get("data_copies") or []:
+                if drop_copy(x.get("copy")):
+                    say(f"Datenkopie gelöscht: {x['copy']}", f"Deleted data copy {x['copy']}")
+
+
+def save_store(op, base, store, st):
+    """Step 3b of a key-value store's new major (in the history already):
+    stop its services, so that the store writes its files and nothing changes
+    them, then pack each container's data directory. Anything wrong starts the
+    services again and takes back what the run did (exit 5)."""
+    name = store["name"]
+    op["store"] = name
+    items = [i for i in store["items"] if i["source"]]
+    if not items:
+        say(f"{name}: kein Datenverzeichnis eingehängt – nichts zu sichern; nach einem Rollback startet {name} leer.",
+            f"{name}: no data directory mounted – nothing to save; after a rollback {name} starts empty.")
+        return
+    need = sum(i["bytes"] or 0 for i in items) + FREE_MARGIN
+    free = free_space(BASE)
+    if free < need:
+        drop_run(op)
+        raise Abort(5, f"Zu wenig Platz in {BASE} für die Daten von {name}: {human(free)} frei, {human(need)} nötig "
+                       f"– nichts geändert.",
+                    f"Not enough space in {BASE} for the data of {name}: {human(free)} free, {human(need)} needed "
+                    f"– nothing changed.")
+    op["data_copies"] = []
+    try:
+        say(f"{name} wird gestoppt, damit es seine Dateien schreibt und nichts sie mehr ändert: "
+            f"{', '.join(op['services'])}",
+            f"Stopping {name}, so that it writes its files and nothing changes them any more: "
+            f"{', '.join(op['services'])}")
+        if stream(base + ["stop", *op["services"]]) != 0:
+            raise RuntimeError(pick("docker compose stop schlug fehl", "docker compose stop failed"))
+        for i in items:
+            # Named in op before it is written: taking back the run removes a half-written copy too.
+            x = {"container": i["container"], "source": i["source"], "destination": i["destination"],
+                 "copy": f"{op['project']}/{st}_{i['container']}.tar", "bytes": None}
+            op["data_copies"].append(x)
+            pack_dir(i["source"], op["project"], f"{st}_{i['container']}")
+            x["bytes"] = os.path.getsize(copy_path(x["copy"]))
+            say(f"Daten gesichert: {i['source']} → {os.path.join(BASE, 'data', x['copy'])} ({human(x['bytes'])})",
+                f"Data saved: {i['source']} → {os.path.join(BASE, 'data', x['copy'])} ({human(x['bytes'])})")
+        # With its copies in the history: a run that ends for good from here on
+        # is rolled back with them.
+        record(op, log=op["id"] + ".log")
+    except (Exception, Interrupted) as e:
+        with held():
+            try:
+                stream(base + ["start", *op["services"]])
+            except Exception:
+                pass
+            drop_run(op)
+        if isinstance(e, Interrupted):
+            raise stopped(e, f"{name} läuft wieder, nichts geändert.", f"{name} runs again, nothing changed.")
+        detail = str(e).strip()[-300:]
+        raise Abort(5, f"Sichern der Daten von {name} fehlgeschlagen: {detail} – {name} läuft wieder, Dateien "
+                       f"wiederhergestellt, nichts geändert.",
+                    f"Saving the data of {name} failed: {detail} – {name} runs again, files restored, nothing "
+                    f"changed.")
 
 
 # -------------------------------------------------------- database majors ----
@@ -3310,6 +3536,24 @@ def cmd_rollback(op_id):
             raise Abort(5, f"{x['path']} wurde nach dem Tag-Wechsel geändert – nichts geändert. Die alte Datei "
                            f"liegt in {x['backup']}.",
                         f"{x['path']} changed after the tag change – nothing changed. The old file is in {x['backup']}.")
+    # A key-value store's new major goes back with the data saved before it
+    # (save_store): every copy must be there and readable, and its container
+    # must still keep its files where the copy came from.
+    copies = (op.get("data_copies") or []) if op.get("kind") == "retag" else []
+    for x in copies:
+        path = copy_path(x.get("copy"))
+        if not path or not os.path.isfile(path) or not tarfile.is_tarfile(path):
+            raise Abort(2, f"Die Datenkopie {x.get('copy')} fehlt oder ist beschädigt – nichts geändert.",
+                        f"The data copy {x.get('copy')} is missing or damaged – nothing changed.")
+        try:
+            m = store_mount(inspect(x["container"]))
+        except Abort:
+            m = None
+        if not m or m["source"] != x["source"]:
+            raise Abort(5, f"{x['container']} hält seine Daten nicht mehr in {x['source']} – nichts geändert. Die "
+                           f"Kopie liegt in {path}.",
+                        f"{x['container']} no longer keeps its data in {x['source']} – nothing changed. The copy "
+                        f"is in {path}.")
     # The files must give the services the operation's image (other_image):
     # without a tag change checked before anything changes, with one once its
     # files are back, which are written again as they were if not.
@@ -3322,6 +3566,11 @@ def cmd_rollback(op_id):
         if major:
             say(f"Die Datenbank kehrt mit ihren alten Daten zu {ename(op)} {op.get('from_major')} zurück.",
                 f"The database returns to {ename(op)} {op.get('from_major')} with its old data.")
+        elif copies:
+            store = op.get("store") or "Store"
+            say(f"{store} bekommt seine Daten von vor dem Tag-Wechsel zurück; was es seitdem geschrieben hat, geht "
+                f"verloren.",
+                f"{store} gets back its data from before the tag change; what it wrote since then is lost.")
         else:
             say("Achtung: Datenbanken werden NICHT zurückgesetzt. Bei Migrationsproblemen den Dump einspielen.",
                 "Note: databases are NOT restored. If migrations cause trouble, restore the dump.")
@@ -3350,6 +3599,19 @@ def cmd_rollback(op_id):
             try:
                 swap_back(op, compose_cmd(ctx))
             except Exception as e:      # the data is not back: say so (a signal is error_reason's)
+                reason = major_reason(op["container"], "data", str(e)[:REASON_MAX])
+                raise
+        if copies:
+            # Stopped, the store's directory takes the copy; unpacking is never cut in two.
+            try:
+                if stream(compose_cmd(ctx) + ["stop", *op["services"]]) != 0:
+                    raise RuntimeError(pick("docker compose stop schlug fehl", "docker compose stop failed"))
+                with held():
+                    for x in copies:
+                        unpack_dir(copy_path(x["copy"]), x["source"])
+                        say(f"Daten zurückgelegt: {x['source']} (Stand vor dem Tag-Wechsel)",
+                            f"Data put back: {x['source']} (as before the tag change)")
+            except Exception as e:
                 reason = major_reason(op["container"], "data", str(e)[:REASON_MAX])
                 raise
         run(["docker", "tag", rb, op["image"]])
@@ -3494,6 +3756,15 @@ def cmd_backups():
         for k, iid in (("from_version", o.get("old_id")), ("to_version", o.get("new_id"))):
             if refines(known.get(iid), o.get(k)):
                 o[k] = known[iid]
+        # A key-value store's data saved before its new major: its size, and
+        # without the copies no rollback (it would start the old major on newer files).
+        copies = o.pop("data_copies", None) or []
+        if copies:
+            there = all(copy_path(x.get("copy")) and os.path.isfile(copy_path(x["copy"])) for x in copies)
+            o["data_copy"] = {"bytes": sum(x.get("bytes") or 0 for x in copies), "there": there}
+            if o.get("can_rollback") and not there:
+                o["can_rollback"] = False
+                o["data_gone"] = True
         for k in ("workdir", "files", "env_files", "old_id", "new_id", "backup_files", "pid"):
             o.pop(k, None)
         # The data a database major keeps (kept_of), while it is there.
@@ -3558,9 +3829,13 @@ def cmd_delete_image(ref):
         raise Abort(64, f"Kein Rollback-Image: {ref}", f"Not a rollback image: {ref}")
     if not image_id(ref):
         raise Abort(2, f"{ref} nicht gefunden.", f"{ref} not found.")
-    # Without -f: Docker refuses if a container still uses the image.
+    # Without -f: Docker refuses if a container still uses the image. Its runs'
+    # data copies go with it.
     try:
-        return stream(["docker", "rmi", ref])
+        rc = stream(["docker", "rmi", ref])
+        if rc == 0:
+            drop_copies_of(ref)
+        return rc
     except Timeout as e:
         raise Abort(1, f"docker rmi hat nach {e.seconds} s nicht geendet und wurde abgebrochen; ob {ref} noch da "
                        f"ist, zeigt die Übersicht nach dem Neuladen.",
@@ -3711,6 +3986,7 @@ def apply_cleanup(dumps, images):
             continue
         gone_images.append(i["ref"])
         say(f"Rollback-Image entfernt: {i['ref']}", f"Removed rollback image {i['ref']}")
+        drop_copies_of(i["ref"])
     return gone_dumps, gone_images, freed, failed
 
 

@@ -15,7 +15,7 @@ together.
 | `/var/lib/diun-radar/status.json` | the add-on's status for the Status Board (since 0.20.0, see [`status`](#status-diun-updatepy-since-0200)) and for the icon in Cockpit's menu (since 0.21.0, see [Status in Cockpit's menu](#status-in-cockpits-menu-since-0210)): names of containers, states and times only | root, 644 |
 | `/var/lib/diun/events.jsonl` | Diun events (written by the notifier **inside the container**) | writable from the Diun container → data only, never code |
 | `/var/lib/diun/dismissed.json` | Diun events the plugin marked as dismissed | data |
-| `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log`, `compose/<project>/<stamp>/<n>_<file>` (the compose / `.env` files a tag change wrote, byte-exact as they were) | root, 700 / 600 |
+| `/var/backups/image-updates/` | `dumps/<project>/*.sql.gz`, `operations.jsonl`, `logs/<op-id>.log` and `.rollback.log`, `compose/<project>/<stamp>/<n>_<file>` (the compose / `.env` files a tag change wrote, byte-exact as they were), `data/<project>/<stamp>_<container>.tar` (a key-value store's data before its new major, since 0.27.0) | root, 700 / 600 |
 | `/etc/image-updates.conf` | cleanup rules and time limits (optional, see below) | root, not writable by others |
 | `/opt/diun/` | Diun stack (`docker-compose.yml`, `diun.yml`), from `diun-deps.sh install diun` | root |
 | `/usr/lib/systemd/system/diun-radar.{service,timer}` | radar every 6 h (`*-*-* 00/6:17:00`); from the package, `diun-deps.sh install radar` enables the timer | root, 644 |
@@ -334,7 +334,7 @@ plus:
                        "old": "    image: ghcr.io/formbricks/formbricks:5.0.2",
                        "new": "    image: ghcr.io/formbricks/formbricks:5",
                        "service": "survey", "sha256": "…"}],
-          "git": null, "fingerprint": "…"}
+          "git": null, "fingerprint": "…", "store": null}
 ```
 
 - `choice`: under which the radar offers the tag for the installed version (`versions[…].choices`):
@@ -352,6 +352,20 @@ plus:
 - `git`: the git repository the project directory lies in, as a hint (nothing is committed).
 - `fingerprint`: sha256 over the new tag and every change (file, line, before, after, file
   checksum). The page passes it to `retag … --expect`.
+- `store` (since 0.27.0): a newer major of a key-value store (`redis`, `valkey`, `keydb`, also
+  Bitnami's images) with a known target. These read the files of an older major when they start, so
+  the major needs no migration and is a tag change; otherwise `null`. Per container of the plan, the
+  volume or bind mount at `/data`, `/bitnami/redis/data` or `/bitnami/valkey/data` that the change
+  packs (`source` `null`: nothing mounted, nothing to keep):
+
+  ```json
+  "store": {"engine": "redis", "name": "Redis", "bytes": 3145728,
+            "items": [{"container": "nc-redis", "type": "volume", "source": "/var/lib/docker/volumes/…/_data",
+                       "destination": "/data", "bytes": 3145728}]}
+  ```
+
+  The page offers such a tag (“new major, the data is saved first”) and shows a warning box with
+  the directories and their size; the major's tick box applies as for every new major.
 - `reason` when `possible` is false, `detail` names the file:line, service or variable:
 
 | `reason` | Meaning |
@@ -360,7 +374,7 @@ plus:
 | `same-tag` | the configured tag itself |
 | `no-choices` | the radar has no choices for the installed version (unknown version, no scheme, data before 0.11.0) |
 | `not-offered` | not among the choices: older, a pre-release, another flavour |
-| `db-major` | a database image to another major version, or to a floating tag that can bring one (stage 5) |
+| `db-major` | a database image to another major version, or to a floating tag that can bring one (stage 5); since 0.27.0 not a key-value store's newer major with a known target (`store`) |
 | `major-skip` | Nextcloud more than one major ahead, or to a floating tag |
 | `anchors` | the image line sits under a YAML anchor or outside a service |
 | `not-found` | no `image:` line with this reference for a service (e.g. `include:` or a generated file) |
@@ -382,6 +396,14 @@ change is no longer possible or the fingerprint differs (a file edited since the
    reference. If not, or if writing fails, the copies are put back, the rollback tag and dumps removed,
    exit 5: no container changed.
 3. Pull; the new image must then exist locally, otherwise the same: files back, exit 5.
+3b. **A key-value store's new major** (`store`, since 0.27.0), in the history already: free space for
+   the data plus 1 GiB in `/var/backups/image-updates` (otherwise exit 5 before the store stops), then
+   `docker compose stop` of the services, so that the store writes its files on shutdown and nothing
+   changes them, and each container's directory packed into `data/<project>/<stamp>_<container>.tar`
+   (Python's `tarfile`, owners, modes and links kept; folders 700, file 600, written as `.part` and
+   renamed). A failed stop or pack, or a signal, starts the services again and takes back what the
+   run did (files, copies, rollback tag), exit 5. Without a mounted directory nothing is saved and the
+   output says so. The copies go into the history (`data_copies`) before the restart.
 4. `up -d --no-deps` always, even when the image ID stays the same (pinning `latest` to the running
    version): the containers must carry the new tag. Waiting, watching the dependents, cleanup and radar
    as in `update`.
@@ -392,6 +414,17 @@ stops it (exit 5 / 2) without touching anything. A file that has its old checksu
 is (since 0.18.1: an earlier attempt put it back, or the run ended before writing it). Then the copies
 go back, the old tag points to the rollback image again and the services are recreated. The copies
 stay with the history entry.
+
+With `data_copies` (since 0.27.0) every copy must be there and a tar file, otherwise exit 2; each
+container must still have its store directory where the copy came from, otherwise exit 5 (both
+before anything changes). After the files, the services are stopped, each directory is emptied and
+the copy unpacked into it (members checked first: no absolute paths, nothing above the directory,
+only files, directories and links; owners and modes as packed, with the `tar` extraction filter where
+Python has it), and only then does the old tag point to the rollback image. What the store wrote
+after the change is lost; the rollback dialog says so. A failure there fails the rollback (exit 4,
+`reason.source` `"data"`), which may be tried again: the copy stays. The copies are deleted together
+with their rollback image, by `delete-image` and by the cleanup; without that image there is no
+rollback to use them for.
 
 ### `dbmajor` (database major, stage 5, since 0.23.0)
 
@@ -858,7 +891,11 @@ rollback marks the operation with `rolled_back`, `rollback_ts`, `rollback_status
 - **Tag change** (since 0.11.0): `kind: "retag"`, `image` is the old reference, plus `to_image`,
   `from_tag`, `to_tag`, `changes` (`file`, `line`, `old`, `new`), `backup` (the folder) and
   `backup_files` (`path`, `backup`, `sha256` before, `new_sha256` after). `backups` leaves
-  `backup_files` out. Its dumps count as the project's last update for the cleanup.
+  `backup_files` out. Its dumps count as the project's last update for the cleanup. A key-value
+  store's new major (since 0.27.0) adds `store` (`Redis`, `Valkey`, `KeyDB`) and `data_copies`
+  (`container`, `source`, `destination`, `copy` as `<project>/<stamp>_<container>.tar` below `data/`,
+  `bytes`); `backups` gives `data_copy` (`bytes`, `there`) instead and, when a copy is gone, sets
+  `can_rollback` false and adds `data_gone: true` (the history says “Data copy gone”).
 - **Output:** `update` and `rollback`, called through `main`, keep what they print in
   `logs/<op-id>.log` and `logs/<op-id>.rollback.log` (600, at most 512 KiB, without `@@RESULT`). Only
   runs that reach the history keep output; an update stopped before any change does not, and a run that
@@ -1088,7 +1125,10 @@ plugin without the field (helper older than the plugin) hides the cleanup box.
   - Listed but locked (`disabled`, the reason in the entry): on a database (`db`) every target in
     another major and every floating tag; on Nextcloud (`(^|/)nextcloud$`) more than one major ahead
     and every floating tag. The helper refuses the same (`db-major`, `major-skip`). The major is the
-    first number of the tag (`v3.2.1` → 3, `18-alpine` → 18).
+    first number of the tag (`v3.2.1` → 3, `18-alpine` → 18). Not locked: a PostgreSQL or MariaDB
+    major (`dbmajor`, below) and, since 0.27.0, a newer major of a key-value store
+    (`(^|/)(redis|valkey|keydb)$`) with a known target, offered as “new major, the data is saved
+    first”; its preview shows the `store` warning box before the changed lines.
   - Each choice runs `retag … --dry-run` (`superuser: "try"`); an answer for an earlier choice is
     dropped. `#dm-retag-preview` shows the changed lines (file:line, `-` before, `+` after, wrapped,
     never scrolled sideways), `variable` and `git` as hints, then the plan of an update. A floating tag
@@ -1196,13 +1236,13 @@ roll-outs pending, 17 new versions”).
 | `test/menu-status.js` | the status icon in Cockpit's menu with `i18n.js`, `menu-status.js` and the page's scripts: preloaded and hidden, the icon from `status.json` (`superuser: "try"`) and nothing else read or run, shown, the page loads (once); opened directly; German; a changed file, the same again (not sent), a missing and an unreadable file; the radar turning outdated while the session stays open (the check at 24 hours); no answer at all (the page starts after 3 seconds); state and tooltip equal state and summary of `diunstatus.document()` for the same facts, in English and German (the fixture, failed updates with an outdated radar, singular forms, nothing to do, no Diun and no radar, an unreadable radar time, a time with an offset, a run that reached no registry, also outdated and next to a failed update, odd values) |
 | `test/places.js` | where the Status Board's links lead, with `i18n.js`, `menu-status.js` and the page's scripts: each place opened directly (its tab at once, its first row once the rows are there, the history once it is there), while the page stays loaded (`locationchanged`), a tab chosen with the mouse or the keyboard going into the location and the link back to the place before, a reload that scrolls nowhere, no place, paths that are no place (also `constructor`, `toString`), no row of that status, the page loaded hidden (the location before and after the shell's hint, loaded at a place), and every link of `test/fixtures/status.json`: the Status Board's rule, its place, the rows its item counts |
 | `test/proc_test.py` | `diunproc` with real child processes: a silent hang, endless output, children that ignore SIGTERM (the group killed), a dump that hangs, the next command after a timeout; signals: no handler changed on import, `on_signals` restores the handlers before it, `held` defers a signal; a helper that holds a lock gets SIGTERM or SIGHUP while its command runs (silent and printing, `stream` and `copy`) and keeps the lock until the stop has reached the command (synchronised through FIFOs), children that ignore SIGTERM with SIGTERM and SIGHUP again during the cleanup (SIGKILL after the grace time, repeats only counted), the next operation afterwards, SIGKILL (the command runs on and keeps the lock until it ends) |
-| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, a plan before the backup folder and its parent exist (the RHEL rebuilds have no `/var/backups`), unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), rebuild (the plan with the versions of the final base, read-only, `not-built`, a failing build putting the tag back and leaving no history, the same build, a rebuild with its versions, history and rollback, a build over its time limit, since 0.24.1 a build without `image:` (compose's name `<project>-<service>`, also under another project name) rebuilt and rolled back, and the rollback refused when the files give the service another image or no longer define it; the compose stand-in gives the project's `name` and no `image` for such a service, as Compose does), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes), signals (SIGTERM during the dump: exit 5, partial dump and everything else taken back; SIGHUP during the pull: exit 5; SIGTERM during `compose up`: exit 4 with history, output, rollback and the cause `signal`; SIGHUP during a rollback's restart: failed, offered again; a signal before the rollback changed a container: exit 5; the same with the real helper (`entry`), a real dump process and a real `compose up` process: state before the signal, the command gone, the lock free afterwards, the rollback), time limits (a pull or dump over its limit stops before any change, `compose up` over its limit fails with its rollback, the limits from the settings file and their ranges) |
+| `test/update_test.py` | `diun-update.py` with fake Docker, compose and systemctl: database detection, plan reasons, services of the same compose files only, running CI jobs in a runner's plan, a plan before the backup folder and its parent exist (the RHEL rebuilds have no `/var/backups`), unknown jump size, argument checks and exit codes, update (dumps, rollback tag, versions, cleanup, radar start, a failed pull that leaves the old image, a registry error with and without a newer image on the server), rebuild (the plan with the versions of the final base, read-only, `not-built`, a failing build putting the tag back and leaving no history, the same build, a rebuild with its versions, history and rollback, a build over its time limit, since 0.24.1 a build without `image:` (compose's name `<project>-<service>`, also under another project name) rebuilt and rolled back, and the rollback refused when the files give the service another image or no longer define it; the compose stand-in gives the project's `name` and no `image` for such a service, as Compose does), most likely cause of a failure (log lines of several languages, health check, out of memory, `docker compose`), kept output and `log`, digests of the new build, relations in the plan, watch of dependent services, rollback (a failed one tried again, an `image:` line changed since, containers on another image), a run cut off after the restart (exception, kill) or before it (files back, entry discarded), cleanup rules, `backups`, `radar`, `retag --dry-run` (tag lines, override files, `.env` variables, anchors, refusals, nothing written), `retag --expect` (fingerprint, the written lines with owner and mode, backup, a failed `compose config` or pull restoring the files, an override file, rollback restoring them byte-exact, a file edited after the change stopping the rollback), waiting for health, `stream`, a real update process killed with SIGKILL after the restart (history, kept output, rollback; synchronised through pipes), signals (SIGTERM during the dump: exit 5, partial dump and everything else taken back; SIGHUP during the pull: exit 5; SIGTERM during `compose up`: exit 4 with history, output, rollback and the cause `signal`; SIGHUP during a rollback's restart: failed, offered again; a signal before the rollback changed a container: exit 5; the same with the real helper (`entry`), a real dump process and a real `compose up` process: state before the signal, the command gone, the lock free afterwards, the rollback), time limits (a pull or dump over its limit stops before any change, `compose up` over its limit fails with its rollback, the limits from the settings file and their ranges), a key-value store's new major (planned with its data directory, stopped before the restart, packed root only, put back by the rollback; refused without its copy or with the data elsewhere; the copy deleted with its rollback image; a failed stop or pack and too little space start the store again and leave nothing; nothing mounted; an unsafe copy refused before the directory is emptied) |
 | `test/deps_check_test.py` | `diun-deps.sh check` prints valid JSON with every field the plugin reads |
 | `test/loading.js` | loading indicator, double loads, error cases |
 | `test/i18n-deps.js` | DE/EN, requirements panel, install dialog |
 | `test/update-backups.js` | update buttons, plan dialog, dump tick box, unknown jump size (warning, tick box), rollback offer, cause above the log, backups tab with causes (a failed rollback offered again, an aborted and a running update, the helper's own cause), output button, a build that failed before (row note, second tick box), “together with” in the rows, CI job containers left out, the warning for running CI jobs, plan groups and dependencies, delete; since 0.24.0 Rebuild (the button, the plan of `rebuild --dry-run` with the base images, no two steps and no release notes, with and without dump, the outcomes in both languages, the rollback offered after a failure, a refusal, the history note) |
 | `test/diun-events.js` | which Diun event belongs to which row: its own image and tag only, none for a reference with a digest, no update for the same build under a new digest, the registry link from any event of the image, a dismissed event, the events-only view |
-| `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English; the states while the dry-run and the run work are checked at fixed points (the stub's answers wait for a gate) |
+| `test/version-change.js` | “Change version”: rows with the button, outlined chips as buttons, the field's groups and locked entries (database, Nextcloud), preview (changed lines, plan, hints), tick boxes for a major and a floating tag, the last choice wins, refusals, `--expect` with the preview's fingerprint and `--no-dump`, failure with rollback, a stopped rollback, the history entry and its rollback dialog, no German in English; the states while the dry-run and the run work are checked at fixed points (the stub's answers wait for a gate); a key-value store's new major (selectable, its warning box with the directory, the major's tick box, the copy in the history, “Data copy gone”, the rollback dialog) |
 | `test/release-notes.js` | release notes in the update dialog and the preview of a version change: the range (installed, target], newest first, closed; the warning words in the summary and per release; the text as text (links, images, HTML, comments, `<script>`, angle brackets that are no HTML, nested and split markup); empty and cut texts, links only to GitHub; the slot's place; English without German, the singular; a note for every missing piece (no source, not fetched, no file, no releases, limit, error, nothing in range, the installed version unknown, nothing after it, a broken file); without a target all since the installed version; kept releases under a limit; nothing for the same version; another choice in the preview |
 | `test/page-scripts.js` | not a test: the page's scripts for the jsdom tests, in the order `index.html` loads them (from `i18n.js` on, `menu-status.js` when asked for) |
 | `test/partial-load.js` | a page that did not get all its scripts (each script run on its own, as in the browser): everything there (the page starts, the mark of an earlier reload gone), scripts new in a version missing (`cockpit.Packages.Reload` on the internal bus, one more load, nothing thrown, nothing run on the server), a bridge without `Reload`, still missing after that (the message in English and German, no loop), without `common.js` |

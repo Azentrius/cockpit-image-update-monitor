@@ -29,6 +29,9 @@
 # The MariaDB major (MariaDB 11 to 12, MARIADB12_IMAGE, default mariadb:12) runs
 # in "imgupd-test-mdb", its volume named imgupd-test-major_mdbdata; E2E_MYSQL=0
 # skips it with the other MariaDB/MySQL parts.
+# The major of a key-value store (Redis 7 to 8, REDIS_IMAGE and REDIS8_IMAGE,
+# defaults redis:7-alpine and redis:8-alpine) runs in "imgupd-test-kv", its
+# volume named imgupd-test-major_kvdata; its data copy lies in data/imgupd-test-kv.
 # The rebuild of an image built on the server runs in "imgupd-test-build": a
 # Dockerfile on a base image in the local registry, which gets a newer build;
 # one service names its image, one does not (compose calls it <project>-<service>).
@@ -60,12 +63,14 @@ P3=imgupd-test-reg
 P4=imgupd-test-major
 P6=imgupd-test-mdb
 P5=imgupd-test-build
+P7=imgupd-test-kv
 D=${E2E_DIR:-/root/imgupd-test}
 D2=$D-my
 D3=$D-reg
 D4=$D-major
 D6=$D-mdb
 D5=$D-build
+D7=$D-kv
 REG_PORT=${E2E_REGISTRY_PORT:-5000}
 REG=localhost:$REG_PORT
 REGISTRY_IMAGE=${REGISTRY_IMAGE:-registry:2.8.3}
@@ -78,7 +83,7 @@ export DIUN_LANG=en
 
 [ "$(id -u)" = 0 ] || { echo "ABORT: run as root"; exit 1; }
 [ -x "$H" ] || { echo "ABORT: $H missing (install first)"; exit 1; }
-for p in "$P" "$P2" "$P3" "$P4" "$P5" "$P6"; do
+for p in "$P" "$P2" "$P3" "$P4" "$P5" "$P6" "$P7"; do
     if [ -n "$(docker ps -aq --filter label=com.docker.compose.project="$p")" ]; then
         echo "ABORT: compose project $p exists already"; exit 1
     fi
@@ -92,8 +97,10 @@ MARIADB_IMAGE=${MARIADB_IMAGE:-mariadb:11}
 MYSQL_IMAGE=${MYSQL_IMAGE:-mysql:8}
 PG17_IMAGE=${PG17_IMAGE:-postgres:17-alpine}
 MARIADB12_IMAGE=${MARIADB12_IMAGE:-mariadb:12}
+REDIS_IMAGE=${REDIS_IMAGE:-redis:7-alpine}
+REDIS8_IMAGE=${REDIS8_IMAGE:-redis:8-alpine}
 E2E_MYSQL=${E2E_MYSQL:-1}
-IMAGES="$OLD_IMAGE $NEW_IMAGE $REGISTRY_IMAGE $PG17_IMAGE"
+IMAGES="$OLD_IMAGE $NEW_IMAGE $REGISTRY_IMAGE $PG17_IMAGE $REDIS_IMAGE $REDIS8_IMAGE"
 [ "$E2E_MYSQL" = 1 ] && IMAGES="$IMAGES $MARIADB_IMAGE $MYSQL_IMAGE $MARIADB12_IMAGE"
 for i in $IMAGES; do
     docker image inspect "$i" >/dev/null 2>&1 || docker pull -q "$i" >/dev/null || { echo "ABORT: $i not available"; exit 1; }
@@ -224,6 +231,7 @@ cleanup() {
     docker compose -p "$P4" -f "$D4/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P5" -f "$D5/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     docker compose -p "$P6" -f "$D6/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
+    docker compose -p "$P7" -f "$D7/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1
     for v in $(docker volume ls -q --filter name='^imgupd-test-major_'); do
         docker volume rm "$v" >/dev/null 2>&1 && echo "removed volume $v"
     done
@@ -256,8 +264,9 @@ cleanup() {
         fi
     done
     rm -rf "${DUMPS:?}/${P:?}" "${DUMPS:?}/${P2:?}" "${DUMPS:?}/${P4:?}" "${DUMPS:?}/${P5:?}" "${DUMPS:?}/${P6:?}" \
-           "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}" "${BK_DIR:?}/compose/${P6:?}"
-    rmdir "$BK_DIR/compose" 2>/dev/null
+           "${BK_DIR:?}/compose/${P:?}" "${BK_DIR:?}/compose/${P4:?}" "${BK_DIR:?}/compose/${P6:?}" \
+           "${BK_DIR:?}/compose/${P7:?}" "${BK_DIR:?}/data/${P7:?}"
+    rmdir "$BK_DIR/compose" "$BK_DIR/data" 2>/dev/null
     rm -f "${LOGS:?}"/[0-9]*-imgupd-test-*.log
     # A radar run started by the last rollback writes the test's images into
     # versions.json when it ends: wait for it, then take them out.
@@ -295,15 +304,15 @@ PY
         python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import diunstatus; diunstatus.refresh()' "$LIB" \
             && echo "status.json: written again without the test project"
     fi
-    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" "${D5:?}" "${D6:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz /tmp/e2e-ready /tmp/e2e-go
+    rm -rf "${D:?}" "${D2:?}" "${D3:?}" "${D4:?}" "${D5:?}" "${D6:?}" "${D7:?}" /tmp/e2e-hold.fifo /tmp/e2e-half-*.sql.gz /tmp/e2e-ready /tmp/e2e-go
     n_c=$(docker ps -a --format '{{.Names}}' | grep -c imgupd)
     n_t=$(docker image ls --format '{{.Repository}}' | grep -cE '(^|/)imgupd-test/|^imgupd-test-build-')
     n_d=$(find "$DUMPS" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l)
     n_l=$(find "$LOGS" -maxdepth 1 -name '*-imgupd-test-*' 2>/dev/null | wc -l)
-    n_b=$(find "$BK_DIR/compose" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l)
+    n_b=$(find "$BK_DIR/compose" "$BK_DIR/data" -maxdepth 1 -name 'imgupd-test*' 2>/dev/null | wc -l)
     n_v=$(docker volume ls -q --filter name='^imgupd-test-major_' | wc -l)
-    echo "Left over: $n_c containers, $n_t tags, $n_d test dump folders, $n_l test logs, $n_b test file backups," \
-         "$n_v test volumes"
+    echo "Left over: $n_c containers, $n_t tags, $n_d test dump folders, $n_l test logs, $n_b test file backups" \
+         "and data copies, $n_v test volumes"
     if [ "$rc" = 0 ] && [ $((n_c + n_t + n_d + n_l + n_b + n_v)) != 0 ]; then
         echo "E2E: FAILURES (the test left something behind)"
         exit 1
@@ -1164,6 +1173,83 @@ python3 $H delete-olddata "$OPY" > /tmp/e2e-y3.log 2>&1; RC=$?
 check "MariaDB delete-olddata after the rollback: the data of MariaDB 12 released" \
     '[ $RC = 0 ] && [ -z "$(docker volume ls -q --filter name="^imgupd-test-major_mdbdata-mariadb12-")" ]'
 fi
+
+echo "=== 17e. Key-value store major: Redis 7 to 8 with its data saved first, rollback ==="
+# Redis reads an older major's files: the major is a tag change. The helper stops
+# the store, packs its data directory (an AOF of Redis 7 here) and only then
+# starts Redis 8; the rollback puts the files of Redis 7 back, which Redis 8 may
+# have rewritten. The copy goes with its rollback image.
+redis_version() { docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" | sed -n 's/^REDIS_VERSION=\([0-9.]*\).*/\1/p'; }
+R7=$(redis_version "$REDIS_IMAGE")
+R8=$(redis_version "$REDIS8_IMAGE")
+docker tag "$REDIS_IMAGE" imgupd-test/redis:7
+docker tag "$REDIS8_IMAGE" "imgupd-test/redis:$R8"
+mkdir -p "$D7"
+cat > "$D7/docker-compose.yml" <<EOF
+name: $P7
+services:
+  cache:
+    image: imgupd-test/redis:7
+    container_name: imgupd-test-kv
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - kvdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+volumes:
+  kvdata:
+    name: imgupd-test-major_kvdata
+EOF
+docker compose -p "$P7" -f "$D7/docker-compose.yml" up -d --wait 2>&1 | tail -n 2
+KV=imgupd-test-kv
+kv() { docker exec "$KV" redis-cli "$@" | tr -d '\r'; }
+kv_major() { kv info server | sed -n 's/^redis_version:\([0-9]*\).*/\1/p'; }
+kv set e2e-key before > /dev/null
+KVVOL=$(docker volume inspect -f '{{.Mountpoint}}' imgupd-test-major_kvdata)
+SUMK=$(sum_of "$D7/docker-compose.yml")
+radar_idle
+python3 - "$VERSIONS" "$R7" "$R8" <<'PY'
+import json, os, sys, tempfile
+p, version, target = sys.argv[1:4]
+try:
+    d = json.load(open(p))
+except (OSError, ValueError):
+    d = {"images": []}
+d["images"] = [r for r in d.get("images") or [] if r.get("image") != "imgupd-test/redis"]
+d["images"].append({"image": "imgupd-test/redis", "tag": "7", "db": True, "containers": ["imgupd-test-kv"],
+                    "versions": {version: {"status": "major", "choices": {
+                        "pin": None, "lines": [], "newer": [{"tag": target, "level": "major"}], "floating": []}}}})
+os.makedirs(os.path.dirname(p), exist_ok=True)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p))
+with os.fdopen(fd, "w") as f:
+    json.dump(d, f, ensure_ascii=False, indent=1)
+os.chmod(tmp, 0o644)
+os.replace(tmp, p)
+PY
+DRY=$(python3 $H retag "$KV" "$R8" --dry-run)
+ST=$(jget "$DRY" '(d["retag"]["possible"], d["retag"]["store"]["engine"], d["retag"]["store"]["items"][0]["source"] == "'"$KVVOL"'")')
+check "retag --dry-run of a Redis major: possible, the store and its volume named" '[ "$ST" = "(True, '"'"'redis'"'"', True)" ]'
+python3 $H retag "$KV" "$R8" --expect "$(jget "$DRY" 'd["retag"]["fingerprint"]')" --no-dump > /tmp/e2e-k1.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-k1.log | tail -n 12
+OPK=$(jget "$(result_of /tmp/e2e-k1.log)" 'd["op"]')
+COPYK=$(python3 -c 'import json, sys
+ops = [json.loads(l) for l in open(sys.argv[1])]
+c = [o["data_copies"] for o in ops if o.get("id") == sys.argv[2] and o.get("data_copies")]
+print(c[-1][0]["copy"] if c else "")' "$OPS" "$OPK")
+check "Redis major: exit 0, Redis 8 runs with the data of Redis 7, saved before it started" \
+    '[ $RC = 0 ] && [ "$(kv_major)" = 8 ] && [ "$(kv get e2e-key)" = before ] && [ -n "$COPYK" ] && grep -q "Data saved: $KVVOL" /tmp/e2e-k1.log'
+check "Redis major: the copy root only, with the AOF of Redis 7" \
+    '[ "$(stat -c %a "$BK_DIR/data/$COPYK")" = 600 ] && tar -tf "$BK_DIR/data/$COPYK" | grep -q "appendonlydir/"'
+kv set e2e-key after > /dev/null
+python3 $H rollback "$OPK" > /tmp/e2e-k2.log 2>&1; RC=$?
+sed 's/^/  | /' /tmp/e2e-k2.log | tail -n 8
+check "Redis rollback: exit 0, Redis 7 with its data from before the major, the file byte-identical" \
+    '[ $RC = 0 ] && [ "$(kv_major)" = 7 ] && [ "$(kv get e2e-key)" = before ] && [ "$(sum_of "$D7/docker-compose.yml")" = "$SUMK" ] && grep -q "Data put back: $KVVOL" /tmp/e2e-k2.log'
+RBK=$(jget "$(python3 $H backups)" '[o["rollback"] for o in d["ops"] if o["id"] == "'"$OPK"'"][0]')
+python3 $H delete-image "$RBK" > /tmp/e2e-k3.log 2>&1; RC=$?
+check "Redis: deleting the rollback image deletes the data copy" '[ $RC = 0 ] && [ ! -e "$BK_DIR/data/$COPYK" ]'
 
 echo "=== 18. Rebuild of an image built on the server: a newer base from the registry, rollback ==="
 # The base is OLD in the local registry; the build on it runs. Then the registry

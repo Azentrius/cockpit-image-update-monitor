@@ -24,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
@@ -198,6 +199,7 @@ class Docker:
         self.build_rc = 0            # exit code of `compose build` (it may have tagged one service before)
         self.build_out = []          # what a failing `compose build` prints
         self.build_raises = None     # exception `compose build` raises
+        self.stop_rc = 0             # exit code of `compose stop`
 
     def add(self, c):
         self.containers[c["Name"].lstrip("/")] = c
@@ -295,6 +297,8 @@ class Docker:
             if self.build_rc:
                 U.STREAM_TAIL[:] = self.build_out
             return self.build_rc
+        if "stop" in cmd and self.stop_rc:
+            return self.stop_rc
         if "pull" in cmd and self.pull_raises:
             raise self.pull_raises
         if "pull" in cmd and self.pull_rc:
@@ -2166,6 +2170,247 @@ check("retag with an override file: rollback restores it byte-identical",
       (rc, raw(ov_over) == OVER_BEFORE, raw(ov_base) == BASE_BEFORE, D.containers["metrics"]["Image"]),
       (0, True, True, "sha256:pl"))
 del D.containers["metrics"]
+D.images_from = None
+os.unlink(U.VERSIONS)
+
+# ------------------------------------------- key-value store majors (retag)
+# Redis 7.4 -> 8: a tag change that stops the store and packs its data
+# directory first; the rollback puts that copy back.
+reset_fs()
+fresh_docker()
+release_lock()
+U.systemctl = Systemctl()
+U.wait_healthy = lambda project, services: (True, [], {})
+REC_RD = {"image": "redis", "tag": "7.4-alpine", "db": True, "versions": {"7.4.12": {"status": "major", "choices": {
+    "pin": "7.4.12-alpine", "lines": [{"tag": "8.10-alpine", "newest": "8.10.3-alpine"},
+                                      {"tag": "7.4-alpine", "newest": "7.4.12-alpine"}],
+    "newer": [{"tag": "8.10.3-alpine", "level": "major"}], "floating": ["alpine"]}}}}
+radar(REC_RD)
+D.images["sha256:rd7"] = {"Id": "sha256:rd7", "Config": {"Env": ["REDIS_VERSION=7.4.12"]}}
+D.images["sha256:rd8"] = {"Id": "sha256:rd8", "Config": {"Env": ["REDIS_VERSION=8.10.3"]}}
+D.tags.update({"redis:7.4-alpine": "sha256:rd7", "redis:7.4.12-alpine": "sha256:rd7",
+               "redis:8.10-alpine": "sha256:rd8"})
+RDATA = os.path.join(TMP, "redis-data")
+
+
+def redis_files(files):
+    """The store's data directory with these files {relative path: bytes}."""
+    shutil.rmtree(RDATA, ignore_errors=True)
+    for rel, data in files.items():
+        p = os.path.join(RDATA, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(data)
+    os.makedirs(RDATA, exist_ok=True)
+
+
+def redis_now():
+    out = {}
+    for root, _dirs, files in os.walk(RDATA):
+        for f in files:
+            p = os.path.join(root, f)
+            out[os.path.relpath(p, RDATA)] = raw(p)
+    return out
+
+
+def data_left():
+    d = os.path.join(U.BASE, "data")
+    return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+
+def order(*words):
+    """Index of the first streamed command with each word, in the order given."""
+    return [next((i for i, c in enumerate(D.streamed) if w in c), None) for w in words]
+
+
+OLD_DATA = {"dump.rdb": b"REDIS0011 old major", "appendonlydir/appendonly.aof.1.base.rdb": b"REDIS0011 base",
+            "appendonlydir/appendonly.aof.manifest": b"file appendonly.aof.1.base.rdb seq 1 type b\n"}
+redis_files(OLD_DATA)
+RD_TEXT = "services:\n  redis:\n    image: redis:7.4-alpine\n    volumes:\n      - redis:/data\n"
+rd_file = write("rd.yml", RD_TEXT)
+RD_BEFORE = raw(rd_file)
+redis_ctn = ctn("nc-redis", "redis:7.4-alpine", "sha256:rd7", project="ncf", service="redis", files=rd_file,
+                cmd=["redis-server"])
+redis_ctn["Mounts"] = [{"Type": "volume", "Name": "a" * 64, "Source": RDATA, "Destination": "/data"}]
+D.add(redis_ctn)
+D.images_from = compose_images([rd_file])
+
+check("store: Redis, Valkey and KeyDB (also Bitnami's) are key-value stores, PostgreSQL is not",
+      [U.store_of(r) for r in ("redis", "docker.io/library/redis", "valkey/valkey", "eqalpha/keydb", "bitnami/redis",
+                               "postgres", "acme/redis-commander")],
+      ["redis", "redis", "valkey", "keydb", "redis", None, None])
+p = retag("nc-redis", "8.10-alpine")
+r = p["retag"]
+check("store: a newer major is a tag change that names the data it saves",
+      (r["possible"], r["reason"], r["choice"], p["target_version"], r["store"]["engine"], r["store"]["name"],
+       [(i["container"], i["source"], i["destination"], i["bytes"]) for i in r["store"]["items"]], r["store"]["bytes"]),
+      (True, None, "line", "8.10.3", "redis", "Redis",
+       [("nc-redis", RDATA, "/data", sum(len(v) for v in OLD_DATA.values()))], sum(len(v) for v in OLD_DATA.values())))
+check("store: to an unknown version (a floating tag) still refused", why("nc-redis", "alpine"), ["db-major"])
+check("store: within its major, no data is saved", (retag("nc-redis", "7.4.12-alpine")["retag"]["possible"],
+                                                     retag("nc-redis", "7.4.12-alpine")["retag"]["store"]), (True, None))
+
+fp = r["fingerprint"]
+D.streamed.clear()
+rc, res, out = apply("nc-redis", "8.10-alpine", fp)
+op = ops()[res["op"]]
+x = op["data_copies"][0] if op.get("data_copies") else {}
+copy = U.copy_path(x.get("copy"))
+check("store: exit 0, the copy in the history, the store stopped before the restart",
+      (rc, res["status"], op["store"], x.get("container"), x.get("source"), bool(U.COPY_RE.match(x.get("copy") or "")),
+       order("stop", "up")[0] < order("stop", "up")[1]),
+      (0, "ok", "Redis", "nc-redis", RDATA, True, True))
+with tarfile.open(copy) as tar:
+    packed = {os.path.normpath(m.name): tar.extractfile(m).read() for m in tar.getmembers() if m.isreg()}
+check("store: the copy holds every file, root only (600, folders 700), its size in the history",
+      (packed == OLD_DATA, oct(os.stat(copy).st_mode & 0o777), oct(os.stat(os.path.dirname(copy)).st_mode & 0o777),
+       oct(os.stat(os.path.join(U.BASE, "data")).st_mode & 0o777), x["bytes"] == os.path.getsize(copy)),
+      (True, "0o600", "0o700", "0o700", True))
+h = history(res["op"])
+check("store: backups shows the copy's size and offers the rollback, without the paths",
+      (h["data_copy"], h["can_rollback"], "data_copies" in h), ({"bytes": x["bytes"], "there": True}, True, False))
+check("store: the container runs the new major", (D.containers["nc-redis"]["Config"]["Image"],
+                                                  D.containers["nc-redis"]["Image"]), ("redis:8.10-alpine", "sha256:rd8"))
+
+# Redis 8 rewrites its files; the rollback puts the old ones back, stopped.
+redis_files({"dump.rdb": b"REDIS0012 new major", "temp-1.rdb": b"x"})
+D.streamed.clear()
+with as_uid(0):
+    rc, out = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+check("store rollback: exit 0, the files as before the change, put back while stopped, then the old image",
+      (rc, redis_now() == OLD_DATA, order("stop")[0] is not None and order("stop", "up")[0] < order("stop", "up")[1],
+       "Data put back: " + RDATA in out, raw(rd_file) == RD_BEFORE, D.containers["nc-redis"]["Image"]),
+      (0, True, True, True, True, "sha256:rd7"))
+check("store rollback: the output says what is lost", "what it wrote since then is lost" in out, True)
+
+# Without its copy no rollback: the old major would start on the new files.
+fp = retag("nc-redis", "8.10-alpine")["retag"]["fingerprint"]
+rc, res, out = apply("nc-redis", "8.10-alpine", fp)
+copy = U.copy_path(ops()[res["op"]]["data_copies"][0]["copy"])
+os.unlink(copy)
+h = history(res["op"])
+NEW_DATA = {"dump.rdb": b"REDIS0012 new major"}
+redis_files(NEW_DATA)
+with as_uid(0):
+    rc2, out2 = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+check("store: the copy deleted -> no rollback offered, a rollback stops (exit 2) before anything changes",
+      (rc, h["can_rollback"], h.get("data_gone"), rc2, "is missing or damaged" in out2, redis_now() == NEW_DATA,
+       D.containers["nc-redis"]["Image"], raw(rd_file) != RD_BEFORE),
+      (0, False, True, 2, True, True, "sha256:rd8", True))
+
+# A container that keeps its files elsewhere now: the copy would land where it is not used.
+with open(rd_file, "wb") as f:
+    f.write(RD_BEFORE)
+D.containers["nc-redis"]["Config"]["Image"], D.containers["nc-redis"]["Image"] = "redis:7.4-alpine", "sha256:rd7"
+redis_files(OLD_DATA)
+fp = retag("nc-redis", "8.10-alpine")["retag"]["fingerprint"]
+rc, res, out = apply("nc-redis", "8.10-alpine", fp)
+redis_ctn["Mounts"][0]["Source"] = RDATA + "-elsewhere"
+with as_uid(0):
+    rc2, out2 = quiet(U.main, ["rollback", res["op"]])
+release_lock()
+redis_ctn["Mounts"][0]["Source"] = RDATA
+check("store: the container's data elsewhere now -> the rollback stops (exit 5), nothing changed",
+      (rc, rc2, "no longer keeps its data in " + RDATA in out2, D.containers["nc-redis"]["Image"]), (0, 5, True, "sha256:rd8"))
+
+# The copy goes with the rollback image: removed in the backups tab or by the cleanup.
+rb = ops()[res["op"]]["rollback"]
+copy = U.copy_path(ops()[res["op"]]["data_copies"][0]["copy"])
+with as_uid(0):
+    rc, out = quiet(U.main, ["delete-image", rb])
+release_lock()
+check("store: deleting the rollback image deletes its data copy", (rc, os.path.exists(copy), "Deleted data copy" in out),
+      (0, False, True))
+with open(rd_file, "wb") as f:
+    f.write(RD_BEFORE)
+D.containers["nc-redis"]["Config"]["Image"], D.containers["nc-redis"]["Image"] = "redis:7.4-alpine", "sha256:rd7"
+fp = retag("nc-redis", "8.10-alpine")["retag"]["fingerprint"]
+rc, res, out = apply("nc-redis", "8.10-alpine", fp)
+rb = ops()[res["op"]]["rollback"]
+copy = U.copy_path(ops()[res["op"]]["data_copies"][0]["copy"])
+with contextlib.redirect_stdout(io.StringIO()) as buf:
+    gone = U.apply_cleanup([], [{"ref": rb}])
+check("store: the cleanup removing the rollback image deletes its data copy too",
+      (gone[1], os.path.exists(copy), "Deleted data copy" in buf.getvalue()), ([rb], False, True))
+
+# Stopping before the restart: anything wrong starts the store again and leaves nothing.
+shutil.rmtree(U.BASE)
+U.ensure_base()
+for t in [t for t in D.tags if ":rollback-" in t]:
+    del D.tags[t]
+with open(rd_file, "wb") as f:
+    f.write(RD_BEFORE)
+D.containers["nc-redis"]["Config"]["Image"], D.containers["nc-redis"]["Image"] = "redis:7.4-alpine", "sha256:rd7"
+redis_files(OLD_DATA)
+
+
+def store_fails(label, setup, undo, words):
+    fp = retag("nc-redis", "8.10-alpine")["retag"]["fingerprint"]
+    setup()
+    D.streamed.clear()
+    try:
+        rc, res, out = apply("nc-redis", "8.10-alpine", fp)
+    finally:
+        undo()
+    check(label, (rc, leftovers(), data_left(), raw(rd_file) == RD_BEFORE, redis_now() == OLD_DATA,
+                  D.containers["nc-redis"]["Image"], all(w in out for w in words),
+                  [i for i, c in enumerate(D.streamed) if "up" in c]),
+          (5, ([], [], 0), [], True, True, "sha256:rd7", True, []))
+    return out
+
+
+real_pack, real_free = U.pack_dir, U.free_space
+out = store_fails("store: compose stop fails -> exit 5, started again, files restored, nothing left",
+                  lambda: setattr(D, "stop_rc", 1), lambda: setattr(D, "stop_rc", 0),
+                  ["Saving the data of Redis failed", "runs again"])
+check("store: after a failed stop the store is started again", order("stop", "start")[1] is not None, True)
+
+
+def pack_breaks(src, project, name):
+    with open(os.path.join(U.BASE, "data", project, name + ".tar.part"), "wb") as f:
+        f.write(b"half")
+    raise OSError(28, "No space left on device")
+
+
+def setup_pack():
+    os.makedirs(os.path.join(U.BASE, "data", "ncf"), exist_ok=True)
+    U.pack_dir = pack_breaks
+
+
+store_fails("store: packing fails -> exit 5, the half-written copy removed, started again",
+            setup_pack, lambda: setattr(U, "pack_dir", real_pack), ["No space left on device"])
+out = store_fails("store: too little space for the copy -> exit 5 before the store stops",
+                  lambda: setattr(U, "free_space", lambda path: 1024), lambda: setattr(U, "free_space", real_free),
+                  ["Not enough space", "for the data of Redis"])
+check("store: too little space -> the store was not stopped", order("stop"), [None])
+
+# No data directory mounted: nothing to save, said so.
+redis_ctn["Mounts"] = []
+fp = retag("nc-redis", "8.10-alpine")["retag"]["fingerprint"]
+D.streamed.clear()
+rc, res, out = apply("nc-redis", "8.10-alpine", fp)
+check("store without a data directory: changed without stopping first, says that there is nothing to save",
+      (rc, ops()[res["op"]].get("data_copies"), order("stop"), "no data directory mounted – nothing to save" in out),
+      (0, None, [None], True))
+redis_ctn["Mounts"] = [{"Type": "volume", "Name": "a" * 64, "Source": RDATA, "Destination": "/data"}]
+
+# The unpacking checks the copy before it empties the directory.
+bad = os.path.join(TMP, "bad.tar")
+with tarfile.open(bad, "w") as tar:
+    info = tarfile.TarInfo("../outside")
+    info.size = 1
+    tar.addfile(info, io.BytesIO(b"x"))
+redis_files(OLD_DATA)
+try:
+    U.unpack_dir(bad, RDATA)
+    refused = False
+except ValueError:
+    refused = True
+check("store: a copy with a path outside the directory is refused, the directory untouched",
+      (refused, redis_now() == OLD_DATA, os.path.exists(os.path.join(TMP, "outside"))), (True, True, False))
+del D.containers["nc-redis"]
 D.images_from = None
 os.unlink(U.VERSIONS)
 

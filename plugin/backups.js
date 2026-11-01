@@ -31,7 +31,9 @@
     function rollbackGone(o) {
         return o.rollback_gone
             ? `<span class="dm-row-note dm-rb-gone" title="${esc(t("rb.goneTip", { ref: o.rollback || "?" }))}">${esc(t("rb.gone"))}</span>`
-            : "";
+            : o.data_gone      // a key-value store's data copy is gone, the rollback image is not (since 0.27.0)
+                ? `<span class="dm-row-note dm-rb-gone" title="${esc(t("rb.dataGoneTip", { engine: o.store || "?" }))}">${esc(t("rb.dataGone"))}</span>`
+                : "";
     }
 
     // A failed rollback may be tried again; up to 0.18.0 it was marked
@@ -179,6 +181,7 @@
             `<td class="az-nowrap" data-label="${L("col.container")}"><span class="dm-cell">${esc(o.container || "")}</span></td>` +
             `<td data-label="${L("col.image")}"><span class="dm-cell"><span class="az-mono">${esc(o.image || "")}</span>` +
               (o.kind === "retag" ? `<span class="dm-row-note">${esc(t("op.retag", { from: o.from_tag, to: o.to_tag }))}</span>` : "") +
+              (o.data_copy && o.data_copy.there ? `<span class="dm-row-note">${esc(t("op.dataCopy", { engine: o.store || "?", size: human(o.data_copy.bytes) }))}</span>` : "") +
               (o.kind === "rebuild" ? `<span class="dm-row-note">${esc(t("op.rebuild"))}</span>` : "") +
               (o.kind === "dbmajor" ? `<span class="dm-row-note">${esc(t("op.dbmajor", { engine: engineName(o.engine), from: o.from_major, to: o.to_major }))}</span>` +
                   (o.kept ? `<span class="dm-row-note">${esc(t("op.kept", { engine: engineName(o.engine), major: o.kept.major, where: o.kept.where,

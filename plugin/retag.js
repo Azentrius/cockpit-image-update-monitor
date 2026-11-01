@@ -12,13 +12,16 @@
     // What the selection field of "Change version" offers: the radar's
     // versions[installed].choices (since 0.11.0), in the field's order, as
     // [{ group, tag, text, disabled, major }]. A PostgreSQL major with a known
-    // target is a database major (stage 5, `dbmajor`); other database majors,
-    // and Nextcloud jumps over more than one major, are listed but cannot be
-    // chosen; the helper refuses them as well (db-major, major-skip). The
-    // configured tag is the field's first entry and is left out here.
+    // target is a database major (stage 5, `dbmajor`); a newer major of a
+    // key-value store (since 0.27.0) is a tag change that saves the store's data
+    // first; other database majors, and Nextcloud jumps over more than one
+    // major, are listed but cannot be chosen; the helper refuses them as well
+    // (db-major, major-skip). The configured tag is the field's first entry and
+    // is left out here.
     const NEXTCLOUD_RE = /(^|\/)nextcloud$/;
     const PG_RE = /(^|\/)(postgres|postgresql|postgis|pgvector|timescaledb[a-z0-9-]*)$/;
     const MARIADB_RE = /(^|\/)mariadb$/;
+    const STORE_RE = /(^|\/)(redis|valkey|keydb)$/;
 
     function majorOf(v) {
         const m = /\d+/.exec(String(v || ""));
@@ -34,9 +37,10 @@
         // PostgreSQL and (since 0.25.0) MariaDB; MySQL and the other databases stay locked.
         const engine = PG_RE.test(repoKey(ctn.image)) || MARIADB_RE.test(repoKey(ctn.image));
         const dbMajor = (target) => rec.db && engine && target != null && majorOf(target) > cur;
+        const storeMajor = (target) => rec.db && STORE_RE.test(repoKey(ctn.image)) && target != null && majorOf(target) > cur;
         const blocked = (target) => {      // the version the tag brings; null: follows every release
             const m = target == null ? null : majorOf(target);
-            if (rec.db && m !== cur && !dbMajor(target)) return "rt.optDbMajor";
+            if (rec.db && m !== cur && !dbMajor(target) && !storeMajor(target)) return "rt.optDbMajor";
             if (nextcloud && (m == null || m - cur > 1)) return "rt.optSkip";
             return null;
         };
@@ -45,8 +49,10 @@
             if (!tag || tag === ctn.tag || out.some((o) => o.tag === tag)) return;
             const why = blocked(target);
             const major = !why && dbMajor(target) && majorOf(target) !== cur;
+            const store = !why && storeMajor(target);
             out.push({ group, tag, disabled: !!why, major,
-                       text: why ? t(why, { tag }) : major ? t("rt.optMajor", { tag }) : key ? t(key, { ...vars, tag }) : tag });
+                       text: why ? t(why, { tag }) : major ? t("rt.optMajor", { tag })
+                           : store ? t("rt.optStoreMajor", { tag }) : key ? t(key, { ...vars, tag }) : tag });
         };
         add("rt.grp.pin", ch.pin, "rt.optPin", inst.v);
         (ch.lines || []).forEach((l) => add("rt.grp.lines", l.tag, "rt.optLine", l.newest, { v: l.newest }));
@@ -138,6 +144,17 @@
             `</ul>`;
     }
 
+    // --- Key-value store major (since 0.27.0) --------------------------------
+    // Redis, Valkey, KeyDB: the plan's retag.store names the data directory the
+    // helper packs after stopping the store; the rollback puts it back.
+    function storeBody(st) {
+        const saved = (st.items || []).filter((i) => i.source);
+        const li = (k, v) => `<li><span class="dm-kv-k">${esc(k)}</span><span class="dm-kv-v">${v}</span></li>`;
+        return alertBox("warning", t("st.title", { engine: st.name }), esc(t(saved.length ? "st.body" : "st.bodyNone", { engine: st.name }))) +
+            (saved.length ? `<ul class="dm-kv">` + saved.map((i) => li(i.container, `<code>${esc(i.source)}</code>` +
+                ` <span class="dm-muted">${esc(i.bytes == null ? "?" : human(i.bytes))}</span>`)).join("") + `</ul>` : "");
+    }
+
     function majorOutcome(o, name) {
         const r = o.result || {};
         if (o.ok) {
@@ -199,7 +216,8 @@
                         box.innerHTML = alertBox("warning", t("upd.notPossibleTitle"), rich(major ? majorReason(plan) : retagReason(plan)));
                         return;
                     }
-                    box.innerHTML = (major ? majorBody(plan) : "") + retagDiff(rt) + P.planBody(plan, null, rt);
+                    box.innerHTML = (major ? majorBody(plan) : "") + (rt.store ? storeBody(rt.store) : "") + retagDiff(rt) +
+                        P.planBody(plan, null, rt);
                     // A major always dumps: the dump is what it restores.
                     const dump = major && box.querySelector("#dm-dump-check");
                     if (dump) dump.closest("label").remove();

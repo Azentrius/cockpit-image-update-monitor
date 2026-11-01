@@ -33,7 +33,7 @@ const PLAN = { container: "metrics", image: REPO + ":v2.1.4", updatable: true, r
     jump_unknown: false, depends_on: [], dependents: [], jobs: [], job_order: [], shared_networks: [] };
 const FP = { "v2.1.5": "a".repeat(64), "v3.2.1": "b".repeat(64), v2: "c".repeat(64), latest: "d".repeat(64) };
 const TARGET = { "v2.1.5": ["2.1.5", "patch", "newer"], "v3.2.1": ["3.2.1", "major", "newer"],
-                 v2: ["2.1.5", "patch", "line"], latest: [null, null, "floating"] };
+                 v2: ["2.1.5", "patch", "line"], latest: [null, null, "floating"], "8-alpine": ["8.10.2", "major", "line"] };
 function dryRun(tag, rt) {
     const [target, jump, choice] = TARGET[tag] || [null, null, null];
     return { ...PLAN, target_version: target, jump, jump_unknown: target === null,
@@ -428,6 +428,80 @@ const tick = (x, id, on) => { const b = x.$(id); b.checked = on; b.dispatchEvent
     const found = german.filter((g) => all.includes(g));
     console.log("\nEN German leftovers:", found.length ? found : "none");
     assert.deepStrictEqual(found, []);
+
+    // 11. A key-value store (since 0.27.0): a newer major can be chosen as a tag
+    // change; the preview names the data saved first, the history its copy, and the
+    // rollback dialog says that the data goes back.
+    const versions = files["/var/lib/diun-radar/versions.json"];
+    const withChoices = JSON.parse(JSON.stringify(versions));
+    withChoices.images.find((i) => i.image === "redis").versions["7.4.11"].choices = {
+        pin: "7.4.11-alpine", lines: [{ tag: "8-alpine", newest: "8.10.2-alpine" }, { tag: "7-alpine", newest: "7.4.11-alpine" }],
+        newer: [{ tag: "8.10.2-alpine", level: "major" }], floating: ["alpine"] };
+    files["/var/lib/diun-radar/versions.json"] = withChoices;
+    const SRC = "/var/lib/docker/volumes/" + "a".repeat(64) + "/_data";
+    const STORE = { engine: "redis", name: "Redis", bytes: 3 * 2 ** 20,
+        items: [{ container: "cloud-redis-1", type: "volume", source: SRC, destination: "/data", bytes: 3 * 2 ** 20 }] };
+    const STORE_OP = { ...RETAG_OP, id: "20261101-211610-cloud-redis-1", container: "cloud-redis-1", image: "redis:7-alpine",
+        from_tag: "7-alpine", to_tag: "8-alpine", store: "Redis", data_copy: { bytes: 3 * 2 ** 20, there: true },
+        changes: [{ file: "/opt/cloud/compose.yml", line: 30, old: "    image: redis:7-alpine", new: "    image: redis:8-alpine" }],
+        rollback: "redis:rollback-20261101-211610", services: ["redis"] };
+    const GONE_OP = { ...STORE_OP, id: "20261101-201610-cloud-redis-1", data_copy: { bytes: 3 * 2 ** 20, there: false },
+                      can_rollback: false, data_gone: true };
+    const storeScript = (store) => ({ ...BASE, "diun-update.py retag": DRY({ store }),
+        "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: [STORE_OP, GONE_OP] }) },
+        "diun-update.py rollback": { chunks: ["@@RESULT " + JSON.stringify({ op: STORE_OP.id, status: "ok" }) + "\n"] } });
+    const rd = boot("de", storeScript(STORE));
+    await settle();
+    rowOf(rd.d, "cloud-redis-1").querySelector("td.az-cell-actions button[data-retag]").click();
+    await settle();
+    optionsOf(rd.d).forEach((g) => console.log("  ", g));
+    assert.deepStrictEqual(optionsOf(rd.d), [
+        "Laufende Version festsetzen: 7.4.11-alpine (läuft jetzt)",
+        "Versionslinien: Updates innerhalb der Linie: 8-alpine – neue Hauptversion, die Daten werden vorher gesichert",
+        "Major-Versionen: 8.10.2-alpine – neue Hauptversion, die Daten werden vorher gesichert",
+        "Folgt jeder neuen Version: alpine – Datenbank-Major, braucht eine Migration [x]"]);
+    choose(rd, "8-alpine");
+    await settle();
+    const rpv = rd.$("dm-retag-preview");
+    const warn = rpv.querySelector(".az-alert--warning");
+    console.log("store preview:", warn && warn.textContent);
+    assert(warn && warn.textContent.startsWith("Neue Hauptversion von Redis") &&
+           warn.textContent.includes("stoppt das Add-on Redis und sichert sein Datenverzeichnis"), warn && warn.textContent);
+    assert(kvRows(rpv).some((r) => r.startsWith("cloud-redis-1: " + SRC)), kvRows(rpv).join(" | "));
+    assert.strictEqual(rd.last("retag").cmd[1], "retag", "a store's major is a tag change, not dbmajor");
+    // As every new major: one tick box, then the change itself with the preview's fingerprint.
+    assert(rd.$("dm-dialog-confirm").disabled && !rpv.querySelector("#dm-mj-backup"), "the major's tick box, not a database major's");
+    tick(rd, "dm-major-check", true);
+    assert(!rd.$("dm-dialog-confirm").disabled);
+    rd.$("dm-dialog-cancel").click();
+    rd.$("dm-tab-btn-backups").click();
+    await settle();
+    const storeRow = [...rd.d.querySelectorAll("#dm-ops tr")].find((tr) => tr.textContent.includes(STORE_OP.to_tag) &&
+        tr.querySelector("button[data-op]"));
+    const gonePos = [...rd.d.querySelectorAll("#dm-ops tr")].find((tr) => tr.querySelector(".dm-rb-gone"));
+    assert([...storeRow.querySelectorAll(".dm-row-note")].some((n) => n.textContent.startsWith("Daten von Redis vorher gesichert: 3")),
+           storeRow.textContent);
+    assert.strictEqual(gonePos.querySelector(".dm-rb-gone").textContent, "Datenkopie fehlt");
+    assert(!gonePos.querySelector("button[data-op]"), "without its copy no rollback button");
+    storeRow.querySelector("button[data-op]").click();
+    console.log("store rollback dialog:", rd.$("dm-dialog-desc").textContent);
+    assert(rd.$("dm-dialog-desc").textContent.startsWith("Stoppt Redis, legt seine Daten von vor dem Tag-Wechsel und /opt/cloud/compose.yml zurück"));
+    rd.$("dm-dialog-cancel").click();
+    // Nothing mounted: nothing saved, said so; in English without German.
+    const rde = boot("en", storeScript({ ...STORE, items: [{ ...STORE.items[0], type: null, source: null, destination: null, bytes: null }] }));
+    await settle();
+    rowOf(rde.d, "cloud-redis-1").querySelector("td.az-cell-actions button[data-retag]").click();
+    await settle();
+    const rdeOpts = optionsOf(rde.d).join(" / ");
+    choose(rde, "8-alpine");
+    await settle();
+    const rdeWarn = rde.$("dm-retag-preview").querySelector(".az-alert--warning").textContent;
+    assert(rdeOpts.includes("8-alpine – new major, the data is saved first"), rdeOpts);
+    assert(rdeWarn.startsWith("New major of Redis") && rdeWarn.includes("No data directory is mounted"), rdeWarn);
+    assert.deepStrictEqual(kvRows(rde.$("dm-retag-preview")).filter((r) => r.startsWith("cloud-redis-1")), []);
+    const enStore = rdeOpts + rdeWarn;
+    assert.deepStrictEqual(german.filter((g) => enStore.includes(g)), []);
+    files["/var/lib/diun-radar/versions.json"] = versions;
 
     console.log("\nALL CHECKS PASSED");
 })().catch((e) => { console.error("FEHLGESCHLAGEN:", e.stack || e.message); process.exit(1); });
