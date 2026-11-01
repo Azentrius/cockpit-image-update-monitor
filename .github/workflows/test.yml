@@ -78,8 +78,8 @@ jobs:
             /usr/lib/cockpit-image-updates/diun-deps.sh check | python3 -c "import json, sys; json.load(sys.stdin)"
             apt-get remove -y -qq cockpit-image-update-monitor > /dev/null
             test ! -e /usr/share/cockpit/image-updates'
-          docker run --rm -v "$PWD/dist:/dist:ro" fedora:43 sh -ec '
-            dnf install -y -q /dist/*.rpm
+          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/tools/dnf.sh:/dnf.sh:ro" fedora:43 sh -ec '
+            sh /dnf.sh install -y -q /dist/*.rpm
             rpm -V cockpit-image-update-monitor
             rpm -q --conflicts cockpit-image-update-monitor | grep -qx cockpit-image-updates
             test -f /usr/share/cockpit/image-updates/manifest.json
@@ -154,6 +154,8 @@ jobs:
   # helpers answer, removal. An installed package is not yet a supported system (README,
   # Supported systems). And two systems below the minimums, which must refuse the package:
   # Ubuntu 20.04 (Cockpit 215) and Rocky Linux 8 (python3 is 3.6).
+  # dnf runs through tools/dnf.sh, with time limits and three tries: on AlmaLinux the first dnf
+  # install of a job once took almost 14 minutes, and once ran until the job's time limit.
   install:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -186,7 +188,7 @@ jobs:
           IMAGE: ${{ matrix.image }}
           KIND: ${{ matrix.kind }}
         run: |
-          docker run --rm -e KIND -v "$PWD/dist:/dist:ro" "$IMAGE" sh -ec '
+          docker run --rm -e KIND -v "$PWD/dist:/dist:ro" -v "$PWD/tools/dnf.sh:/dnf.sh:ro" "$IMAGE" sh -ec '
             # The openSUSE mirrors refuse a file now and then (HTTP 403) or stall a download:
             # zypper then skips the whole repository, or gives up an install after minutes with
             # exit 4 and, under --quiet, without saying why. So every zypper step that downloads
@@ -207,7 +209,7 @@ jobs:
             case "$KIND" in
               deb) apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/*.deb > /dev/null
                    dpkg-query -W cockpit-bridge python3 ;;
-              rpm) dnf install -y -q /dist/*.rpm
+              rpm) sh /dnf.sh install -y -q /dist/*.rpm
                    rpm -q cockpit-bridge python3 ;;
               zypper) # Refresh first, then install from the refreshed metadata without refreshing again.
                       tries "zypper refresh" zypper --non-interactive --quiet refresh
@@ -252,12 +254,13 @@ jobs:
           KIND: ${{ matrix.kind }}
           REFUSED: ${{ matrix.refused }}
         run: |
-          docker run --rm -e KIND -e REFUSED -v "$PWD/dist:/dist:ro" "$IMAGE" sh -c '
+          docker run --rm -e KIND -e REFUSED -v "$PWD/dist:/dist:ro" -v "$PWD/tools/dnf.sh:/dnf.sh:ro" "$IMAGE" sh -c '
             case "$KIND" in
               deb) apt-get update -qq
                    apt-cache policy cockpit-bridge python3 | grep -E "^[a-z]|Candidate"
                    DEBIAN_FRONTEND=noninteractive apt-get install -y /dist/*.deb > /tmp/out 2>&1 ;;
-              rpm) dnf -q list --available cockpit-bridge python3 2>&1 | tail -n +1
+              rpm) sh /dnf.sh makecache || exit 1
+                   dnf -q list --available cockpit-bridge python3 2>&1 | tail -n +1
                    dnf install -y -q /dist/*.rpm > /tmp/out 2>&1 ;;
             esac
             rc=$?
@@ -274,6 +277,8 @@ jobs:
   # from the release before it. Its files are checked against its SHA256SUMS and its build
   # provenance first. Without such a release there is no upgrade to test: the job says so
   # (warning, summary) and checks a fresh install of this build instead.
+  # dnf runs through tools/dnf.sh, with time limits and three tries: on AlmaLinux the first dnf
+  # install of a job once took almost 14 minutes, and once ran until the job's time limit.
   upgrade:
     name: upgrade (${{ matrix.image }})
     runs-on: ubuntu-24.04
@@ -318,7 +323,8 @@ jobs:
           KIND: ${{ matrix.kind }}
         run: |
           docker run --rm -e BASE -e VERSION -v "$PWD/dist:/dist:ro" -v "$PWD/prev:/prev:ro" \
-            -v "$PWD/test/package-upgrade.sh:/package-upgrade.sh:ro" "$IMAGE" sh /package-upgrade.sh "$KIND"
+            -v "$PWD/test/package-upgrade.sh:/package-upgrade.sh:ro" -v "$PWD/tools/dnf.sh:/dnf.sh:ro" \
+            "$IMAGE" sh /package-upgrade.sh "$KIND"
 
   # The add-on in a real Cockpit with systemd and Docker, on this throw-away runner and never
   # on a server with real containers (test/cockpit-setup.sh, test/cockpit-session.py,
