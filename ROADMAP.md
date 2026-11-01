@@ -256,7 +256,7 @@ the add-on says too little or protects too little.
   changed, so an update rolls out a change nobody has seen. Proposal: the plan names what would change
   between `docker compose config` and the running container: image, command, volumes, ports, networks
   and the names (never the values) of environment variables. (On one host every service with an
-  `env_file` showed the warning without any change: compose's own hash before 5.5.0, fixed in 0.27.0.)
+  `env_file` showed the warning without any change: compose's own hash before 5.5.0, fixed in 0.27.1.)
 - **Expected error lines after a database major.** After every PostgreSQL major the new server logs
   `ERROR: role "<user>" already exists`: the dump creates the role again that the image created on its
   first start, and the helper ignores exactly this line. Proposal: say so in the output after the
