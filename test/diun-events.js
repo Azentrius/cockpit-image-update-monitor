@@ -104,7 +104,9 @@ const updateButton = (d, name) => d.querySelector(`[data-update="${name}"][data-
 
     // A new digest of the tag, but the build that runs: Docker Hub published
     // the list of platforms of nextcloud:apache again when it added riscv64
-    // (a test host, 2026-10-17). Diun's "created" says which build it is.
+    // (a test host, 2026-10-17). Diun's "created" says which build it is. An
+    // older build than the one that runs: Diun looked before the container
+    // was updated to a build pushed later (mobsf:latest, 2026-11-01).
     const BUILT = "2026-10-15T19:00:50.089352556Z";
     const withCreated = (created) => inventory.trim().split("\n").map((l) => JSON.parse(l))
         .map((c) => (c.name === "booking-db" ? { ...c, created } : c)).map((c) => JSON.stringify(c)).join("\n") + "\n";
@@ -112,6 +114,7 @@ const updateButton = (d, name) => d.querySelector(`[data-update="${name}"][data-
         ["same build, a new list of platforms", "2026-10-15 19:00:50.089352556 +0000 UTC", BUILT, false],
         ["same build, another time zone", "2026-10-15 21:00:50 +0200 CEST", BUILT, false],
         ["a newer build", "2026-10-17 01:36:06.1 +0000 UTC", BUILT, true],
+        ["an older build than the one that runs", "2026-10-15 17:42:34.049 +0000 UTC", BUILT, false],
         ["Diun names no build time", "", BUILT, true],
         ["the image names no build time", "2026-10-15 19:00:50 +0000 UTC", "", true],
         ["a fixed date proves nothing (reproducible builds)", "1970-01-01 00:00:00 +0000 UTC", "1970-01-01T00:00:00Z", true]]) {

@@ -375,14 +375,18 @@
         const ms = Date.parse(m[1] + "T" + m[2] + zone);
         return isNaN(ms) ? null : ms / 1000;
     }
-    // Diun reports a new digest of the tag, but the build is the one that runs:
-    // Docker Hub publishes the list of platforms of an official image again
-    // when it adds one (nextcloud:apache, 2026-10-16: riscv64), and its digest
-    // changes while the amd64 build stays. A fixed date (1970, reproducible
-    // builds) proves nothing.
-    function sameBuild(ev, ctn) {
+    // Diun reports a new digest of the tag, but no newer build than the one
+    // that runs. The same build: Docker Hub publishes the list of platforms of
+    // an official image again when it adds one (nextcloud:apache, 2026-10-16:
+    // riscv64), and its digest changes while the amd64 build stays. An older
+    // build: Diun looks only every few hours, and a container updated since
+    // then may run a build pushed after its look (mobsf:latest, 2026-11-01:
+    // Diun saw the 20:42 build at 23:00, the 22:56 build came at 23:02 and was
+    // rolled out at 23:20). A fixed date (1970, reproducible builds) proves
+    // nothing.
+    function notNewerBuild(ev, ctn) {
         const a = builtAt(ev.created), b = builtAt(ctn.created);
-        return a !== null && a === b && a > Date.UTC(1980, 0, 1) / 1000;
+        return a !== null && b !== null && a <= b && a > Date.UTC(1980, 0, 1) / 1000;
     }
 
     function rowFor(ctn, events, versionsMap, radarOk) {
@@ -391,7 +395,7 @@
         let kind;
         if (ctn.pulled) {
             kind = "pulled";        // newer image already local, container on the old one
-        } else if (ev && ev.digest && ctn.digest && ev.digest !== ctn.digest && !acknowledged && !sameBuild(ev, ctn)) {
+        } else if (ev && ev.digest && ctn.digest && ev.digest !== ctn.digest && !acknowledged && !notNewerBuild(ev, ctn)) {
             kind = "update";
         } else if (!ctn.digest) {
             kind = "unknown";
