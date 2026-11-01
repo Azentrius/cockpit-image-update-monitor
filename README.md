@@ -700,7 +700,7 @@ tools/upgrade-base.py     the release the CI upgrade test starts from (upgrade-b
 docs/              INTERNALS.md (interfaces, formats), images
 ```
 
-**Tests** (no Docker, no root, no network; the `test` workflow runs them on every push and pull request):
+**Tests** (no Docker, no root, no network; the `test` workflow runs them on every pull request and every push to `main`):
 
 ```bash
 make check          # = cd test && npm ci && ./run-all.sh
