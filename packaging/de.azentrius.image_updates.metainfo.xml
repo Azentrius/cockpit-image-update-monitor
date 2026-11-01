@@ -6,24 +6,30 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>Apache-2.0</project_license>
   <name>Image Update Monitor</name>
-  <summary>Configured, running and newest version of every Docker container</summary>
-  <summary xml:lang="de">Konfigurierte, laufende und neueste Version jedes Docker-Containers</summary>
+  <summary>Configured, installed and newest version of every running Docker container</summary>
+  <summary xml:lang="de">Konfigurierte, installierte und neueste Version jedes laufenden Docker-Containers</summary>
   <description>
     <p>
       For every running Docker container the page shows what the compose file asks for, which
-      version actually runs and which version is the newest. Updates run right from Cockpit, with
-      a database dump first, a rollback copy of the old image and a rollback at the push of a
-      button. Diun and a version radar find new versions; the update dialog shows the release notes
-      in between. PostgreSQL and MariaDB majors run by dump and restore after a trial run, and
-      images built on the server are built again once a base image is newer.
+      version actually runs and which version is the newest. Containers started with Docker
+      Compose can be updated right from Cockpit, with a database dump first, a rollback copy of the
+      old image and a rollback at the push of a button; other containers are shown, but not
+      changed. Diun and a version radar find new versions; the update dialog shows the release
+      notes in between. PostgreSQL and MariaDB majors run by dump and restore after a trial run,
+      and images built on the server are built again once a base image is newer. The dumps and
+      rollback copies serve the update and are no complete backup: the apps' volumes and other
+      files are not copied.
     </p>
     <p xml:lang="de">
       Die Seite zeigt für jeden laufenden Docker-Container, was die Compose-Datei vorgibt, welche
-      Version wirklich läuft und welche die neueste ist. Updates laufen direkt aus Cockpit, mit
-      Datenbank-Dump vorab, Rollback-Kopie des alten Images und Rollback auf Knopfdruck. Diun und
-      ein Versionsradar finden neue Versionen; der Update-Dialog zeigt die Release Notes dazwischen.
-      PostgreSQL- und MariaDB-Majors laufen nach einem Probelauf per Dump und Restore, und auf dem
-      Server gebaute Images werden neu gebaut, sobald ein Basis-Image neuer ist.
+      Version wirklich läuft und welche die neueste ist. Mit Docker Compose gestartete Container
+      lassen sich direkt aus Cockpit aktualisieren, mit Datenbank-Dump vorab, Rollback-Kopie des
+      alten Images und Rollback auf Knopfdruck; andere Container werden gezeigt, aber nicht
+      geändert. Diun und ein Versionsradar finden neue Versionen; der Update-Dialog zeigt die
+      Release Notes dazwischen. PostgreSQL- und MariaDB-Majors laufen nach einem Probelauf per Dump
+      und Restore, und auf dem Server gebaute Images werden neu gebaut, sobald ein Basis-Image
+      neuer ist. Dumps und Rollback-Kopien dienen dem Update und sind keine vollständige
+      Datensicherung: Volumes und andere Dateien der Anwendungen werden nicht kopiert.
     </p>
   </description>
   <extends>org.cockpit_project.cockpit</extends>
