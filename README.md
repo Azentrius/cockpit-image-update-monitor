@@ -1,9 +1,10 @@
 # Image Update Monitor
 
 A [Cockpit](https://cockpit-project.org/) add-on that shows three things for every running Docker container: what the compose file says, which version actually runs and which version is the newest.
-Updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button.
+For containers started with Docker Compose, updates with the same tag (e.g. `latest`, `16-alpine`) can be applied right from Cockpit, with a database dump first, a rollback copy of the old image and a rollback at the push of a button; other containers are shown, but not changed.
 A different version (another tag in the compose file) is chosen from a list; the add-on shows the lines it will change, keeps byte-exact copies of the files and puts them back on rollback.
 A newer PostgreSQL or MariaDB major runs by dump and restore after a trial run in a throwaway container, and images built on the server are built again once a base image is newer.
+The dumps and rollback copies serve the update and are no complete backup: the apps' volumes and other files are not copied, and rolling back an update does not undo what the new version did to its data (see [Backups & dumps](#backups--dumps)).
 Everything that runs as root for this is a small, fixed set of helper scripts. The browser makes no external requests, and Diun sees Docker only through a read-only socket proxy.
 
 | Light | Dark |
@@ -794,6 +795,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 ## Known limits
 
 - **Docker with Compose 2.8 or newer only.** Podman, Swarm and Kubernetes are not supported. Containers without compose are shown but not updated. See [Supported systems](#supported-systems).
+- **No complete backup.** Before an update the add-on dumps the project's PostgreSQL, MariaDB and MySQL databases (unless the dump is unticked in the dialog) and keeps a rollback copy of the old image. Volumes, bind mounts and other files of the apps are not copied, and the dumps lie on the same disk as the data: keep a backup of the server besides (see [Backups & dumps](#backups--dumps)).
 - **Private registries:** the radar runs hardened (`ProtectHome=yes`) and therefore cannot see credentials in `/root/.docker/config.json`. Private images show up as “not in a registry”, like images built on the server.
 - **Version cannot be determined** for `latest` builds without a release behind them (e.g. builds from the main branch).
 - **Database majors:** PostgreSQL (since 0.23.0) and MariaDB (since 0.25.0) majors by dump and restore
