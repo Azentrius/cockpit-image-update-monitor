@@ -1,9 +1,24 @@
 # Changelog
 
+## 0.27.1 – 2026-11-02
+
+A service with an `env_file` no longer shows *Compose file changed* when nothing changed.
+
+**Upgrading:** nothing to do.
+
+- ***Compose file changed* only when it changed.** Every service with an `env_file` got this warning,
+  also right after an update by the add-on: before compose 5.5.0 (Ubuntu ships 2.40.3)
+  `docker compose config --hash` hashes a service without the `env_file` that `docker compose up`
+  merges into its environment (docker/compose#14001). A service whose hash differs is now hashed once
+  more from the configuration `docker compose config` prints, and counts as changed only if that hash
+  differs as well; a changed `env_file` still counts. `test/update_test.py` covers both answers and a
+  failing second hash, `test/e2e-server.sh` a service with an `env_file` and a `$$` before and after
+  its `env_file` changed (compose 2.38 on the runner, 5.6 in the Rocky machines).
+
 ## 0.27.0 – 2026-11-01
 
 Redis, Valkey and KeyDB can move to a newer major in *Change version*, with their data saved for the
-rollback, and a service with an `env_file` no longer shows *Compose file changed* when nothing changed.
+rollback.
 
 **Upgrading:** nothing to do.
 
@@ -30,14 +45,6 @@ rollback, and a service with an `env_file` no longer shows *Compose file changed
   that moved, the cleanup, a failed stop or pack, too little space, nothing mounted and an unsafe copy;
   `test/version-change.js` the choice, the preview, the history and the rollback dialog;
   `test/e2e-server.sh` a real Redis 7 moved to 8 and rolled back with its key.
-- ***Compose file changed* only when it changed.** Every service with an `env_file` got this warning,
-  also right after an update by the add-on: before compose 5.5.0 (Ubuntu ships 2.40.3)
-  `docker compose config --hash` hashes a service without the `env_file` that `docker compose up`
-  merges into its environment (docker/compose#14001). A service whose hash differs is now hashed once
-  more from the configuration `docker compose config` prints, and counts as changed only if that hash
-  differs as well; a changed `env_file` still counts. `test/update_test.py` covers both answers and a
-  failing second hash, `test/e2e-server.sh` a service with an `env_file` and a `$$` before and after
-  its `env_file` changed (compose 2.38 on the runner, 5.6 in the Rocky machines).
 
 ## 0.26.1 – 2026-10-31
 
