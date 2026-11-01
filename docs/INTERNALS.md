@@ -364,12 +364,19 @@ plus:
 
   ```json
   "store": {"engine": "redis", "name": "Redis", "bytes": 3145728,
-            "items": [{"container": "nc-redis", "type": "volume", "source": "/var/lib/docker/volumes/…/_data",
-                       "destination": "/data", "bytes": 3145728}]}
+            "items": [{"container": "nc-redis", "service": "redis", "type": "volume",
+                       "source": "/var/lib/docker/volumes/…/_data", "destination": "/data",
+                       "anonymous": true, "bytes": 3145728}]}
   ```
 
   The page offers such a tag (“new major, the data is saved first”) and shows a warning box with
   the directories and their size; the major's tick box applies as for every new major.
+  `anonymous` (since 0.27.2): a volume without a name, made by the image's `VOLUME`. Compose keeps
+  such a volume when it recreates the container only while the image declares the path; the official
+  `redis:8` image no longer declares `/data`. Data in an anonymous volume that the new image does not
+  declare and the compose file does not mount (`volumes:` with that `target` in `docker compose
+  config`) would stay behind, and the new major would start empty: `store-volume` (below) when the
+  new image is on the server, otherwise the run stops after the pull (step 3b).
 - `reason` when `possible` is false, `detail` names the file:line, service or variable:
 
 | `reason` | Meaning |
@@ -379,6 +386,7 @@ plus:
 | `no-choices` | the radar has no choices for the installed version (unknown version, no scheme, data before 0.11.0) |
 | `not-offered` | not among the choices: older, a pre-release, another flavour |
 | `db-major` | a database image to another major version, or to a floating tag that can bring one (stage 5); since 0.27.0 not a key-value store's newer major with a known target (`store`) |
+| `store-volume` | since 0.27.2: a key-value store's data in an anonymous volume that the new image (on the server) no longer declares and the compose file does not mount; `detail` names container and path |
 | `major-skip` | Nextcloud more than one major ahead, or to a floating tag |
 | `anchors` | the image line sits under a YAML anchor or outside a service |
 | `not-found` | no `image:` line with this reference for a service (e.g. `include:` or a generated file) |
@@ -400,8 +408,10 @@ change is no longer possible or the fingerprint differs (a file edited since the
    reference. If not, or if writing fails, the copies are put back, the rollback tag and dumps removed,
    exit 5: no container changed.
 3. Pull; the new image must then exist locally, otherwise the same: files back, exit 5.
-3b. **A key-value store's new major** (`store`, since 0.27.0), in the history already: free space for
-   the data plus 1 GiB in `/var/backups/image-updates` (otherwise exit 5 before the store stops), then
+3b. **A key-value store's new major** (`store`, since 0.27.0), in the history already: since 0.27.2
+   first the new image, now on the server, against data in anonymous volumes (`anonymous` above): a
+   path it no longer declares and the compose file does not mount takes back what the run did, exit 5
+   before the store stops. Then free space for the data plus 1 GiB in `/var/backups/image-updates` (otherwise exit 5 before the store stops), then
    `docker compose stop` of the services, so that the store writes its files on shutdown and nothing
    changes them, and each container's directory packed into `data/<project>/<stamp>_<container>.tar`
    (Python's `tarfile`, owners, modes and links kept; folders 700, file 600, written as `.part` and

@@ -1224,8 +1224,10 @@ kv_major() { kv info server | sed -n 's/^redis_version:\([0-9]*\).*/\1/p'; }
 kv set e2e-key before > /dev/null
 KVVOL=$(docker volume inspect -f '{{.Mountpoint}}' imgupd-test-major_kvdata)
 SUMK=$(sum_of "$D7/docker-compose.yml")
-radar_idle
-python3 - "$VERSIONS" "$R7" "$R8" <<'PY'
+# The radar cannot list tags of the local-only image: the test offers Redis 8 itself.
+offer_kv() {
+    radar_idle
+    python3 - "$VERSIONS" "$R7" "$R8" <<'PY'
 import json, os, sys, tempfile
 p, version, target = sys.argv[1:4]
 try:
@@ -1243,6 +1245,8 @@ with os.fdopen(fd, "w") as f:
 os.chmod(tmp, 0o644)
 os.replace(tmp, p)
 PY
+}
+offer_kv
 DRY=$(python3 $H retag "$KV" "$R8" --dry-run)
 ST=$(jget "$DRY" '(d["retag"]["possible"], d["retag"]["store"]["engine"], d["retag"]["store"]["items"][0]["source"] == "'"$KVVOL"'")')
 check "retag --dry-run of a Redis major: possible, the store and its volume named" '[ "$ST" = "(True, '"'"'redis'"'"', True)" ]'
@@ -1265,6 +1269,26 @@ check "Redis rollback: exit 0, Redis 7 with its data from before the major, the 
 RBK=$(jget "$(python3 $H backups)" '[o["rollback"] for o in d["ops"] if o["id"] == "'"$OPK"'"][0]')
 python3 $H delete-image "$RBK" > /tmp/e2e-k3.log 2>&1; RC=$?
 check "Redis: deleting the rollback image deletes the data copy" '[ $RC = 0 ] && [ ! -e "$BK_DIR/data/$COPYK" ]'
+
+# Redis 8's image declares no VOLUME /data, Redis 7's does (checked from the image): without a
+# volume of its own in the compose file the data of Redis 7 lies in the anonymous volume its image
+# made, and the major would leave it behind. The plan refuses it, nothing changes.
+sed -i '/^    volumes:$/d; /^      - kvdata:\/data$/d' "$D7/docker-compose.yml"
+# Removed first: a recreated container would take over the named volume at the image's /data.
+docker compose -p "$P7" -f "$D7/docker-compose.yml" rm -sf cache > /dev/null 2>&1
+docker compose -p "$P7" -f "$D7/docker-compose.yml" up -d --wait 2>&1 | tail -n 2
+echo "  | /data of $KV: $(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$KV")"
+kv set e2e-key anonymous > /dev/null
+SUMA=$(sum_of "$D7/docker-compose.yml")
+offer_kv
+REFA=$(jget "$(python3 $H retag "$KV" "$R8" --dry-run)" '(d["retag"]["possible"], d["retag"]["reason"], (d["retag"]["store"] or {}).get("items", [{}])[0].get("anonymous"))')
+echo "  | plan: $REFA"
+if docker image inspect -f '{{json .Config.Volumes}}' "$REDIS8_IMAGE" | grep -q '"/data"'; then
+    check "Redis 8 declares /data again: the major with an anonymous volume is possible" '[ "$REFA" = "(True, None, True)" ]'
+else
+    check "Redis major with the data in an anonymous volume: refused (store-volume), nothing changed" \
+        '[ "$REFA" = "(False, '"'"'store-volume'"'"', True)" ] && [ "$(sum_of "$D7/docker-compose.yml")" = "$SUMA" ] && [ "$(kv_major)" = 7 ] && [ "$(kv get e2e-key)" = anonymous ]'
+fi
 
 echo "=== 18. Rebuild of an image built on the server: a newer base from the registry, rollback ==="
 # The base is OLD in the local registry; the build on it runs. Then the registry

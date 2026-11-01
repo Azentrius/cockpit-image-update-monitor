@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.27.2 – 2026-11-02
+
+A key-value store's new major no longer leaves its data behind when the new image stops declaring
+the data directory as a volume.
+
+**Upgrading:** nothing to do.
+
+- **Data in an anonymous volume.** The official `redis:8` image no longer declares `/data` as a
+  volume; `redis:7` did. A compose file without a volume of its own for Redis kept the data in the
+  anonymous volume that `VOLUME /data` made, and compose recreated the container on Redis 8 without
+  it: Redis 8 started empty, wrote into the container, and the data of Redis 7 stayed in a volume no
+  container uses. The rollback then stopped, because the copy no longer had a place to go. Now such a
+  change stops before the store stops (exit 5, nothing changed) when the new image does not declare
+  the path and the compose file mounts nothing there; the preview refuses it already when the new
+  image is on the server (`store-volume`). A named volume or a bind mount is not affected.
+- **Tests.** `test/update_test.py` covers the refusal in the plan, the stop after the pull, a compose
+  file that mounts the path itself and a named volume; `test/e2e-server.sh` checks a Redis 7 with
+  an anonymous volume against the real Redis 8 image.
+
 ## 0.27.1 – 2026-11-02
 
 A service with an `env_file` no longer shows *Compose file changed* when nothing changed.
