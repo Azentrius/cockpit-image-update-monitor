@@ -248,7 +248,8 @@ class Docker:
             if cmd[3:5] == ["--format", "{{.Id}}"]:
                 iid = self.tags.get(U.norm_ref(cmd[5]))
                 return (iid + "\n", 0, "") if iid else ("", 1, "No such image")
-            imgs = [self.images[i] for i in cmd[3:] if i in self.images]
+            ids = [self.tags.get(U.norm_ref(i), i) for i in cmd[3:]]     # a reference: the image it names
+            imgs = [self.images[i] for i in ids if i in self.images]
             return (json.dumps(imgs), 0, "") if len(imgs) == len(cmd[3:]) else ("", 1, "No such image")
         if cmd[:3] == ["docker", "image", "ls"]:
             lines = []
@@ -2213,8 +2214,8 @@ REC_RD = {"image": "redis", "tag": "7.4-alpine", "db": True, "versions": {"7.4.1
                                       {"tag": "7.4-alpine", "newest": "7.4.12-alpine"}],
     "newer": [{"tag": "8.10.3-alpine", "level": "major"}], "floating": ["alpine"]}}}}
 radar(REC_RD)
-D.images["sha256:rd7"] = {"Id": "sha256:rd7", "Config": {"Env": ["REDIS_VERSION=7.4.12"]}}
-D.images["sha256:rd8"] = {"Id": "sha256:rd8", "Config": {"Env": ["REDIS_VERSION=8.10.3"]}}
+D.images["sha256:rd7"] = {"Id": "sha256:rd7", "Config": {"Env": ["REDIS_VERSION=7.4.12"], "Volumes": {"/data": {}}}}
+D.images["sha256:rd8"] = {"Id": "sha256:rd8", "Config": {"Env": ["REDIS_VERSION=8.10.3"], "Volumes": {"/data": {}}}}
 D.tags.update({"redis:7.4-alpine": "sha256:rd7", "redis:7.4.12-alpine": "sha256:rd7",
                "redis:8.10-alpine": "sha256:rd8"})
 RDATA = os.path.join(TMP, "redis-data")
@@ -2422,6 +2423,44 @@ check("store without a data directory: changed without stopping first, says that
       (rc, ops()[res["op"]].get("data_copies"), order("stop"), "no data directory mounted – nothing to save" in out),
       (0, None, [None], True))
 redis_ctn["Mounts"] = [{"Type": "volume", "Name": "a" * 64, "Source": RDATA, "Destination": "/data"}]
+
+# Redis 8's image no longer declares /data (since 0.27.2): data in an anonymous
+# volume would stay behind, and Redis 8 would start empty in the container.
+with open(rd_file, "wb") as f:
+    f.write(RD_BEFORE)
+D.containers["nc-redis"]["Config"]["Image"], D.containers["nc-redis"]["Image"] = "redis:7.4-alpine", "sha256:rd7"
+redis_files(OLD_DATA)
+D.images["sha256:rd8nv"] = {"Id": "sha256:rd8nv", "Config": {"Env": ["REDIS_VERSION=8.10.3"]}}
+D.tags["redis:8.10-alpine"] = "sha256:rd8nv"
+check("store: a volume without a name is anonymous, a named one is not",
+      (U.store_mount(redis_ctn)["anonymous"],
+       U.store_mount({"Mounts": [{"Type": "volume", "Name": "ncf_redis", "Source": RDATA, "Destination": "/data"}]})["anonymous"],
+       U.store_mount({"Mounts": [{"Type": "bind", "Source": RDATA, "Destination": "/data"}]})["anonymous"]),
+      (True, False, False))
+p = retag("nc-redis", "8.10-alpine")
+check("store: the new image here without VOLUME /data, the data in an anonymous volume -> refused",
+      (p["retag"]["possible"], p["retag"]["reason"], p["retag"]["detail"]), (False, "store-volume", "nc-redis /data"))
+D.images_from, D.cfg = None, {"services": {"redis": {"image": "redis:7.4-alpine", "volumes": [
+    {"type": "volume", "source": "redis", "target": "/data"}]}}}
+check("store: the compose file mounts /data itself -> no data left behind", retag("nc-redis", "8.10-alpine")["retag"]["possible"],
+      True)
+D.images_from, D.cfg = compose_images([rd_file]), {"services": {}}
+redis_ctn["Mounts"][0]["Name"] = "ncf_redis"
+check("store: a named volume stays whatever the image declares", retag("nc-redis", "8.10-alpine")["retag"]["possible"], True)
+redis_ctn["Mounts"][0]["Name"] = "a" * 64
+# Not on the server at planning: the run checks after the pull, before the store stops.
+del D.tags["redis:8.10-alpine"]
+fp = retag("nc-redis", "8.10-alpine")["retag"]["fingerprint"]
+D.pull_to = ("redis:8.10-alpine", "sha256:rd8nv")
+D.streamed.clear()
+before = leftovers()
+rc, res, out = apply("nc-redis", "8.10-alpine", fp)
+D.pull_to = None
+check("store: after the pull the new image lacks VOLUME /data -> exit 5 before the store stops, nothing left",
+      (rc, leftovers() == before, data_left(), raw(rd_file) == RD_BEFORE, redis_now() == OLD_DATA,
+       D.containers["nc-redis"]["Image"], order("stop"), "no longer declares nc-redis /data as a volume" in out),
+      (5, True, [], True, True, "sha256:rd7", [None], True))
+D.tags["redis:8.10-alpine"] = "sha256:rd8"
 
 # The unpacking checks the copy before it empties the directory.
 bad = os.path.join(TMP, "bad.tar")
