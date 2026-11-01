@@ -235,6 +235,16 @@ the add-on says too little or protects too little.
   from the log and the rollback worked; the data stayed untouched only because version 6 checks its
   environment before its migrations. Proposal: a tag change to a newer major of an app gets a warning box
   as a database major does, with the release notes marked “breaking” at the top and a tick box.
+- **Images that an app release pins are offered on their own.** Formbricks 6.1 fixes its Cube image
+  (`ghcr.io/formbricks/cube:1.7.50-1`, which belongs to the Cube model files next to the compose file)
+  and SpiceDB (`authzed/spicedb:v1.52.0`); the next Formbricks release moves both. The radar offers each
+  as a *new version* by itself (Cube 1.8.8-1, SpiceDB v1.57.0), which would run a combination nobody
+  tested. SpiceDB also needs its one-off `spicedb-migrate` (same image) to finish before the server
+  starts; the compose file says so (`service_completed_successfully`), but the update recreates both
+  with `--no-deps`, so in no order. Proposal: an image can be marked as moving with an app (a rule in
+  `/etc/image-updates.conf`, set from the page); the page then shows it as held with that reason instead
+  of offering it, and the app's next version change lists it in the same plan. Independently, a one-off
+  job of the same image that a long-running service waits for runs first and to completion.
 - **The new version stays empty after an update.** For images without a version label (docuseal,
   ollama, ntfy, sharewerk, cube, Forgejo, the Nextcloud MCP server) `to_version` is `null` until the
   next radar run fills it in. Proposal: look up the new digest at once (the radar's digest cache or one
