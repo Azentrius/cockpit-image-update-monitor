@@ -1274,11 +1274,15 @@ check "Redis: deleting the rollback image deletes the data copy" '[ $RC = 0 ] &&
 # volume of its own in the compose file the data of Redis 7 lies in the anonymous volume its image
 # made, and the major would leave it behind. The plan refuses it, nothing changes.
 sed -i '/^    volumes:$/d; /^      - kvdata:\/data$/d' "$D7/docker-compose.yml"
+# Removed first: a recreated container would take over the named volume at the image's /data.
+docker compose -p "$P7" -f "$D7/docker-compose.yml" rm -sf cache > /dev/null 2>&1
 docker compose -p "$P7" -f "$D7/docker-compose.yml" up -d --wait 2>&1 | tail -n 2
+echo "  | /data of $KV: $(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$KV")"
 kv set e2e-key anonymous > /dev/null
 SUMA=$(sum_of "$D7/docker-compose.yml")
 offer_kv
 REFA=$(jget "$(python3 $H retag "$KV" "$R8" --dry-run)" '(d["retag"]["possible"], d["retag"]["reason"], (d["retag"]["store"] or {}).get("items", [{}])[0].get("anonymous"))')
+echo "  | plan: $REFA"
 if docker image inspect -f '{{json .Config.Volumes}}' "$REDIS8_IMAGE" | grep -q '"/data"'; then
     check "Redis 8 declares /data again: the major with an anonymous volume is possible" '[ "$REFA" = "(True, None, True)" ]'
 else
