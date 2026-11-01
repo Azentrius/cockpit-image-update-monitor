@@ -6,7 +6,8 @@
 #   VERSION=0.19.0 BASE=v0.18.1 sh test/package-upgrade.sh deb|rpm
 #
 # This build's package is in /dist; BASE names the release to upgrade from
-# (tools/upgrade-base.py), its package in /prev, checked against its SHA256SUMS before.
+# (tools/upgrade-base.py), its package in /prev, checked against its SHA256SUMS before;
+# tools/dnf.sh is /dnf.sh (dnf with time limits and three tries).
 # Installs that release, adds data a server has after some updates, installs this build over it
 # and checks:
 #   - the version went up, compared by the package manager's own rules,
@@ -45,7 +46,7 @@ case $kind in
     rpm)
         new=$(ls /dist/*.rpm)
         old=$(ls /prev/*.rpm 2> /dev/null || true)
-        pkg_install() { dnf install -y -q "$1"; }
+        pkg_install() { sh /dnf.sh install -y -q "$1"; }
         pkg_remove() { dnf remove -y -q "$name"; }
         pkg_version() { rpm -q --qf '%{VERSION}-%{RELEASE}' "$name"; }
         pkg_older() { test "$(rpm --eval "%{lua:print(rpm.vercmp(\"$1\", \"$2\"))}")" = -1; }
