@@ -1,24 +1,24 @@
 {
  "plans": {
-  "ollama": {
-   "container": "ollama",
+  "inference": {
+   "container": "inference",
    "image": "ollama/ollama:latest",
    "updatable": true,
    "reason": null,
-   "project": "actual",
-   "workdir": "/opt/actual",
+   "project": "budget",
+   "workdir": "/opt/budget",
    "services": [
-    "ollama"
+    "inference"
    ],
    "containers": [
-    "ollama"
+    "inference"
    ],
    "pulled": false,
    "config_changed": true,
-   "old_image": "sha256:ollama",
+   "old_image": "sha256:inference",
    "dbs": [
     {
-     "name": "actual-db",
+     "name": "budget-db",
      "kind": "postgres",
      "running": true,
      "size": 52428800
@@ -32,30 +32,30 @@
    "jump": "minor"
   },
   "*": {
-   "container": "glitchtip-postgres",
+   "container": "bugs-postgres",
    "image": "postgres:16-alpine",
    "updatable": true,
    "reason": null,
-   "project": "glitchtip",
-   "workdir": "/opt/glitchtip",
+   "project": "bugs",
+   "workdir": "/opt/bugs",
    "services": [
     "postgres"
    ],
    "containers": [
-    "glitchtip-postgres"
+    "bugs-postgres"
    ],
    "pulled": true,
    "config_changed": false,
    "old_image": "sha256:old",
    "dbs": [
     {
-     "name": "glitchtip-postgres",
+     "name": "bugs-postgres",
      "kind": "postgres",
      "running": true,
      "size": 120000000
     },
     {
-     "name": "glitchtip-redis",
+     "name": "bugs-redis",
      "kind": "unsupported",
      "running": true,
      "size": null
@@ -75,16 +75,16 @@
   "dump_bytes": 6081740,
   "dumps": [
    {
-    "path": "glitchtip/20261012-031500_glitchtip-postgres.sql.gz",
-    "project": "glitchtip",
-    "container": "glitchtip-postgres",
+    "path": "bugs/20261012-031500_bugs-postgres.sql.gz",
+    "project": "bugs",
+    "container": "bugs-postgres",
     "size": 3145728,
     "mtime": 1791768900
    },
    {
-    "path": "glitchtip/20260901-031500_glitchtip-postgres.sql.gz",
-    "project": "glitchtip",
-    "container": "glitchtip-postgres",
+    "path": "bugs/20260901-031500_bugs-postgres.sql.gz",
+    "project": "bugs",
+    "container": "bugs-postgres",
     "size": 2936012,
     "mtime": 1788232500
    }
@@ -106,7 +106,7 @@
    },
    {
     "ref": "actualbudget/actual-server:rollback-20261011-180000",
-    "id": "sha256:actual-old",
+    "id": "sha256:budget-old",
     "size": 212123648,
     "created": "2026-10-11T18:00:00+02:00",
     "in_use": false
@@ -121,21 +121,21 @@
   ],
   "ops": [
    {
-    "id": "20261012-232502-formbricks-app",
+    "id": "20261012-232502-survey-app",
     "ts": "2026-10-12T23:25:02Z",
     "kind": "update",
-    "container": "formbricks-app",
-    "project": "formbricks",
+    "container": "survey-app",
+    "project": "survey",
     "image": "ghcr.io/formbricks/formbricks:latest",
     "services": [
-     "formbricks"
+     "survey"
     ],
     "containers": [
-     "formbricks-app"
+     "survey-app"
     ],
     "rollback": "ghcr.io/formbricks/formbricks:rollback-20261012-232502",
     "dumps": [
-     "formbricks/20261012-232502_formbricks-db.sql.gz"
+     "survey/20261012-232502_survey-db.sql.gz"
     ],
     "status": "failed",
     "can_rollback": false,
@@ -145,7 +145,7 @@
     "rollback_ts": "2026-10-12T23:29:08Z",
     "rollback_status": "ok",
     "reason": {
-     "container": "formbricks-app",
+     "container": "survey-app",
      "state": "restarting",
      "exit_code": 1,
      "oom": false,
@@ -156,21 +156,21 @@
     "rollback_log": true
    },
    {
-    "id": "20261012-031500-glitchtip-postgres",
+    "id": "20261012-031500-bugs-postgres",
     "ts": "2026-10-12T01:15:00Z",
     "kind": "update",
-    "container": "glitchtip-postgres",
-    "project": "glitchtip",
+    "container": "bugs-postgres",
+    "project": "bugs",
     "image": "postgres:16-alpine",
     "services": [
      "postgres"
     ],
     "containers": [
-     "glitchtip-postgres"
+     "bugs-postgres"
     ],
     "rollback": "postgres:rollback-20261012-031500",
     "dumps": [
-     "glitchtip/20261012-031500_glitchtip-postgres.sql.gz"
+     "bugs/20261012-031500_bugs-postgres.sql.gz"
     ],
     "status": "ok",
     "can_rollback": true,
@@ -180,17 +180,17 @@
     "rollback_log": false
    },
    {
-    "id": "20261011-180000-actual_server",
+    "id": "20261011-180000-budget_server",
     "ts": "2026-10-11T16:00:00Z",
     "kind": "retag",
-    "container": "actual_server",
-    "project": "actual",
+    "container": "budget_server",
+    "project": "budget",
     "image": "actualbudget/actual-server:26.5.0",
     "services": [
-     "actual_server"
+     "budget_server"
     ],
     "containers": [
-     "actual_server"
+     "budget_server"
     ],
     "rollback": "actualbudget/actual-server:rollback-20261011-180000",
     "dumps": [],
@@ -203,28 +203,28 @@
     "to_tag": "26.6.0",
     "changes": [
      {
-      "file": "/opt/actual/docker-compose.yml",
+      "file": "/opt/budget/docker-compose.yml",
       "line": 9,
       "old": "    image: actualbudget/actual-server:26.5.0",
       "new": "    image: actualbudget/actual-server:26.6.0"
      }
     ],
-    "backup": "/var/backups/image-updates/compose/actual/20261011-180000",
+    "backup": "/var/backups/image-updates/compose/budget/20261011-180000",
     "log": true,
     "rollback_log": false
    },
    {
-    "id": "20261011-120000-ollama",
+    "id": "20261011-120000-inference",
     "ts": "2026-10-11T10:00:00Z",
     "kind": "update",
-    "container": "ollama",
-    "project": "actual",
+    "container": "inference",
+    "project": "budget",
     "image": "ollama/ollama:latest",
     "services": [
-     "ollama"
+     "inference"
     ],
     "containers": [
-     "ollama"
+     "inference"
     ],
     "rollback": null,
     "dumps": [],
@@ -240,7 +240,7 @@
    "file": "/etc/image-updates.conf",
    "error": null,
    "dumps": [
-    "glitchtip/20260901-031500_glitchtip-postgres.sql.gz"
+    "bugs/20260901-031500_bugs-postgres.sql.gz"
    ],
    "images": [
     "postgres:rollback-20260901-031500"
@@ -249,45 +249,45 @@
   }
  },
  "log": [
-  "Updating postgres:16-alpine in project glitchtip: services postgres\n",
-  "Dumping database glitchtip-postgres (postgres) …\n",
-  "  -> /var/backups/image-updates/dumps/glitchtip/20261012-033000_glitchtip-postgres.sql.gz (3.1 MB, 2 s)\n",
+  "Updating postgres:16-alpine in project bugs: services postgres\n",
+  "Dumping database bugs-postgres (postgres) …\n",
+  "  -> /var/backups/image-updates/dumps/bugs/20261012-033000_bugs-postgres.sql.gz (3.1 MB, 2 s)\n",
   "Rollback image: postgres:rollback-20261012-033000\n",
-  "+ docker compose -p glitchtip --project-directory /opt/glitchtip -f /opt/glitchtip/docker-compose.yml pull --ignore-pull-failures postgres\n",
-  "+ docker compose -p glitchtip --project-directory /opt/glitchtip -f /opt/glitchtip/docker-compose.yml up -d --no-deps --pull never postgres\n",
-  " Container glitchtip-postgres  Recreated\n",
-  "Waiting for glitchtip-postgres (max 180 s) …\n",
-  "All containers running: glitchtip-postgres=running/healthy\n",
+  "+ docker compose -p bugs --project-directory /opt/bugs -f /opt/bugs/docker-compose.yml pull --ignore-pull-failures postgres\n",
+  "+ docker compose -p bugs --project-directory /opt/bugs -f /opt/bugs/docker-compose.yml up -d --no-deps --pull never postgres\n",
+  " Container bugs-postgres  Recreated\n",
+  "Waiting for bugs-postgres (max 180 s) …\n",
+  "All containers running: bugs-postgres=running/healthy\n",
   "Update successful.\n",
-  "@@RESULT {\"op\": \"20261012-033000-glitchtip-postgres\", \"status\": \"ok\", \"rollback\": \"postgres:rollback-20261012-033000\", \"dumps\": [\"glitchtip/20261012-033000_glitchtip-postgres.sql.gz\"]}\n"
+  "@@RESULT {\"op\": \"20261012-033000-bugs-postgres\", \"status\": \"ok\", \"rollback\": \"postgres:rollback-20261012-033000\", \"dumps\": [\"bugs/20261012-033000_bugs-postgres.sql.gz\"]}\n"
  ],
  "retag": {
-  "plausible": {
+  "metrics": {
    "plan": {
-    "container": "plausible",
+    "container": "metrics",
     "image": "ghcr.io/plausible/community-edition:v2.1.4",
     "updatable": true,
     "reason": null,
-    "project": "plausible",
-    "workdir": "/opt/plausible",
+    "project": "metrics",
+    "workdir": "/opt/metrics",
     "services": [
-     "plausible"
+     "metrics"
     ],
     "containers": [
-     "plausible"
+     "metrics"
     ],
     "pulled": false,
     "config_changed": false,
-    "old_image": "sha256:plausible",
+    "old_image": "sha256:metrics",
     "dbs": [
      {
-      "name": "plausible_db",
+      "name": "metrics_db",
       "kind": "postgres",
       "running": true,
       "size": 52428800
      },
      {
-      "name": "plausible_events_db",
+      "name": "metrics_events_db",
       "kind": "unsupported",
       "running": true,
       "size": null
@@ -298,20 +298,20 @@
     "tag_digits": 3,
     "depends_on": [
      {
-      "service": "plausible_db",
+      "service": "metrics_db",
       "condition": "service_healthy"
      },
      {
-      "service": "plausible_events_db",
+      "service": "metrics_events_db",
       "condition": "service_healthy"
      }
     ]
    },
    "line": {
-    "file": "/opt/plausible/compose.yml",
+    "file": "/opt/metrics/compose.yml",
     "line": 14,
     "old": "    image: ghcr.io/plausible/community-edition:v2.1.4",
-    "service": "plausible"
+    "service": "metrics"
    },
    "targets": {
     "v2.1.5": [
@@ -351,32 +351,32 @@
     ]
    }
   },
-  "glitchtip-postgres": {
+  "bugs-postgres": {
    "plan": {
-    "container": "glitchtip-postgres",
+    "container": "bugs-postgres",
     "image": "postgres:16-alpine",
     "updatable": true,
     "reason": null,
-    "project": "glitchtip",
-    "workdir": "/opt/glitchtip",
+    "project": "bugs",
+    "workdir": "/opt/bugs",
     "services": [
      "postgres"
     ],
     "containers": [
-     "glitchtip-postgres"
+     "bugs-postgres"
     ],
     "pulled": false,
     "config_changed": false,
     "old_image": "sha256:old",
     "dbs": [
      {
-      "name": "glitchtip-postgres",
+      "name": "bugs-postgres",
       "kind": "postgres",
       "running": true,
       "size": 120000000
      },
      {
-      "name": "glitchtip-redis",
+      "name": "bugs-redis",
       "kind": "unsupported",
       "running": true,
       "size": null
@@ -390,19 +390,19 @@
      {
       "service": "web",
       "containers": [
-       "glitchtip-web"
+       "bugs-web"
       ]
      },
      {
       "service": "worker",
       "containers": [
-       "glitchtip-worker"
+       "bugs-worker"
       ]
      }
     ]
    },
    "line": {
-    "file": "/opt/glitchtip/docker-compose.yml",
+    "file": "/opt/bugs/docker-compose.yml",
     "line": 5,
     "old": "    image: postgres:16-alpine",
     "service": "postgres"
@@ -447,40 +447,40 @@
   }
  },
  "retag_log": [
-  "Changing ghcr.io/plausible/community-edition:v2.1.4 to ghcr.io/plausible/community-edition:v2 in project plausible: services plausible\n",
-  "Dumping database plausible_db (postgres) …\n",
-  "  -> /var/backups/image-updates/dumps/plausible/20261012-034500_plausible_db.sql.gz (1.2 MB, 1 s)\n",
-  "No dump for plausible_events_db (type not supported).\n",
+  "Changing ghcr.io/plausible/community-edition:v2.1.4 to ghcr.io/plausible/community-edition:v2 in project metrics: services metrics\n",
+  "Dumping database metrics_db (postgres) …\n",
+  "  -> /var/backups/image-updates/dumps/metrics/20261012-034500_metrics_db.sql.gz (1.2 MB, 1 s)\n",
+  "No dump for metrics_events_db (type not supported).\n",
   "Rollback image: ghcr.io/plausible/community-edition:rollback-20261012-034500\n",
-  "Files backed up to /var/backups/image-updates/compose/plausible/20261012-034500\n",
-  "/opt/plausible/compose.yml:14: image: ghcr.io/plausible/community-edition:v2.1.4  →  image: ghcr.io/plausible/community-edition:v2\n",
+  "Files backed up to /var/backups/image-updates/compose/metrics/20261012-034500\n",
+  "/opt/metrics/compose.yml:14: image: ghcr.io/plausible/community-edition:v2.1.4  →  image: ghcr.io/plausible/community-edition:v2\n",
   "docker compose config: OK.\n",
-  "+ docker compose -p plausible --project-directory /opt/plausible -f /opt/plausible/compose.yml pull --ignore-pull-failures plausible\n",
-  "+ docker compose -p plausible --project-directory /opt/plausible -f /opt/plausible/compose.yml up -d --no-deps --pull never plausible\n",
-  " Container plausible  Recreated\n",
-  "Waiting for plausible (max 180 s) …\n",
-  "All containers running: plausible=running/healthy\n",
+  "+ docker compose -p metrics --project-directory /opt/metrics -f /opt/metrics/compose.yml pull --ignore-pull-failures metrics\n",
+  "+ docker compose -p metrics --project-directory /opt/metrics -f /opt/metrics/compose.yml up -d --no-deps --pull never metrics\n",
+  " Container metrics  Recreated\n",
+  "Waiting for metrics (max 180 s) …\n",
+  "All containers running: metrics=running/healthy\n",
   "Tag change successful: ghcr.io/plausible/community-edition:v2\n",
-  "@@RESULT {\"op\": \"20261012-034500-plausible\", \"status\": \"ok\", \"rollback\": \"ghcr.io/plausible/community-edition:rollback-20261012-034500\", \"dumps\": [\"plausible/20261012-034500_plausible_db.sql.gz\"], \"from_version\": \"2.1.4\", \"to_version\": \"2.1.5\", \"image\": \"ghcr.io/plausible/community-edition:v2\", \"backup\": \"/var/backups/image-updates/compose/plausible/20261012-034500\"}\n"
+  "@@RESULT {\"op\": \"20261012-034500-metrics\", \"status\": \"ok\", \"rollback\": \"ghcr.io/plausible/community-edition:rollback-20261012-034500\", \"dumps\": [\"metrics/20261012-034500_metrics_db.sql.gz\"], \"from_version\": \"2.1.4\", \"to_version\": \"2.1.5\", \"image\": \"ghcr.io/plausible/community-edition:v2\", \"backup\": \"/var/backups/image-updates/compose/metrics/20261012-034500\"}\n"
  ],
  "built": {
   "inventory": [
    {
-    "name": "caddy",
-    "image": "caddy-caddy",
+    "name": "proxy",
+    "image": "proxy-caddy",
     "tag": "latest",
     "digest": "",
-    "imgid": "sha256:caddy",
-    "tagid": "sha256:caddy",
+    "imgid": "sha256:proxy",
+    "tagid": "sha256:proxy",
     "pulled": false,
-    "project": "caddy",
+    "project": "proxy",
     "service": "caddy",
     "managed": true,
     "version": null,
     "version_src": null,
     "pulled_version": null,
     "files": [
-     "/opt/caddy/compose.yml"
+     "/opt/proxy/compose.yml"
     ],
     "ci_job": false,
     "created": "2026-06-15T18:35:36Z",
@@ -489,10 +489,10 @@
   ],
   "radar": [
    {
-    "image": "caddy-caddy",
+    "image": "proxy-caddy",
     "tag": "latest",
     "containers": [
-     "caddy"
+     "proxy"
     ],
     "db": false,
     "reach": [
@@ -501,7 +501,7 @@
      "major"
     ],
     "installed": {
-     "sha256:caddy": {
+     "sha256:proxy": {
       "version": null,
       "src": "digest",
       "tag": null,
@@ -535,23 +535,23 @@
   ]
  },
  "rebuild": {
-  "caddy": {
-   "container": "caddy",
-   "image": "caddy-caddy:latest",
+  "proxy": {
+   "container": "proxy",
+   "image": "proxy-caddy:latest",
    "updatable": true,
    "reason": null,
    "build": true,
-   "project": "caddy",
-   "workdir": "/opt/caddy",
+   "project": "proxy",
+   "workdir": "/opt/proxy",
    "services": [
     "caddy"
    ],
    "containers": [
-    "caddy"
+    "proxy"
    ],
    "pulled": false,
    "config_changed": false,
-   "old_image": "sha256:caddy",
+   "old_image": "sha256:proxy",
    "dbs": [],
    "free_bytes": 42949672960,
    "installed_version": "2.11.4",
@@ -564,7 +564,7 @@
   }
  },
  "majors": {
-  "glitchtip-postgres": {
+  "bugs-postgres": {
    "major": {
     "possible": true,
     "reason": null,
@@ -573,9 +573,9 @@
     "from_major": 16,
     "data": {
      "type": "volume",
-     "name": "glitchtip_pgdata",
+     "name": "bugs_pgdata",
      "driver": "local",
-     "source": "/var/lib/docker/volumes/glitchtip_pgdata/_data",
+     "source": "/var/lib/docker/volumes/bugs_pgdata/_data",
      "destination": "/var/lib/postgresql/data"
     },
     "pgdata": "/var/lib/postgresql/data",

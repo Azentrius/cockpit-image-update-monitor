@@ -22,29 +22,29 @@ const files = {
 };
 const DEPS_OK = JSON.stringify({ root: true, docker: { state: "ok", compose: true },
     diun: { state: "running", events: true }, skopeo: { state: "ok" }, radar: { state: "active" } });
-const PLAN_OLLAMA = { container: "ollama", image: "ollama/ollama:latest", updatable: true, project: "actual",
-    workdir: "/opt/actual", services: ["ollama"], containers: ["ollama"], pulled: false, config_changed: true,
-    dbs: [{ name: "actual-db", kind: "postgres", running: true, size: 52428800 }], free_bytes: 40 * 2 ** 30 };
-const PLAN_GLITCH = { container: "glitchtip-postgres", image: "postgres:16-alpine", updatable: true, project: "glitchtip",
-    workdir: "/opt/glitchtip", services: ["postgres"], containers: ["glitchtip-postgres"], pulled: true, config_changed: false,
-    dbs: [{ name: "glitchtip-postgres", kind: "postgres", running: true, size: 1.2e8 },
-          { name: "glitchtip-redis", kind: "unsupported", running: true, size: null }], free_bytes: 40 * 2 ** 30 };
+const PLAN_OLLAMA = { container: "inference", image: "ollama/ollama:latest", updatable: true, project: "budget",
+    workdir: "/opt/budget", services: ["inference"], containers: ["inference"], pulled: false, config_changed: true,
+    dbs: [{ name: "budget-db", kind: "postgres", running: true, size: 52428800 }], free_bytes: 40 * 2 ** 30 };
+const PLAN_GLITCH = { container: "bugs-postgres", image: "postgres:16-alpine", updatable: true, project: "bugs",
+    workdir: "/opt/bugs", services: ["postgres"], containers: ["bugs-postgres"], pulled: true, config_changed: false,
+    dbs: [{ name: "bugs-postgres", kind: "postgres", running: true, size: 1.2e8 },
+          { name: "bugs-redis", kind: "unsupported", running: true, size: null }], free_bytes: 40 * 2 ** 30 };
 const PLAN_JUMP = { ...PLAN_OLLAMA, config_changed: false, installed_version: null, tag_digits: 0, jump_unknown: true };
-const REASON = { container: "formbricks-app", state: "restarting", exit_code: 1, oom: false, source: "log",
+const REASON = { container: "survey-app", state: "restarting", exit_code: 1, oom: false, source: "log",
     line: "Error: Invalid environment variables: - AUTHZED_ENABLED: Formbricks v6 requires AUTHZED_ENABLED=true" };
 const BACKUPS = {
     dir: "/var/backups/image-updates", free_bytes: 40 * 2 ** 30, dump_bytes: 3 * 2 ** 20,
-    dumps: [{ path: "glitchtip/20261012-031500_glitchtip-postgres.sql.gz", project: "glitchtip",
-              container: "glitchtip-postgres", size: 3 * 2 ** 20, mtime: 1791768900 }],
+    dumps: [{ path: "bugs/20261012-031500_bugs-postgres.sql.gz", project: "bugs",
+              container: "bugs-postgres", size: 3 * 2 ** 20, mtime: 1791768900 }],
     images: [{ ref: "postgres:rollback-20261012-031500", id: "sha256:old", size: 274993152, created: "2026-10-12T03:15:00+02:00", in_use: false },
              { ref: "ollama/ollama:rollback-20261011-120000", id: "sha256:x", size: 3650722201, created: "2026-10-11T12:00:00+02:00", in_use: true }],
-    ops: [{ id: "20261012-031500-glitchtip-postgres", ts: "2026-10-12T01:15:00Z", kind: "update", container: "glitchtip-postgres",
+    ops: [{ id: "20261012-031500-bugs-postgres", ts: "2026-10-12T01:15:00Z", kind: "update", container: "bugs-postgres",
             image: "postgres:16-alpine", services: ["postgres"], rollback: "postgres:rollback-20261012-031500",
-            dumps: ["glitchtip/20261012-031500_glitchtip-postgres.sql.gz"], status: "ok", can_rollback: true },
-          { id: "20261011-120000-ollama", ts: "2026-10-11T10:00:00Z", kind: "update", container: "ollama",
-            image: "ollama/ollama:latest", services: ["ollama"], rollback: null, dumps: [], status: "nochange", can_rollback: false },
-          { id: "20261012-232502-formbricks-app", ts: "2026-10-10T23:25:02Z", kind: "update", container: "formbricks-app",
-            image: "ghcr.io/formbricks/formbricks:latest", services: ["formbricks"], rollback: "x", dumps: [], status: "failed",
+            dumps: ["bugs/20261012-031500_bugs-postgres.sql.gz"], status: "ok", can_rollback: true },
+          { id: "20261011-120000-inference", ts: "2026-10-11T10:00:00Z", kind: "update", container: "inference",
+            image: "ollama/ollama:latest", services: ["inference"], rollback: null, dumps: [], status: "nochange", can_rollback: false },
+          { id: "20261012-232502-survey-app", ts: "2026-10-10T23:25:02Z", kind: "update", container: "survey-app",
+            image: "ghcr.io/formbricks/formbricks:latest", services: ["survey"], rollback: "x", dumps: [], status: "failed",
             can_rollback: false, rolled_back: true, rollback_status: "ok", reason: REASON },
           { id: "20261009-120000-x", ts: "2026-10-09T10:00:00Z", kind: "update", container: "x", image: "x:latest",
             services: ["x"], rollback: "x", dumps: [], status: "failed", can_rollback: false,
@@ -116,25 +116,25 @@ const BASE_SCRIPT = {
     await settle();
     const rowOf = (d, name) => [...d.querySelectorAll("#dm-rows tr")].find((tr) => tr.querySelector(".dm-name").textContent === name);
     const describe = (tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent.trim()).filter(Boolean).join(" | ");
-    for (const n of ["ollama", "glitchtip-postgres", "actual-ai", "calcom"]) console.log("row:", describe(rowOf(a.d, n)));
-    assert(rowOf(a.d, "ollama").querySelector('button[data-update="ollama"]').textContent === "Update");
-    assert(rowOf(a.d, "glitchtip-postgres").querySelector("button[data-update]").textContent === "Image ausrollen");
-    assert(rowOf(a.d, "glitchtip-postgres").textContent.includes("Ausrollen ausstehend"));
+    for (const n of ["inference", "bugs-postgres", "budget-ai", "booking"]) console.log("row:", describe(rowOf(a.d, n)));
+    assert(rowOf(a.d, "inference").querySelector('button[data-update="inference"]').textContent === "Update");
+    assert(rowOf(a.d, "bugs-postgres").querySelector("button[data-update]").textContent === "Image ausrollen");
+    assert(rowOf(a.d, "bugs-postgres").textContent.includes("Ausrollen ausstehend"));
     const together = (n) => { const x = rowOf(a.d, n).querySelector("td .dm-row-note"); return x && x.textContent; };
-    console.log("together:", ["glitchtip-web", "hbbr", "nextcloud-family-cron-1", "ollama"].map((n) => `${n} -> ${together(n)}`).join(" | "));
-    assert.strictEqual(together("glitchtip-web"), "zusammen mit glitchtip-worker");
-    assert.strictEqual(together("hbbr"), "zusammen mit hbbs");
-    assert.strictEqual(together("ollama"), null, "alone in its project with its image");
+    console.log("together:", ["bugs-web", "remote-tunnel", "cloud-cron-1", "inference"].map((n) => `${n} -> ${together(n)}`).join(" | "));
+    assert.strictEqual(together("bugs-web"), "zusammen mit bugs-worker");
+    assert.strictEqual(together("remote-tunnel"), "zusammen mit remote-signal");
+    assert.strictEqual(together("inference"), null, "alone in its project with its image");
     // Same project and image, but started from another compose file (a
     // runner in docker-compose.emu.yml next to docker-compose.yml, 2026-10-16):
     // an update does not take it along, so it is not "together with".
-    const split = inventory.trim().split("\n").map((l) => JSON.parse(l)).map((c) => c.project !== "rustdesk" ? c
-        : { ...c, files: [c.name === "hbbr" ? "/opt/rustdesk/relay.yml" : "/opt/rustdesk/compose.yml"] });
+    const split = inventory.trim().split("\n").map((l) => JSON.parse(l)).map((c) => c.project !== "remote" ? c
+        : { ...c, files: [c.name === "remote-tunnel" ? "/opt/remote/relay.yml" : "/opt/remote/compose.yml"] });
     const sp = boot("de", { ...BASE_SCRIPT, "diun-inventory.py": { out: split.map((c) => JSON.stringify(c)).join("\n") + "\n" } });
     await settle();
     const togetherIn = (d, n) => { const x = rowOf(d, n).querySelector("td .dm-row-note"); return x && x.textContent; };
-    assert.deepStrictEqual([togetherIn(sp.d, "hbbr"), togetherIn(sp.d, "hbbs"), togetherIn(sp.d, "glitchtip-web")],
-                           [null, null, "zusammen mit glitchtip-worker"], "other compose files: not together");
+    assert.deepStrictEqual([togetherIn(sp.d, "remote-tunnel"), togetherIn(sp.d, "remote-signal"), togetherIn(sp.d, "bugs-web")],
+                           [null, null, "zusammen mit bugs-worker"], "other compose files: not together");
     // Containers of CI jobs (Forgejo runner, a CI host, 2026-10-17) are not
     // listed: the meta line counts them, its tooltip names them.
     const JOB = { name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "example-ci", tag: "1", digest: "",
@@ -156,21 +156,21 @@ const BASE_SCRIPT = {
     const places = (tr) => [...tr.querySelector("td.az-cell-actions .dm-cell").children].map((x) =>
         x.classList.contains("dm-slot") ? "slot" : x.dataset.update ? "update" : x.dataset.retag ? "retag"
             : x.dataset.key ? "dismiss" : x.dataset.op ? "rollback" : x.dataset.log ? "log" : x.tagName);
-    const PLACES = { "ollama": ["update", "retag", "dismiss"], "prod-mcp-1": ["update", "slot", "dismiss"],
-                     "glitchtip-postgres": ["update", "retag", "slot"], "docuseal": ["retag", "slot"], "calcom": [] };
+    const PLACES = { "inference": ["update", "retag", "dismiss"], "tools-mcp-1": ["update", "slot", "dismiss"],
+                     "bugs-postgres": ["update", "retag", "slot"], "contracts": ["retag", "slot"], "booking": [] };
     console.log("places:", Object.keys(PLACES).map((n) => `${n} = ${places(rowOf(a.d, n))}`).join(" | "));
     for (const [n, want] of Object.entries(PLACES)) assert.deepStrictEqual(places(rowOf(a.d, n)), want, n);
-    const slot = rowOf(a.d, "prod-mcp-1").querySelector(".dm-slot");
+    const slot = rowOf(a.d, "tools-mcp-1").querySelector(".dm-slot");
     assert(slot.getAttribute("aria-hidden") === "true" && slot.classList.contains("az-btn--plain") &&
            slot.classList.contains("az-btn--sm"), "hidden from screen readers, sized like an icon button");
 
-    // 2. Update ollama: plan -> body -> confirm -> stream -> success
+    // 2. Update inference: plan -> body -> confirm -> stream -> success
     const runOk = { chunks: ["Update ollama/ollama:latest …\n", "+ docker compose … pull\n",
-                             '@@RESULT {"op":"20261012-032000-ollama","status":"ok","rollback":"ollama/ollama:rollback-20261012-032000"}\n'] };
+                             '@@RESULT {"op":"20261012-032000-inference","status":"ok","rollback":"ollama/ollama:rollback-20261012-032000"}\n'] };
     const b = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_OLLAMA) },
                                            "diun-update.py update": runOk });
     await settle();
-    b.d.querySelector('button[data-update="ollama"]').click();
+    b.d.querySelector('button[data-update="inference"]').click();
     await settle();
     const body = b.d.getElementById("dm-dialog-body").textContent.replace(/\s+/g, " ");
     console.log("\ndialog:", b.d.getElementById("dm-dialog-title").textContent, "|", b.d.getElementById("dm-dialog-desc").textContent);
@@ -183,7 +183,7 @@ const BASE_SCRIPT = {
     await settle();
     const up = b.last("update");
     console.log("spawn :", JSON.stringify(up.cmd), up.opts.superuser);
-    assert.strictEqual(JSON.stringify(up.cmd), JSON.stringify(["/usr/lib/cockpit-image-updates/diun-update.py", "update", "ollama"]));
+    assert.strictEqual(JSON.stringify(up.cmd), JSON.stringify(["/usr/lib/cockpit-image-updates/diun-update.py", "update", "inference"]));
     const log = b.d.getElementById("dm-dialog-log").textContent;
     console.log("log   :", JSON.stringify(log));
     assert(!log.includes("@@RESULT"));
@@ -200,7 +200,7 @@ const BASE_SCRIPT = {
         const tp = boot(lang, { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_OLLAMA) },
                                                 "diun-update.py pull": pullOk });
         await settle();
-        tp.d.querySelector('button[data-update="ollama"]').click();
+        tp.d.querySelector('button[data-update="inference"]').click();
         await settle();
         const steps = [...tp.d.querySelectorAll('#dm-dialog-body input[name="dm-step"]')];
         console.log("two steps (" + lang + "):", steps.map((x) => x.closest("label").textContent.trim()).join(" | "));
@@ -213,7 +213,7 @@ const BASE_SCRIPT = {
         assert(tp.d.getElementById("dm-dump-check").disabled, "pull only: no dump to choose");
         confirm.click();
         await settle();
-        assert.strictEqual(JSON.stringify(tp.last("pull").cmd), JSON.stringify(["/usr/lib/cockpit-image-updates/diun-update.py", "pull", "ollama"]));
+        assert.strictEqual(JSON.stringify(tp.last("pull").cmd), JSON.stringify(["/usr/lib/cockpit-image-updates/diun-update.py", "pull", "inference"]));
         assert.strictEqual(tp.last("update"), undefined, "no update ran");
         assert.strictEqual(tp.d.getElementById("dm-dialog-result").textContent, done);
     }
@@ -232,18 +232,18 @@ const BASE_SCRIPT = {
                { image: "alpine", tag: "3.20", final: false, pinned: true, newer: false },
                { image: "golang", tag: "1.25", final: false, newer: false, now: "1.25.3" }] });
     files[RADAR] = builtRadar;
-    const PLAN_BUILT = { container: "prod-mcp-1", image: "ghcr.io/cbcoutinho/nextcloud-mcp-server:latest", updatable: true,
-        build: true, project: "prod", workdir: "/opt/prod", services: ["prod-mcp-1"], containers: ["prod-mcp-1"], pulled: false,
-        config_changed: false, dbs: [{ name: "prod-db", kind: "postgres", running: true, size: 52428800 }], free_bytes: 40 * 2 ** 30,
+    const PLAN_BUILT = { container: "tools-mcp-1", image: "ghcr.io/cbcoutinho/nextcloud-mcp-server:latest", updatable: true,
+        build: true, project: "tools", workdir: "/opt/tools", services: ["tools-mcp-1"], containers: ["tools-mcp-1"], pulled: false,
+        config_changed: false, dbs: [{ name: "tools-db", kind: "postgres", running: true, size: 52428800 }], free_bytes: 40 * 2 ** 30,
         installed_version: "2.11.4", tag_digits: 0, jump_unknown: false, target_version: "2.11.7", jump: "patch" };
-    const rebuildRun = (status, extra) => ({ chunks: ["Rebuilding …\n", "@@RESULT " + JSON.stringify({ op: "20261012-034000-prod-mcp-1",
+    const rebuildRun = (status, extra) => ({ chunks: ["Rebuilding …\n", "@@RESULT " + JSON.stringify({ op: "20261012-034000-tools-mcp-1",
         status, rollback: "ghcr.io/cbcoutinho/nextcloud-mcp-server:rollback-20261012-034000", ...extra }) + "\n"] });
     for (const [lang, btn, title, bases, ok, same] of [
-        ["de", "Neu bauen", "prod-mcp-1 neu bauen?",
+        ["de", "Neu bauen", "tools-mcp-1 neu bauen?",
          "Basis-Images: caddy:2-builder neuer: 2.11.7caddy:2 neuer: 2.11.7alpine:3.20 per Digest festgelegt, bleibtgolang:1.25 unverändert",
          "Neubau erfolgreich: 2.11.4 → 2.11.7. Rollback-Kopie: ghcr.io/cbcoutinho/nextcloud-mcp-server:rollback-20261012-034000",
          "Der Neubau ergab dasselbe Image – nichts geändert."],
-        ["en", "Rebuild", "Rebuild prod-mcp-1?",
+        ["en", "Rebuild", "Rebuild tools-mcp-1?",
          "Base images: caddy:2-builder newer: 2.11.7caddy:2 newer: 2.11.7alpine:3.20 pinned by digest, staysgolang:1.25 unchanged",
          "Rebuild successful: 2.11.4 → 2.11.7. Rollback copy: ghcr.io/cbcoutinho/nextcloud-mcp-server:rollback-20261012-034000",
          "The rebuild gave the same image – nothing changed."]]) {
@@ -257,7 +257,7 @@ const BASE_SCRIPT = {
             button.click();
             await settle();
             assert.deepStrictEqual(rb.calls.filter((c) => c.cmd[1] === "rebuild").map((c) => c.cmd.slice(1)),
-                                   [["rebuild", "prod-mcp-1", "--dry-run"]], "the plan of a rebuild, no update plan");
+                                   [["rebuild", "tools-mcp-1", "--dry-run"]], "the plan of a rebuild, no update plan");
             assert.strictEqual(rb.last("plan"), undefined);
             const rbBody = rb.d.getElementById("dm-dialog-body");
             assert.strictEqual(rb.d.getElementById("dm-dialog-title").textContent, title);
@@ -270,7 +270,7 @@ const BASE_SCRIPT = {
             if (want === ok) rb.d.getElementById("dm-dump-check").checked = false;
             confirm.click();
             await settle();
-            assert.deepStrictEqual(rb.last("rebuild").cmd.slice(1), want === ok ? ["rebuild", "prod-mcp-1", "--no-dump"] : ["rebuild", "prod-mcp-1"]);
+            assert.deepStrictEqual(rb.last("rebuild").cmd.slice(1), want === ok ? ["rebuild", "tools-mcp-1", "--no-dump"] : ["rebuild", "tools-mcp-1"]);
             assert.strictEqual(rb.last("update"), undefined, "no update ran");
             assert.strictEqual(rb.d.getElementById("dm-dialog-result").textContent, want);
         }
@@ -288,7 +288,7 @@ const BASE_SCRIPT = {
     assert.strictEqual(rf.d.getElementById("dm-dialog-extra").textContent.trim(), "Update zurückrollen");
     rf.d.getElementById("dm-dialog-extra").click();
     await settle();
-    assert.deepStrictEqual(rf.last("rollback").cmd.slice(1), ["rollback", "20261012-034000-prod-mcp-1"]);
+    assert.deepStrictEqual(rf.last("rollback").cmd.slice(1), ["rollback", "20261012-034000-tools-mcp-1"]);
     // A pulled image is no rebuild: the helper says so, nothing to confirm.
     const nbu = boot("en", { ...BASE_SCRIPT,
         "diun-update.py rebuild": { out: JSON.stringify({ ...PLAN_BUILT, updatable: false, reason: "not-built" }) } });
@@ -300,7 +300,7 @@ const BASE_SCRIPT = {
     files[RADAR] = realRadar;
     // In the history a rebuild says what it was.
     const hb = boot("de", { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: [{ ...BACKUPS.ops[0],
-        id: "20261012-034000-prod-mcp-1", kind: "rebuild", container: "prod-mcp-1", image: "ghcr.io/cbcoutinho/nextcloud-mcp-server:latest",
+        id: "20261012-034000-tools-mcp-1", kind: "rebuild", container: "tools-mcp-1", image: "ghcr.io/cbcoutinho/nextcloud-mcp-server:latest",
         from_version: "2.11.4", to_version: "2.11.7" }] }) } });
     await settle();
     hb.d.getElementById("dm-tab-btn-backups").click();
@@ -309,10 +309,10 @@ const BASE_SCRIPT = {
 
     // 3. Without dump -> --no-dump; failure -> rollback offered -> rollback runs
     const c = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_GLITCH) },
-        "diun-update.py update": { chunks: ["…\n", '@@RESULT {"op":"20261012-033000-glitchtip-postgres","status":"failed"}\n'], fail: { exit_status: 4 } },
-        "diun-update.py rollback": { chunks: ["Rollback …\n", '@@RESULT {"op":"20261012-033000-glitchtip-postgres","status":"ok"}\n'] } });
+        "diun-update.py update": { chunks: ["…\n", '@@RESULT {"op":"20261012-033000-bugs-postgres","status":"failed"}\n'], fail: { exit_status: 4 } },
+        "diun-update.py rollback": { chunks: ["Rollback …\n", '@@RESULT {"op":"20261012-033000-bugs-postgres","status":"ok"}\n'] } });
     await settle();
-    c.d.querySelector('button[data-update="glitchtip-postgres"]').click();
+    c.d.querySelector('button[data-update="bugs-postgres"]').click();
     await settle();
     console.log("\ndialog:", c.d.getElementById("dm-dialog-title").textContent, "|", c.d.getElementById("dm-dialog-desc").textContent);
     assert.strictEqual(c.d.querySelectorAll('#dm-dialog-body input[name="dm-step"]').length, 0,
@@ -321,7 +321,7 @@ const BASE_SCRIPT = {
     c.d.getElementById("dm-dialog-confirm").click();
     await settle();
     console.log("spawn :", JSON.stringify(c.last("update").cmd.slice(1)));
-    assert.strictEqual(JSON.stringify(c.last("update").cmd.slice(1)), JSON.stringify(["update", "glitchtip-postgres", "--no-dump"]));
+    assert.strictEqual(JSON.stringify(c.last("update").cmd.slice(1)), JSON.stringify(["update", "bugs-postgres", "--no-dump"]));
     const extra = c.d.getElementById("dm-dialog-extra");
     console.log("result:", c.d.getElementById("dm-dialog-result").textContent, "| extra:", !extra.hidden, extra.textContent.trim());
     assert(!extra.hidden && extra.textContent.trim() === "Update zurückrollen");
@@ -336,7 +336,7 @@ const BASE_SCRIPT = {
         const nd = boot("de", { ...BASE_SCRIPT, "diun-update.py update": runOk,
             "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, config_changed: false, dbs }) } });
         await settle();
-        nd.d.querySelector('button[data-update="ollama"]').click();
+        nd.d.querySelector('button[data-update="inference"]').click();
         await settle();
         const ndBody = nd.d.getElementById("dm-dialog-body");
         console.log("no db :", kvRows(ndBody).find((r) => r.startsWith("Datenbank-Dump")), "| tick box:",
@@ -344,13 +344,13 @@ const BASE_SCRIPT = {
         assert(!nd.d.getElementById("dm-dump-check") && !ndBody.querySelector(".dm-check"));
         nd.d.getElementById("dm-dialog-confirm").click();
         await settle();
-        assert.deepStrictEqual(nd.last("update").cmd.slice(1), ["update", "ollama"]);
+        assert.deepStrictEqual(nd.last("update").cmd.slice(1), ["update", "inference"]);
     }
 
     // 3b. Dialog closed while the plan is still loading -> must stay closed
     const s = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_OLLAMA) } });
     await settle();
-    s.d.querySelector('button[data-update="ollama"]').click();
+    s.d.querySelector('button[data-update="inference"]').click();
     s.d.getElementById("dm-dialog-cancel").click();
     await settle();
     console.log("\nclosed during plan -> open:", s.d.getElementById("dm-dialog").hasAttribute("open"));
@@ -359,7 +359,7 @@ const BASE_SCRIPT = {
     // 4. Not updatable / no admin
     const e = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, updatable: false, reason: "not-compose" }) } });
     await settle();
-    e.d.querySelector('button[data-update="ollama"]').click();
+    e.d.querySelector('button[data-update="inference"]').click();
     await settle();
     console.log("\nnot updatable:", e.d.getElementById("dm-dialog-desc").textContent, "| confirm hidden:", e.d.getElementById("dm-dialog-confirm").hidden);
     assert(e.d.getElementById("dm-dialog-confirm").hidden);
@@ -368,14 +368,14 @@ const BASE_SCRIPT = {
         const m = boot(lang, { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify({ ...PLAN_OLLAMA, updatable: false,
             reason: "service-missing", missing: ["runner-2"] }) } });
         await settle();
-        m.d.querySelector('button[data-update="ollama"]').click();
+        m.d.querySelector('button[data-update="inference"]').click();
         await settle();
         const desc = m.d.getElementById("dm-dialog-desc").textContent;
         assert(desc.includes(want) && m.d.getElementById("dm-dialog-confirm").hidden, desc);
     }
     const f = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { fail: { problem: "access-denied" } } });
     await settle();
-    f.d.querySelector('button[data-update="ollama"]').click();
+    f.d.querySelector('button[data-update="inference"]').click();
     await settle();
     console.log("no admin     :", f.d.getElementById("dm-dialog-desc").textContent);
     assert(f.d.getElementById("dm-dialog-desc").textContent.startsWith("Denied"));
@@ -403,24 +403,24 @@ const BASE_SCRIPT = {
     console.log("delete dialog:", g.d.getElementById("dm-dialog-title").textContent, "|", g.d.getElementById("dm-dialog-desc").textContent);
     assert.deepStrictEqual([g.d.querySelector("#dm-dialog-confirm .dm-btn-label").textContent,
                             g.d.querySelector("#dm-dialog-desc code").textContent],
-                           ["Dump löschen", "glitchtip/20261012-031500_glitchtip-postgres.sql.gz"]);
+                           ["Dump löschen", "bugs/20261012-031500_bugs-postgres.sql.gz"]);
     g.d.getElementById("dm-dialog-confirm").click();
     await settle();
     console.log("spawn :", JSON.stringify(g.last("delete-dump").cmd.slice(1)), g.last("delete-dump").opts.superuser,
                 "| result:", g.d.getElementById("dm-dialog-result").textContent);
-    assert.strictEqual(g.last("delete-dump").cmd[2], "glitchtip/20261012-031500_glitchtip-postgres.sql.gz");
+    assert.strictEqual(g.last("delete-dump").cmd[2], "bugs/20261012-031500_bugs-postgres.sql.gz");
     g.d.getElementById("dm-dialog-cancel").click();
     g.d.querySelector('#dm-ops button[data-op="0"]').click();
     console.log("rollback dialog:", g.d.getElementById("dm-dialog-title").textContent, "|", g.d.getElementById("dm-dialog-desc").textContent);
     g.d.getElementById("dm-dialog-confirm").click();
     await settle();
-    assert.strictEqual(JSON.stringify(g.last("rollback").cmd.slice(1)), JSON.stringify(["rollback", "20261012-031500-glitchtip-postgres"]));
+    assert.strictEqual(JSON.stringify(g.last("rollback").cmd.slice(1)), JSON.stringify(["rollback", "20261012-031500-bugs-postgres"]));
     console.log("result:", g.d.getElementById("dm-dialog-result").textContent);
     const causes = [...g.d.querySelectorAll("#dm-ops .dm-op-reason")].map((x) => x.textContent);
     console.log("causes:", causes);
-    assert.deepStrictEqual(causes, ["formbricks-app: " + REASON.line, "x: Wegen Speichermangels beendet.",
+    assert.deepStrictEqual(causes, ["survey-app: " + REASON.line, "x: Wegen Speichermangels beendet.",
                                     "y: Health-Check: curl: (7) Failed to connect to localhost port 8000"]);
-    assert.strictEqual(g.d.querySelector("#dm-ops .dm-op-reason").title, "formbricks-app: " + REASON.line);
+    assert.strictEqual(g.d.querySelector("#dm-ops .dm-op-reason").title, "survey-app: " + REASON.line);
     // the backups cannot be loaded: an error alert above the cards instead of the summary
     for (const [fail, body] of [[{ problem: "access-denied" }, "Die Backup-Übersicht braucht administrativen Zugriff: Schalten Sie ihn oben in Cockpit ein."],
                                 [{ message: "docker: not found" }, "Prüfen Sie, ob Docker auf diesem Server läuft, und wählen Sie dann „Aktualisieren“. Details: docker: not found"]]) {
@@ -440,7 +440,7 @@ const BASE_SCRIPT = {
     const j = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_JUMP) },
                                            "diun-update.py update": runOk });
     await settle();
-    j.d.querySelector('button[data-update="ollama"]').click();
+    j.d.querySelector('button[data-update="inference"]').click();
     await settle();
     const jbody = j.d.getElementById("dm-dialog-body");
     console.log("\njump  :", jbody.textContent.replace(/\s+/g, " ").slice(0, 150), "…");
@@ -463,12 +463,12 @@ const BASE_SCRIPT = {
     toggle(true);
     jc.click();
     await settle();
-    assert.strictEqual(j.last("update").cmd[2], "ollama");
+    assert.strictEqual(j.last("update").cmd[2], "inference");
     console.log("jump  : confirmed after the tick box ->", JSON.stringify(j.last("update").cmd.slice(1)));
     const kn = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
         { ...PLAN_OLLAMA, installed_version: "0.30.11", tag_digits: 0, jump_unknown: false }) } });
     await settle();
-    kn.d.querySelector('button[data-update="ollama"]').click();
+    kn.d.querySelector('button[data-update="inference"]').click();
     await settle();
     assert(!kn.d.getElementById("dm-jump-check") && !kn.d.getElementById("dm-dialog-confirm").disabled);
     assert(kvRows(kn.d.getElementById("dm-dialog-body")).includes("Installierte Version: 0.30.11"));
@@ -476,10 +476,10 @@ const BASE_SCRIPT = {
     // 8. Failed update: the most likely cause above the log, the rollback next to it
     const k = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_GLITCH) },
         "diun-update.py update": { chunks: ["…\n", "@@RESULT " + JSON.stringify(
-            { op: "20261012-232502-formbricks-app", status: "failed", reason: REASON }) + "\n"], fail: { exit_status: 4 } },
-        "diun-update.py rollback": { chunks: ["Rollback …\n", '@@RESULT {"op":"20261012-232502-formbricks-app","status":"ok"}\n'] } });
+            { op: "20261012-232502-survey-app", status: "failed", reason: REASON }) + "\n"], fail: { exit_status: 4 } },
+        "diun-update.py rollback": { chunks: ["Rollback …\n", '@@RESULT {"op":"20261012-232502-survey-app","status":"ok"}\n'] } });
     await settle();
-    k.d.querySelector('button[data-update="glitchtip-postgres"]').click();
+    k.d.querySelector('button[data-update="bugs-postgres"]').click();
     await settle();
     const box = k.d.getElementById("dm-dialog-reason");
     assert(box.hidden, "no cause before the run");
@@ -487,7 +487,7 @@ const BASE_SCRIPT = {
     await settle();
     console.log("\ncause :", box.textContent.replace(/\s+/g, " ").trim());
     assert(!box.hidden && box.classList.contains("az-alert--danger"));
-    assert.strictEqual(box.querySelector(".az-alert__title").textContent, "Vermutliche Ursache (formbricks-app)");
+    assert.strictEqual(box.querySelector(".az-alert__title").textContent, "Vermutliche Ursache (survey-app)");
     assert.strictEqual(box.querySelector(".dm-reason-line").textContent, REASON.line);
     assert(box.compareDocumentPosition(k.d.getElementById("dm-dialog-log")) & k.w.Node.DOCUMENT_POSITION_FOLLOWING,
            "the cause stands above the log");
@@ -499,7 +499,7 @@ const BASE_SCRIPT = {
     // a failed rollback names its own cause; without a log line the state speaks
     const m = boot("de", { ...BASE_SCRIPT,
         "diun-update.py rollback": { chunks: ["…\n", "@@RESULT " + JSON.stringify({ op: "x", status: "failed",
-            reason: { container: "glitchtip-postgres", state: "starting", exit_code: 0, oom: false, source: null, line: null } }) + "\n"],
+            reason: { container: "bugs-postgres", state: "starting", exit_code: 0, oom: false, source: null, line: null } }) + "\n"],
             fail: { exit_status: 4 } } });
     await settle();
     m.d.getElementById("dm-tab-btn-backups").click();
@@ -581,27 +581,27 @@ const BASE_SCRIPT = {
                 JSON.stringify(lg.d.getElementById("dm-dialog-log").textContent));
     assert.strictEqual(JSON.stringify(lg.last("log").cmd.slice(1)), JSON.stringify(["log", withLog.ops[0].id]));
     assert.strictEqual(lg.last("log").opts.superuser, "try");
-    assert.strictEqual(lg.d.getElementById("dm-dialog-title").textContent, "Ausgabe: glitchtip-postgres");
+    assert.strictEqual(lg.d.getElementById("dm-dialog-title").textContent, "Ausgabe: bugs-postgres");
     assert(!lg.d.getElementById("dm-dialog-log").hidden &&
            lg.d.getElementById("dm-dialog-log").textContent.includes("--- Rollback ---"));
     assert(lg.d.getElementById("dm-dialog-confirm").hidden, "nothing to confirm");
 
     // 10. The registry offers again exactly the build whose update failed
     const OLLAMA_DIGEST = "sha256:adca95a12c2b386a8f9a995e7fa0600e187e3323b5e5522f5a6c3b1ec73eff99";
-    const failedOp = (digest, extra) => ({ id: "20261012-040000-ollama", ts: "2026-10-12T02:00:00Z", kind: "update",
-        container: "ollama", image: "ollama/ollama:latest", services: ["ollama"], rollback: "x", dumps: [],
+    const failedOp = (digest, extra) => ({ id: "20261012-040000-inference", ts: "2026-10-12T02:00:00Z", kind: "update",
+        container: "inference", image: "ollama/ollama:latest", services: ["inference"], rollback: "x", dumps: [],
         status: "failed", can_rollback: false, rolled_back: true, rollback_status: "ok", new_digests: [digest],
         reason: REASON, ...extra });
     const withFailed = (ops) => ({ ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops }) },
                                    "diun-update.py plan": { out: JSON.stringify(PLAN_JUMP) } });
     // the plugin formats dates in the browser's time zone, the test does the same
     const FB_DATE = new Date("2026-10-12T02:00:00Z").toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
-    const noteOf = (d) => { const n = rowOf(d, "ollama").querySelector(".dm-row-note"); return n && n.textContent; };
+    const noteOf = (d) => { const n = rowOf(d, "inference").querySelector(".dm-row-note"); return n && n.textContent; };
     const fb = boot("de", withFailed([failedOp(OLLAMA_DIGEST), ...BACKUPS.ops]));
     await settle();
-    console.log("\nfailed build row:", describe(rowOf(fb.d, "ollama")));
+    console.log("\nfailed build row:", describe(rowOf(fb.d, "inference")));
     assert.strictEqual(noteOf(fb.d), `Das Update auf diesen Build ist am ${FB_DATE} gescheitert.`);
-    fb.d.querySelector('button[data-update="ollama"]').click();
+    fb.d.querySelector('button[data-update="inference"]').click();
     await settle();
     const fbBody = fb.d.getElementById("dm-dialog-body");
     const warns = [...fbBody.querySelectorAll(".az-alert--warning .az-alert__body")].map((x) => x.textContent);
@@ -620,44 +620,44 @@ const BASE_SCRIPT = {
     const nb = boot("de", withFailed([failedOp("sha256:another-build"), ...BACKUPS.ops]));
     await settle();
     assert.strictEqual(noteOf(nb.d), null, "a new build is not marked");
-    nb.d.querySelector('button[data-update="ollama"]').click();
+    nb.d.querySelector('button[data-update="inference"]').click();
     await settle();
     assert(!nb.d.getElementById("dm-retry-check"));
-    const ok = boot("de", withFailed([{ ...failedOp(OLLAMA_DIGEST), id: "20261012-050000-ollama", status: "ok",
+    const ok = boot("de", withFailed([{ ...failedOp(OLLAMA_DIGEST), id: "20261012-050000-inference", status: "ok",
                                          rolled_back: false, reason: null }, failedOp(OLLAMA_DIGEST), ...BACKUPS.ops]));
     await settle();
     assert.strictEqual(noteOf(ok.d), null, "a later successful update clears the mark");
 
     // 11. What else the update touches: groups, dependencies, warnings
-    const PLAN_REL = { ...PLAN_OLLAMA, config_changed: false, container: "glitchtip-web", image: "glitchtip/glitchtip:latest",
-        project: "glitchtip", services: ["glitchtip-migrate", "glitchtip-web", "glitchtip-worker"],
-        containers: ["glitchtip-migrate", "glitchtip-web", "glitchtip-worker"], jobs: ["glitchtip-migrate"],
-        depends_on: [{ service: "glitchtip-postgres", condition: "service_started" },
-                     { service: "glitchtip-redis", condition: "service_healthy" }],
-        dependents: [{ service: "side", containers: ["glitchtip-side"] }],
-        job_order: [{ job: "glitchtip-migrate", services: ["glitchtip-web", "glitchtip-worker"] }],
-        shared_networks: [{ network: "mailrelay", projects: ["calcom", "smtp-relay"] }],
+    const PLAN_REL = { ...PLAN_OLLAMA, config_changed: false, container: "bugs-web", image: "glitchtip/glitchtip:latest",
+        project: "bugs", services: ["bugs-migrate", "bugs-web", "bugs-worker"],
+        containers: ["bugs-migrate", "bugs-web", "bugs-worker"], jobs: ["bugs-migrate"],
+        depends_on: [{ service: "bugs-postgres", condition: "service_started" },
+                     { service: "bugs-redis", condition: "service_healthy" }],
+        dependents: [{ service: "side", containers: ["bugs-side"] }],
+        job_order: [{ job: "bugs-migrate", services: ["bugs-web", "bugs-worker"] }],
+        shared_networks: [{ network: "mailnet", projects: ["booking", "mailer"] }],
         installed_version: "6.2.6", tag_digits: 0, jump_unknown: false };
     const rl = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(PLAN_REL) } });
     await settle();
-    rl.d.querySelector('button[data-update="ollama"]').click();
+    rl.d.querySelector('button[data-update="inference"]').click();
     await settle();
     const rlBody = rl.d.getElementById("dm-dialog-body");
     const rows11 = kvRows(rlBody);
     console.log("\nrelations:", rows11.join(" | "));
-    ["Neu erstellt (gleiches Image): glitchtip-web glitchtip-worker",
-     "Einmal-Jobs (laufen erneut): glitchtip-migrate",
-     "Wartet auf: glitchtip-postgres gestartet, glitchtip-redis gesund",
-     "Hängen davon ab (werden danach beobachtet): glitchtip-side"].forEach((want) => assert(rows11.includes(want), want));
+    ["Neu erstellt (gleiches Image): bugs-web bugs-worker",
+     "Einmal-Jobs (laufen erneut): bugs-migrate",
+     "Wartet auf: bugs-postgres gestartet, bugs-redis gesund",
+     "Hängen davon ab (werden danach beobachtet): bugs-side"].forEach((want) => assert(rows11.includes(want), want));
     const alerts = [...rlBody.querySelectorAll(".az-alert")].map((x) =>
         [x.className, x.querySelector(".az-alert__title").textContent, x.querySelector(".az-alert__body").textContent]);
     alerts.forEach((x) => console.log("  alert:", x.join(" | ")));
     assert.deepStrictEqual(alerts, [
         ["az-alert az-alert--warning", "Startreihenfolge nicht gesichert",
-         "glitchtip-web, glitchtip-worker warten nicht auf glitchtip-migrate: Sie können starten, bevor der Job " +
+         "bugs-web, bugs-worker warten nicht auf bugs-migrate: Sie können starten, bevor der Job " +
          "fertig ist. In der Compose-Datei sorgt depends_on mit condition: service_completed_successfully dafür, dass sie warten."],
         ["az-alert", "Gemeinsames Netzwerk",
-         "Ebenfalls im Netzwerk mailrelay: calcom, smtp-relay. Sie nutzen dieses Projekt womöglich; das Update unterbricht es kurz."],
+         "Ebenfalls im Netzwerk mailnet: booking, mailer. Sie nutzen dieses Projekt womöglich; das Update unterbricht es kurz."],
         ["az-alert", "Ein Rollback stellt das Image wieder her, nicht die Daten",
          "Migriert die neue Version ihre Datenbank, hilft nur der Dump. Die Container sind beim Neuerstellen kurz nicht erreichbar."]]);
     assert.deepStrictEqual([...rlBody.querySelectorAll(".az-alert--warning code")].map((x) => x.textContent),
@@ -670,7 +670,7 @@ const BASE_SCRIPT = {
         { ...PLAN_OLLAMA, config_changed: false, installed_version: "5.0.2", tag_digits: 0, jump_unknown: false,
           target_version: "6.0.2", jump: "major" }) }, "diun-update.py update": runOk });
     await settle();
-    mj.d.querySelector('button[data-update="ollama"]').click();
+    mj.d.querySelector('button[data-update="inference"]').click();
     await settle();
     const mjBody = mj.d.getElementById("dm-dialog-body");
     console.log("major :", kvRows(mjBody).filter((r) => r.startsWith("Bringt") || r.startsWith("Installierte")).join(" | "));
@@ -693,7 +693,7 @@ const BASE_SCRIPT = {
         const x = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
             { ...PLAN_OLLAMA, config_changed: false, installed_version: "5.0.2", tag_digits: 0, jump_unknown: false, ...plan }) } });
         await settle();
-        x.d.querySelector('button[data-update="ollama"]').click();
+        x.d.querySelector('button[data-update="inference"]').click();
         await settle();
         const xb = x.d.getElementById("dm-dialog-body");
         assert(kvRows(xb).includes(row), row);
@@ -708,7 +708,7 @@ const BASE_SCRIPT = {
         ci_jobs: [{ name: "FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", image: "example-ci:1", started },
                   { name: "FORGEJO-ACTIONS-TASK-2417_WORKFLOW-9cbae90a_JOB-gitleaks", image: "example-seccan:1", started }] }) } });
     await settle();
-    ci.d.querySelector('button[data-update="ollama"]').click();
+    ci.d.querySelector('button[data-update="inference"]').click();
     await settle();
     const ciAlert = [...ci.d.querySelectorAll("#dm-dialog-body .az-alert--warning")]
         .find((x) => x.querySelector(".az-alert__title").textContent === "CI-Jobs laufen");
@@ -724,23 +724,23 @@ const BASE_SCRIPT = {
     assert(!cc.disabled);
     // a database that does not run: an error in the plan, with its icon (.dm-error), not colour alone
     const ds = boot("de", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
-        { ...PLAN_OLLAMA, config_changed: false, dbs: [{ name: "actual-db", kind: "postgres", running: false, size: null }] }) } });
+        { ...PLAN_OLLAMA, config_changed: false, dbs: [{ name: "budget-db", kind: "postgres", running: false, size: null }] }) } });
     await settle();
-    ds.d.querySelector('button[data-update="ollama"]').click();
+    ds.d.querySelector('button[data-update="inference"]').click();
     await settle();
     const stopped = ds.d.querySelector("#dm-dialog-body .dm-error");
-    assert(stopped && stopped.textContent === "actual-db läuft nicht – das Update würde abbrechen");
+    assert(stopped && stopped.textContent === "budget-db läuft nicht – das Update würde abbrechen");
 
     // 6. English: no German left in rows, dialog or backups tab
     const h = boot("en", { ...BASE_SCRIPT, "diun-update.py plan": { out: JSON.stringify(
         { ...PLAN_GLITCH, installed_version: null, tag_digits: 0, jump_unknown: true, target_version: "16.15", jump: null,
-          jobs: ["glitchtip-migrate"],
-          depends_on: [{ service: "glitchtip-redis", condition: "service_healthy" }],
-          dependents: [{ service: "side", containers: ["glitchtip-side"] }],
-          job_order: [{ job: "glitchtip-migrate", services: ["glitchtip-web"] }],
-          shared_networks: [{ network: "mailrelay", projects: ["calcom"] }] }) } });
+          jobs: ["bugs-migrate"],
+          depends_on: [{ service: "bugs-redis", condition: "service_healthy" }],
+          dependents: [{ service: "side", containers: ["bugs-side"] }],
+          job_order: [{ job: "bugs-migrate", services: ["bugs-web"] }],
+          shared_networks: [{ network: "mailnet", projects: ["booking"] }] }) } });
     await settle();
-    h.d.querySelector('button[data-update="glitchtip-postgres"]').click();
+    h.d.querySelector('button[data-update="bugs-postgres"]').click();
     await settle();
     h.d.getElementById("dm-tab-btn-backups").click();
     await settle();
@@ -782,18 +782,18 @@ const BASE_SCRIPT = {
 
     // A database major (stage 5, run with the helper): the history names it and the data it keeps,
     // and its rollback says what it does with the data, not that databases are not reset.
-    const MAJOR = [{ id: "20261020-120000-glitchtip-postgres", ts: "2026-10-20T10:00:00Z", kind: "dbmajor",
-                     container: "glitchtip-postgres", image: "postgres:16-alpine", to_image: "postgres:17.6-alpine",
+    const MAJOR = [{ id: "20261020-120000-bugs-postgres", ts: "2026-10-20T10:00:00Z", kind: "dbmajor",
+                     container: "bugs-postgres", image: "postgres:16-alpine", to_image: "postgres:17.6-alpine",
                      from_tag: "16-alpine", to_tag: "17.6-alpine", services: ["postgres"], from_major: 16, to_major: 17,
-                     from_version: "16.15", to_version: "17.6", changes: [{ file: "/opt/glitchtip/docker-compose.yml", line: 4 }],
-                     rollback: "postgres:rollback-20261020-120000", dumps: ["glitchtip/x.sql.gz"], status: "ok", can_rollback: true,
-                     kept: { where: "volume glitchtip_pgdata-pg16-20261020-120000", bytes: 162529280, major: 16, can_release: true } }];
+                     from_version: "16.15", to_version: "17.6", changes: [{ file: "/opt/bugs/docker-compose.yml", line: 4 }],
+                     rollback: "postgres:rollback-20261020-120000", dumps: ["bugs/x.sql.gz"], status: "ok", can_rollback: true,
+                     kept: { where: "volume bugs_pgdata-pg16-20261020-120000", bytes: 162529280, major: 16, can_release: true } }];
     for (const [lang, note, kept, desc] of [
         ["de", "Datenbank-Major: PostgreSQL 16 → 17",
-         "Die Daten von PostgreSQL 16 sind aufbewahrt: volume glitchtip_pgdata-pg16-20261020-120000 (155,00 MiB).",
+         "Die Daten von PostgreSQL 16 sind aufbewahrt: volume bugs_pgdata-pg16-20261020-120000 (155,00 MiB).",
          "Stoppt die Datenbank und die Dienste, die auf sie warten, bewahrt die Daten von PostgreSQL 17 auf, legt die Daten von PostgreSQL 16 zurück"],
         ["en", "Database major: PostgreSQL 16 → 17",
-         "The data of PostgreSQL 16 is kept: volume glitchtip_pgdata-pg16-20261020-120000 (155.00 MiB).",
+         "The data of PostgreSQL 16 is kept: volume bugs_pgdata-pg16-20261020-120000 (155.00 MiB).",
          "Stops the database and the services that wait for it, keeps the data of PostgreSQL 17, moves the data of PostgreSQL 16 back"]]) {
         const mp = boot(lang, { ...BASE_SCRIPT, "diun-update.py backups": { out: JSON.stringify({ ...BACKUPS, ops: MAJOR }) } });
         await settle();

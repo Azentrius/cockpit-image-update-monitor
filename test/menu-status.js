@@ -31,7 +31,7 @@ const files = {
     "/var/lib/diun/events.jsonl": fs.readFileSync(path.join(FIX, "events.jsonl"), "utf8"),
     "/var/lib/diun-radar/versions.json": JSON.parse(fs.readFileSync(path.join(FIX, "versions2.json"), "utf8")),
     "/var/lib/diun/dismissed.json": null,
-    "/etc/hostname": "docker-host",
+    "/etc/hostname": "web1",
 };
 const DEPS = '{"root":true,"docker":{"state":"ok","version":"29.5.2","compose":true},' +
     '"diun":{"state":"running","managed":true,"events":true,"can_install":false,"can_start":false},' +
@@ -158,7 +158,7 @@ const INFO_EN = { type: "info", title: "2 updates available, 3 roll-outs pending
     console.log("German    :", c.last().title);
     assert.deepStrictEqual(c.last(), { type: "info", title: "2 Updates verfügbar, 3 Container auszurollen, 17 neue Versionen" });
     const failed = plain(status);
-    failed.facts.failed.ops = [{ name: "glitchtip-web", how: "failed" }];
+    failed.facts.failed.ops = [{ name: "bugs-web", how: "failed" }];
     failed.facts.radar.generated = "2026-10-10T02:00:00Z";
     c.answer(JSON.stringify(failed));
     await flush();

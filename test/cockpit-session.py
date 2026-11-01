@@ -462,7 +462,7 @@ def main():
         note("journal: the radar runs finished", runs.count("Finished") >= 2 or runs.count("Deactivated successfully") >= 2,
              f"{runs.count('Finished')} finished")
         # After an install the package starts the radar two minutes later, by a timer: the same apt
-        # run can restart the resolver or the network (build-host, 2026-10-20). It no longer
+        # run can restart the resolver or the network (one server, 2026-10-20). It no longer
         # restarts the running radar timer either, which started the radar at once (OnBootSec=).
         # The radar timer starts runs of its own, too: 5 minutes after the boot (OnBootSec=; this
         # runner booted minutes ago, and once that run began in the very second of the check) and

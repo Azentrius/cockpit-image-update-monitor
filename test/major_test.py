@@ -73,8 +73,8 @@ check("restore_errors: the role the new cluster has already is no error",
                                  'psql:<stdin>:90: ERROR:  relation "items" does not exist'])
 
 # ------------------------------------------------- which kept data may go ----
-for kept, want in (({"type": "volume", "name": "glitchtip_pgdata-pg16-20261020-120000"}, True),
-                   ({"type": "volume", "name": "glitchtip_pgdata"}, False),
+for kept, want in (({"type": "volume", "name": "bugs_pgdata-pg16-20261020-120000"}, True),
+                   ({"type": "volume", "name": "bugs_pgdata"}, False),
                    ({"type": "volume", "name": "../x.pg16-20261020-120000"}, False),
                    ({"type": "bind", "path": "/srv/pg.pg16-20261020-120000"}, True),
                    ({"type": "bind", "path": "/srv/pg"}, False),

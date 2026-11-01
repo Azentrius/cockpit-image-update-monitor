@@ -25,21 +25,21 @@ const deps = (over) => JSON.stringify(Object.assign({
     cleanup: { state: "missing", can_install: true } }, over || {}));
 const BACKUPS = {
     dir: "/var/backups/image-updates", free_bytes: 40 * 2 ** 30, dump_bytes: 6 * 2 ** 20,
-    dumps: [{ path: "glitchtip/20261012-031500_glitchtip-postgres.sql.gz", project: "glitchtip",
-              container: "glitchtip-postgres", size: 3 * 2 ** 20, mtime: 1791768900 },
-            { path: "glitchtip/20260901-031500_glitchtip-postgres.sql.gz", project: "glitchtip",
-              container: "glitchtip-postgres", size: 3 * 2 ** 20, mtime: 1788232500 }],
+    dumps: [{ path: "bugs/20261012-031500_bugs-postgres.sql.gz", project: "bugs",
+              container: "bugs-postgres", size: 3 * 2 ** 20, mtime: 1791768900 },
+            { path: "bugs/20260901-031500_bugs-postgres.sql.gz", project: "bugs",
+              container: "bugs-postgres", size: 3 * 2 ** 20, mtime: 1788232500 }],
     // the first as an older helper sent it (Docker's text), the second in bytes
     images: [{ ref: "postgres:rollback-20260901-031500", id: "sha256:a", size: "275MB", created: "2026-09-01 03:15:00 +0200 CEST", in_use: false },
              { ref: "postgres:rollback-20261012-031500", id: "sha256:b", size: 275 * 2 ** 20, created: "2026-10-12T03:15:00+02:00", in_use: false }],
-    ops: [{ id: "20261012-031500-glitchtip-postgres", ts: "2026-10-12T01:15:00Z", kind: "update", container: "glitchtip-postgres",
+    ops: [{ id: "20261012-031500-bugs-postgres", ts: "2026-10-12T01:15:00Z", kind: "update", container: "bugs-postgres",
             image: "postgres:16-alpine", services: ["postgres"], rollback: "postgres:rollback-20261012-031500",
-            dumps: ["glitchtip/20261012-031500_glitchtip-postgres.sql.gz"], status: "ok", can_rollback: true,
+            dumps: ["bugs/20261012-031500_bugs-postgres.sql.gz"], status: "ok", can_rollback: true,
             from_version: "16.14", to_version: "16.15" },
-          { id: "20260901-031500-glitchtip-postgres", ts: "2026-09-01T01:15:00Z", kind: "update", container: "glitchtip-postgres",
+          { id: "20260901-031500-bugs-postgres", ts: "2026-09-01T01:15:00Z", kind: "update", container: "bugs-postgres",
             image: "postgres:16-alpine", services: ["postgres"], rollback: null, dumps: [], status: "ok", can_rollback: false }],
     cleanup: { keep_dumps: 1, image_days: 14, file: null, error: null,
-               dumps: ["glitchtip/20260901-031500_glitchtip-postgres.sql.gz"], images: ["postgres:rollback-20260901-031500"],
+               dumps: ["bugs/20260901-031500_bugs-postgres.sql.gz"], images: ["postgres:rollback-20260901-031500"],
                bytes: 3 * 2 ** 20 },
 };
 // Answers of the stubbed helpers that have not arrived yet, for every page of this file.
@@ -150,7 +150,7 @@ const BASE = {
 
     // 4. Backups tab: rules, timer, preview, marks, versions in the history
     const g = boot("de", { ...BASE, "diun-update.py cleanup": { chunks: ["Regeln (Standard): …\n", "Dump gelöscht: …\n",
-        '@@RESULT {"status":"ok","dumps":["glitchtip/20260901-031500_glitchtip-postgres.sql.gz"],"images":["postgres:rollback-20260901-031500"],"bytes":3145728,"failed":[]}\n'] },
+        '@@RESULT {"status":"ok","dumps":["bugs/20260901-031500_bugs-postgres.sql.gz"],"images":["postgres:rollback-20260901-031500"],"bytes":3145728,"failed":[]}\n'] },
         "diun-deps.sh install": { chunks: ["+ systemctl enable --now diun-cleanup.timer\n"] } });
     await settle();
     g.d.getElementById("dm-tab-btn-backups").click();
@@ -194,7 +194,7 @@ const BASE = {
     console.log("\ncleanup dialog:", g.text("dm-dialog-title"), "|", g.text("dm-dialog-body"));
     assert.deepStrictEqual([g.text("dm-dialog-title"), g.d.querySelector("#dm-dialog-confirm .dm-btn-label").textContent],
                            ["Dumps und Images aufräumen?", "Dumps und Images aufräumen"]);
-    assert(g.text("dm-dialog-body").includes("glitchtip/20260901-031500_glitchtip-postgres.sql.gz"));
+    assert(g.text("dm-dialog-body").includes("bugs/20260901-031500_bugs-postgres.sql.gz"));
     assert(g.text("dm-dialog-body").includes("postgres:rollback-20260901-031500"));
     g.d.getElementById("dm-dialog-confirm").click();
     await settle();
@@ -227,13 +227,13 @@ const BASE = {
     assert(k.d.getElementById("dm-cleanup").hidden);
 
     // 9. Update result names the versions
-    const PLAN = { container: "glitchtip-postgres", image: "postgres:16-alpine", updatable: true, project: "glitchtip",
-        workdir: "/opt/glitchtip", services: ["postgres"], containers: ["glitchtip-postgres"], pulled: true, config_changed: false,
+    const PLAN = { container: "bugs-postgres", image: "postgres:16-alpine", updatable: true, project: "bugs",
+        workdir: "/opt/bugs", services: ["postgres"], containers: ["bugs-postgres"], pulled: true, config_changed: false,
         dbs: [], free_bytes: 40 * 2 ** 30 };
     const m = boot("de", { ...BASE, "diun-update.py plan": { out: JSON.stringify(PLAN) },
         "diun-update.py update": { chunks: ['@@RESULT {"op":"x","status":"ok","rollback":"postgres:rollback-20261012-040000","from_version":"16.14","to_version":"16.15"}\n'] } });
     await settle();
-    m.d.querySelector('button[data-update="glitchtip-postgres"]').click();
+    m.d.querySelector('button[data-update="bugs-postgres"]').click();
     await settle();
     m.d.getElementById("dm-dialog-confirm").click();
     await settle();

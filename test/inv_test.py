@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Offline test for lib/diun-inventory.py: Docker is replaced by a fake that
 returns two containers - a postgres whose tag already points to a newer local
-image ("pulled, not rolled out") and an ollama on `latest` whose image only
+image ("pulled, not rolled out") and an ollama container on `latest` whose image only
 carries an inherited Ubuntu label (must NOT be taken as the version)."""
 import contextlib
 import importlib.util
@@ -17,11 +17,11 @@ inv = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(inv)
 inv.LOCK = "/tmp/diun-inventory-test.lock"
 
-COMPOSE = {"com.docker.compose.project": "glitchtip", "com.docker.compose.service": "postgres",
+COMPOSE = {"com.docker.compose.project": "bugs", "com.docker.compose.service": "postgres",
            "com.docker.compose.project.working_dir": "/opt/g",
            "com.docker.compose.project.config_files": "/opt/g/compose.yml"}
-C = [{"Name": "/glitchtip-postgres", "Image": "sha256:old", "Config": {"Image": "postgres:16-alpine", "Labels": COMPOSE}},
-     {"Name": "/ollama", "Image": "sha256:oll", "Config": {"Image": "ollama/ollama:latest", "Labels": {}}},
+C = [{"Name": "/bugs-postgres", "Image": "sha256:old", "Config": {"Image": "postgres:16-alpine", "Labels": COMPOSE}},
+     {"Name": "/inference", "Image": "sha256:oll", "Config": {"Image": "ollama/ollama:latest", "Labels": {}}},
      # a CI job of the Forgejo runner (a CI host, 2026-10-17): no labels, a volume at /var/run/act
      {"Name": "/FORGEJO-ACTIONS-TASK-2415_WORKFLOW-a545a355_JOB-unit", "Image": "sha256:ci",
       "Config": {"Image": "example-ci:1", "Labels": {}},
@@ -67,14 +67,14 @@ def check(label, got, want):
     print(("OK   " if ok else "FAIL ") + label + ("" if ok else f"  got {got!r}, want {want!r}"))
 
 
-pg, ol = rows["glitchtip-postgres"], rows["ollama"]
+pg, ol = rows["bugs-postgres"], rows["inference"]
 check("exit code", rc, 0)
 check("postgres version from PG_VERSION", (pg["version"], pg["version_src"]), ("16.14", "env:PG_VERSION"))
 check("postgres pulled + newer version", (pg["pulled"], pg["pulled_version"], pg["tagid"]), (True, "16.15", "sha256:new"))
-check("postgres managed by compose", (pg["managed"], pg["project"], pg["service"]), (True, "glitchtip", "postgres"))
+check("postgres managed by compose", (pg["managed"], pg["project"], pg["service"]), (True, "bugs", "postgres"))
 check("postgres digest", pg["digest"], "sha256:16bc")
-check("ollama: inherited label ignored", (ol["version"], ol["version_src"]), (None, None))
-check("ollama not pulled, not managed", (ol["pulled"], ol["managed"]), (False, False))
+check("inference: inherited label ignored", (ol["version"], ol["version_src"]), (None, None))
+check("inference not pulled, not managed", (ol["pulled"], ol["managed"]), (False, False))
 check("compose files: the label as a list, none without compose", (pg["files"], ol["files"]),
       (["/opt/g/compose.yml"], []))
 check("build time of the running image, empty when Docker names none", (pg["created"], ol["created"]),
