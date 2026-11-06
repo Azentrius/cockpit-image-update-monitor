@@ -1029,6 +1029,10 @@ def make_retag(name, new_tag, db_major=False):
         if not (store and target is not None and major(target) > major(installed)):
             return refuse("db-major")
         rt["store"] = store_plan(plan, store)
+        # Data the new major would not get (left_behind); the run checks the same after the pull.
+        gone = left_behind(rt["store"], rt["image"], compose_cmd(ctx))
+        if gone:
+            return refuse("store-volume", ", ".join(f"{i['container']} {i['destination']}" for i in gone))
     # Nextcloud upgrades one major version per step only.
     if NEXTCLOUD_RE.search(norm_ref(repo)) and (target is None or major(target) - major(installed) > 1):
         return refuse("major-skip")
@@ -2030,11 +2034,46 @@ def store_of(repo):
 
 def store_mount(c):
     """The volume or bind mount of container c at one of STORE_DIRS:
-    {"type", "source", "destination"}, or None (nothing kept, e.g. tmpfs)."""
+    {"type", "source", "destination", "anonymous"}, or None (nothing kept,
+    e.g. tmpfs). anonymous: a volume without a name, which the image's VOLUME
+    made (since 0.27.2)."""
     for m in c.get("Mounts") or []:
         if m.get("Destination") in STORE_DIRS and m.get("Type") in ("volume", "bind") and m.get("Source"):
-            return {"type": m["Type"], "source": m["Source"], "destination": m["Destination"]}
+            return {"type": m["Type"], "source": m["Source"], "destination": m["Destination"],
+                    "anonymous": m["Type"] == "volume" and bool(ANON_VOLUME_RE.match(m.get("Name") or ""))}
     return None
+
+
+def image_volumes(ref):
+    """The paths image ref declares as volumes (VOLUME); None if it is not on the server."""
+    try:
+        img = docker_json("image", "inspect", ref)[0]
+    except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
+        return None
+    return set((img.get("Config") or {}).get("Volumes") or {})
+
+
+def compose_targets(base, service):
+    """The paths the compose files mount into service, as `docker compose config` gives them."""
+    try:
+        cfg = json.loads(run(base + ["config", "--format", "json"]))
+    except (subprocess.CalledProcessError, ValueError, OSError):
+        return set()
+    vols = ((cfg.get("services") or {}).get(service) or {}).get("volumes") or []
+    return {v.get("target") for v in vols if isinstance(v, dict)}
+
+
+def left_behind(store, ref, base):
+    """The items of a store whose data lies in an anonymous volume that
+    neither the image ref (VOLUME) nor the compose files keep: compose would
+    recreate the container without it, and the new major would start empty
+    while the data stays in a volume no container uses (Redis 8's image no
+    longer declares /data). None while ref is not on the server."""
+    vols = image_volumes(ref)
+    if vols is None:
+        return None
+    return [i for i in store["items"] if i.get("anonymous") and i["destination"] not in vols
+            and i["destination"] not in compose_targets(base, i.get("service"))]
 
 
 def tree_bytes(path):
@@ -2056,8 +2095,10 @@ def store_plan(plan, store):
     the tag change packs ("source" None: nothing mounted, nothing to keep)."""
     items = []
     for n in plan["containers"]:
-        m = store_mount(inspect(n)) or {"type": None, "source": None, "destination": None}
-        items.append({"container": n, **m, "bytes": tree_bytes(m["source"]) if m["source"] else None})
+        c = inspect(n)
+        m = store_mount(c) or {"type": None, "source": None, "destination": None, "anonymous": False}
+        items.append({"container": n, "service": (c["Config"].get("Labels") or {}).get(L_SERVICE), **m,
+                      "bytes": tree_bytes(m["source"]) if m["source"] else None})
     return {"engine": store, "name": STORE_NAMES[store], "items": items,
             "bytes": sum(i["bytes"] or 0 for i in items)}
 
@@ -2162,6 +2203,17 @@ def save_store(op, base, store, st):
     name = store["name"]
     op["store"] = name
     items = [i for i in store["items"] if i["source"]]
+    # The new image is here now: data it would leave behind stops the run before the store stops.
+    gone = left_behind(store, op.get("to_image") or op["image"], base)
+    if gone:
+        drop_run(op)
+        where = ", ".join(f"{i['container']} {i['destination']}" for i in gone)
+        raise Abort(5, f"Das neue Image erklärt {where} nicht mehr als Volume, und die Compose-Datei bindet dort "
+                       f"nichts ein: Die Daten im anonymen Volume blieben zurück, und {name} startete leer. Erst ein "
+                       f"benanntes Volume für diesen Pfad in die Compose-Datei eintragen – nichts geändert.",
+                    f"The new image no longer declares {where} as a volume, and the compose file mounts nothing "
+                    f"there: the data in the anonymous volume would stay behind and {name} would start empty. Add a "
+                    f"named volume for that path to the compose file first – nothing changed.")
     if not items:
         say(f"{name}: kein Datenverzeichnis eingehängt – nichts zu sichern; nach einem Rollback startet {name} leer.",
             f"{name}: no data directory mounted – nothing to save; after a rollback {name} starts empty.")
